@@ -1,0 +1,19 @@
+{
+  "name": "vibe-cli",
+  "version": "1.0.0",
+  "description": "Structured and declarative framework for AI-driven software",
+  "main": "index.js",
+  "scripts": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/madvib/vibe-cli.git"
+  },
+  "author": "Micah Cotton",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/madvib/vibe-cli/issues"
+  },
+  "homepage": "https://github.com/madvib/vibe-cli#readme"
+}
