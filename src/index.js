@@ -12,10 +12,20 @@ const program = new Command();
 
 program
   .name('vibe')
-  .description('AI-assisted feature development CLI')
+  .description('AI-assisted project tracking and feature development CLI')
   .version('1.0.0');
 
-let commands = [
+const registerCommand = (parent, cmd) => {
+  const command = parent.command(cmd.command)
+    .description(cmd.description)
+    .action(cmd.action);
+
+  if (cmd.subcommands && Array.isArray(cmd.subcommands)) {
+    cmd.subcommands.forEach(sub => registerCommand(command, sub));
+  }
+};
+
+const commands = [
   initCommand,
   newCommand,
   listCommand,
@@ -23,18 +33,9 @@ let commands = [
   showCommand,
   configCommand,
   deleteCommand,
+  ...projectCommands
 ];
 
-if (Array.isArray(projectCommands)) {
-  commands = commands.concat(projectCommands);
-} else {
-  commands.push(projectCommands);
-}
-
-commands.forEach(cmd => {
-  program.command(cmd.command)
-    .description(cmd.description)
-    .action(cmd.action);
-});
+commands.forEach(cmd => registerCommand(program, cmd));
 
 program.parse(process.argv);

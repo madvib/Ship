@@ -8,7 +8,7 @@ const project = require('../core/project');
 
 const server = new Server(
   {
-    name: 'vibe-project-tracker',
+    name: 'Vibe Project Tracker',
     version: '1.0.0',
   },
   {
@@ -77,6 +77,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'add_link',
+        description: 'Link two project items (Issue or ADR) together',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            sourcePath: { type: 'string', description: 'Path to the source file (e.g., .project/Issues/backlog/my-issue.md)' },
+            targetPath: { type: 'string', description: 'Path to the target file to link to' },
+          },
+          required: ['sourcePath', 'targetPath'],
+        },
+      },
+      {
         name: 'log_action',
         description: 'Log an agent action to the project log',
         inputSchema: {
@@ -123,6 +135,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const adrPath = await project.createADR(args.title, args.decision, adrStatus);
         await project.logAction('MCP Server', 'create_adr', `Created ADR: ${args.title} (${adrStatus})`);
         return { content: [{ type: 'text', text: `ADR created at ${adrPath}` }] };
+
+      case 'add_link':
+        await project.addLink(args.sourcePath, args.targetPath);
+        await project.logAction('MCP Server', 'add_link', `Linked ${args.sourcePath} to ${args.targetPath}`);
+        return { content: [{ type: 'text', text: 'Link added successfully.' }] };
 
       case 'log_action':
         await project.logAction(args.agent, args.action, args.details);

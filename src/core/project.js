@@ -4,12 +4,15 @@ const path = require('path');
 const PROJECT_DIR = '.project';
 const ADR_DIR = path.join(PROJECT_DIR, 'ADR');
 const ISSUES_DIR = path.join(PROJECT_DIR, 'Issues');
+const TEMPLATES_DIR = path.join(PROJECT_DIR, 'templates');
 const ISSUE_STATUSES = ['backlog', 'blocked', 'done', 'in-progress'];
 
-const ISSUE_TEMPLATE = `---
+const DEFAULT_TEMPLATES = {
+  'issue.md': `---
 title: {{title}}
 status: {{status}}
 created: {{createdAt}}
+links: []
 ---
 
 # {{title}}
@@ -22,12 +25,12 @@ created: {{createdAt}}
 
 ## Links
 -
-`;
-
-const ADR_TEMPLATE = `---
+`,
+  'adr.md': `---
 title: {{title}}
 status: {{status}}
 date: {{date}}
+links: []
 ---
 
 # ADR: {{title}}
@@ -43,16 +46,24 @@ What is the decision we made?
 
 ## Consequences
 What are the consequences of this decision?
-`;
-
-const LOG_TEMPLATE = `# Project Log
+`,
+  'log_header.md': `# Project Log
 
 | Date | Agent | Action | Details |
 |------|-------|--------|---------|
-`;
+`
+};
 
 const sanitizeFileName = (name) => {
   return name.replace(/[\\/]/g, '_');
+};
+
+const getTemplate = async (name) => {
+  const customPath = path.join(TEMPLATES_DIR, name);
+  if (await fs.pathExists(customPath)) {
+    return await fs.readFile(customPath, 'utf8');
+  }
+  return DEFAULT_TEMPLATES[name];
 };
 
 const initProject = async () => {
@@ -69,8 +80,22 @@ const initProject = async () => {
 
   const logPath = path.join(PROJECT_DIR, 'log.md');
   if (!(await fs.pathExists(logPath))) {
-    await fs.writeFile(logPath, LOG_TEMPLATE);
+    const header = await getTemplate('log_header.md');
+    await fs.writeFile(logPath, header);
   }
+};
+
+const ejectTemplates = async () => {
+  await fs.ensureDir(TEMPLATES_DIR);
+  const ejected = [];
+  for (const [name, content] of Object.entries(DEFAULT_TEMPLATES)) {
+    const dest = path.join(TEMPLATES_DIR, name);
+    if (!(await fs.pathExists(dest))) {
+      await fs.writeFile(dest, content);
+      ejected.push(dest);
+    }
+  }
+  return ejected;
 };
 
 const createIssue = async (title, description, status = 'backlog') => {
@@ -81,7 +106,8 @@ const createIssue = async (title, description, status = 'backlog') => {
   const fileName = sanitizeFileName(`${title.toLowerCase().replace(/\s+/g, '-')}.md`);
   const filePath = path.join(ISSUES_DIR, status, fileName);
 
-  let content = ISSUE_TEMPLATE
+  const template = await getTemplate('issue.md');
+  let content = template
     .replace(/{{title}}/g, title)
     .replace(/{{description}}/g, description)
     .replace(/{{status}}/g, status)
@@ -116,7 +142,8 @@ const createADR = async (title, decision, status = 'proposed') => {
   const fileName = sanitizeFileName(`${title.toLowerCase().replace(/\s+/g, '-')}.md`);
   const filePath = path.join(ADR_DIR, fileName);
 
-  let content = ADR_TEMPLATE
+  const template = await getTemplate('adr.md');
+  let content = template
     .replace(/{{title}}/g, title)
     .replace(/{{status}}/g, status)
     .replace(/{{date}}/g, new Date().toISOString());
@@ -125,9 +152,29 @@ const createADR = async (title, decision, status = 'proposed') => {
   return filePath;
 };
 
+const addLink = async (filePath, targetPath) => {
+  if (!(await fs.pathExists(filePath))) throw new Error(`File not found: ${filePath}`);
+
+  let content = await fs.readFile(filePath, 'utf8');
+  // Simple regex to find links array in frontmatter
+  const linksMatch = content.match(/links: \[(.*)\]/);
+  if (linksMatch) {
+    const currentLinks = linksMatch[1].split(',').map(l => l.trim()).filter(l => l);
+    if (!currentLinks.includes(`"${targetPath}"`)) {
+      currentLinks.push(`"${targetPath}"`);
+      content = content.replace(/links: \[.*\]/, `links: [${currentLinks.join(', ')}]`);
+      await fs.writeFile(filePath, content);
+    }
+  }
+};
+
 const logAction = async (agent, action, details) => {
   const logPath = path.join(PROJECT_DIR, 'log.md');
   const date = new Date().toISOString();
+  // Ensure we have a header if the file somehow doesn't exist
+  if (!(await fs.pathExists(logPath))) {
+    await initProject();
+  }
   const entry = `| ${date} | ${agent} | ${action} | ${details} |\n`;
   await fs.appendFile(logPath, entry);
 };
@@ -152,14 +199,14 @@ module.exports = {
   PROJECT_DIR,
   ADR_DIR,
   ISSUES_DIR,
+  TEMPLATES_DIR,
   ISSUE_STATUSES,
-  ISSUE_TEMPLATE,
-  ADR_TEMPLATE,
-  LOG_TEMPLATE,
   initProject,
+  ejectTemplates,
   createIssue,
   moveIssue,
   createADR,
+  addLink,
   logAction,
   listIssues,
   sanitizeFileName,

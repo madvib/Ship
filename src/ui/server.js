@@ -8,6 +8,16 @@ const md = new MarkdownIt();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Simple HTML escaping
+const escapeHtml = (unsafe) => {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+};
+
 const stripFrontmatter = (content) => {
   if (content.startsWith('---')) {
     const endOfFrontmatter = content.indexOf('---', 3);
@@ -18,111 +28,137 @@ const stripFrontmatter = (content) => {
   return content;
 };
 
+const getLinksFromFrontmatter = (content) => {
+    const linksMatch = content.match(/links: \[(.*)\]/);
+    if (linksMatch) {
+        return linksMatch[1].split(',').map(l => l.trim().replace(/"/g, '')).filter(l => l);
+    }
+    return [];
+};
+
+const layout = (title, body) => `
+  <html>
+    <head>
+      <title>${escapeHtml(title)}</title>
+      <style>
+        :root { --primary: #2563eb; --bg: #f8fafc; --text: #1e293b; --border: #e2e8f0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.5; color: var(--text); background: var(--bg); max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        h1, h2, h3 { color: #0f172a; margin-top: 2rem; }
+        h1 { border-bottom: 2px solid var(--border); padding-bottom: 0.5rem; }
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .backlog { background: #e2e8f0; color: #475569; }
+        .in-progress { background: #dbeafe; color: #1e40af; }
+        .done { background: #dcfce7; color: #166534; }
+        .blocked { background: #fee2e2; color: #991b1b; }
+        .links-section { margin-top: 20px; padding-top: 10px; border-top: 1px dashed var(--border); }
+        .nav-link { display: inline-block; margin-bottom: 20px; font-weight: 500; }
+        table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); }
+        th { background: #f1f5f9; }
+        .log-container { overflow-x: auto; }
+      </style>
+    </head>
+    <body>
+      ${body}
+    </body>
+  </html>
+`;
+
 app.get('/', async (req, res) => {
   try {
     const issues = await project.listIssues();
     const adrFiles = await fs.pathExists(project.ADR_DIR) ? await fs.readdir(project.ADR_DIR) : [];
-    const logContent = await fs.pathExists(path.join(project.PROJECT_DIR, 'log.md'))
-      ? await fs.readFile(path.join(project.PROJECT_DIR, 'log.md'), 'utf8')
+    const logPath = path.join(project.PROJECT_DIR, 'log.md');
+    const logContent = await fs.pathExists(logPath)
+      ? await fs.readFile(logPath, 'utf8')
       : '';
 
-    let html = `
-      <html>
-        <head>
-          <title>Project Tracker</title>
-          <style>
-            body { font-family: sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 20px; }
-            h1 { border-bottom: 2px solid #eee; }
-            .status-group { margin-bottom: 20px; }
-            .status-title { font-weight: bold; text-transform: capitalize; background: #f4f4f4; padding: 5px 10px; }
-            ul { list-style: none; padding: 0; }
-            li { padding: 5px 10px; border-bottom: 1px solid #eee; }
-            .log { background: #f9f9f9; padding: 10px; border: 1px solid #ddd; overflow-x: auto; }
-            table { border-collapse: collapse; width: 100%; }
-            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          </style>
-        </head>
-        <body>
-          <h1>Project Tracker</h1>
-
-          <h2>Issues</h2>
-    `;
-
+    let issuesHtml = '';
     for (const status of project.ISSUE_STATUSES) {
       const statusIssues = issues.filter(i => i.status === status);
-      html += `
-        <div class="status-group">
-          <div class="status-title">${status}</div>
-          <ul>
-            ${statusIssues.map(i => `<li><a href="/issue/${status}/${i.file}">${i.file}</a></li>`).join('') || '<li>None</li>'}
+      issuesHtml += `
+        <div class="card">
+          <h3 style="margin-top: 0"><span class="status-badge ${status}">${status}</span></h3>
+          <ul style="list-style: none; padding: 0">
+            ${statusIssues.map(i => `<li><a href="/view?path=${encodeURIComponent(path.join(project.ISSUES_DIR, status, i.file))}">${escapeHtml(i.file)}</a></li>`).join('') || '<li>No issues</li>'}
           </ul>
         </div>
       `;
     }
 
-    html += `
+    const body = `
+      <h1>Project Dashboard</h1>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+        <div>
+          <h2>Issues</h2>
+          ${issuesHtml}
+        </div>
+        <div>
           <h2>ADRs</h2>
-          <ul>
-            ${adrFiles.filter(f => f.endsWith('.md')).map(f => `<li><a href="/adr/${f}">${f}</a></li>`).join('') || '<li>None</li>'}
-          </ul>
+          <div class="card">
+            <ul style="list-style: none; padding: 0">
+              ${adrFiles.filter(f => f.endsWith('.md')).map(f => `<li><a href="/view?path=${encodeURIComponent(path.join(project.ADR_DIR, f))}">${escapeHtml(f)}</a></li>`).join('') || '<li>No ADRs</li>'}
+            </ul>
+          </div>
 
           <h2>Log</h2>
-          <div class="log">
+          <div class="card log-container">
             ${md.render(logContent)}
           </div>
-        </body>
-      </html>
+        </div>
+      </div>
     `;
 
-    res.send(html);
+    res.send(layout('Project Dashboard', body));
   } catch (error) {
     res.status(500).send(error.message);
   }
 });
 
-app.get('/issue/:status/:file', async (req, res) => {
-  try {
-    const { status, file } = req.params;
-    if (!project.ISSUE_STATUSES.includes(status)) {
-        return res.status(400).send('Invalid status');
-    }
-    const sanitizedFile = project.sanitizeFileName(file);
-    const filePath = path.join(project.ISSUES_DIR, status, sanitizedFile);
-    let content = await fs.readFile(filePath, 'utf8');
-    content = stripFrontmatter(content);
-    res.send(`
-      <html>
-        <head><style>body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }</style></head>
-        <body>
-          <a href="/">Back to Dashboard</a>
-          ${md.render(content)}
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    res.status(404).send('Issue not found');
-  }
-});
+app.get('/view', async (req, res) => {
+    try {
+        const queryPath = req.query.path;
+        if (!queryPath) return res.status(400).send('Path is required');
 
-app.get('/adr/:file', async (req, res) => {
-  try {
-    const { file } = req.params;
-    const sanitizedFile = project.sanitizeFileName(file);
-    const filePath = path.join(project.ADR_DIR, sanitizedFile);
-    let content = await fs.readFile(filePath, 'utf8');
-    content = stripFrontmatter(content);
-    res.send(`
-      <html>
-        <head><style>body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }</style></head>
-        <body>
-          <a href="/">Back to Dashboard</a>
-          ${md.render(content)}
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    res.status(404).send('ADR not found');
-  }
+        const resolvedBase = path.resolve(project.PROJECT_DIR);
+        const resolvedPath = path.resolve(queryPath);
+
+        // Security check: is the resolvedPath inside resolvedBase?
+        const relative = path.relative(resolvedBase, resolvedPath);
+        const isSafe = relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+
+        if (!isSafe && resolvedBase !== resolvedPath) {
+            return res.status(403).send('Access denied');
+        }
+
+        const content = await fs.readFile(resolvedPath, 'utf8');
+        const stripped = stripFrontmatter(content);
+        const links = getLinksFromFrontmatter(content);
+
+        const body = `
+            <a href="/" class="nav-link">← Back to Dashboard</a>
+            <div class="card">
+                ${md.render(stripped)}
+
+                ${links.length > 0 ? `
+                    <div class="links-section">
+                        <h4>Links</h4>
+                        <ul>
+                            ${links.map(l => `<li><a href="/view?path=${encodeURIComponent(l)}">${escapeHtml(l)}</a></li>`).join('')}
+                        </ul>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        res.send(layout(path.basename(resolvedPath), body));
+    } catch (error) {
+        res.status(404).send('File not found');
+    }
 });
 
 const startUiServer = async () => {
