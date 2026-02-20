@@ -6,13 +6,24 @@ const generateCommand = require('./commands/generate');
 const showCommand = require('./commands/show');
 const configCommand = require('./commands/config');
 const deleteCommand = require('./commands/delete');
+const projectCommands = require('./commands/project');
 
 const program = new Command();
 
 program
   .name('vibe')
-  .description('AI-assisted feature development CLI')
+  .description('AI-assisted project tracking and feature development CLI')
   .version('1.0.0');
+
+const registerCommand = (parent, cmd) => {
+  const command = parent.command(cmd.command)
+    .description(cmd.description)
+    .action(cmd.action);
+
+  if (cmd.subcommands && Array.isArray(cmd.subcommands)) {
+    cmd.subcommands.forEach(sub => registerCommand(command, sub));
+  }
+};
 
 const commands = [
   initCommand,
@@ -22,31 +33,9 @@ const commands = [
   showCommand,
   configCommand,
   deleteCommand,
+  ...projectCommands
 ];
 
-commands.forEach(cmd => {
-  const command = program.command(cmd.command)
-    .description(cmd.description)
-    .action(cmd.action);
-
-  // This is a simplified way to handle arguments.
-  // For more complex argument handling, you might need a more robust solution.
-  if (cmd.command.includes('<')) {
-      const args = cmd.command.match(/<[^>]+>/g);
-      if (args) {
-          args.forEach(arg => {
-              command.argument(arg, `Description for ${arg}`);
-          });
-      }
-  }
-   if (cmd.command.includes('[')) {
-      const args = cmd.command.match(/\[[^\]]+\]/g);
-      if (args) {
-          args.forEach(arg => {
-              command.argument(arg, `Description for ${arg}`);
-          });
-      }
-  }
-});
+commands.forEach(cmd => registerCommand(program, cmd));
 
 program.parse(process.argv);
