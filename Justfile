@@ -1,5 +1,5 @@
 ship_dir := ".ship"
-cli     := "./target/release/cli"
+cli     := "./target/release/ship"
 mcp     := "./target/release/ship-mcp"
 
 # List available recipes

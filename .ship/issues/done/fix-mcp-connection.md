@@ -1,4 +1,5 @@
 +++
+id = "fe64c7d9-53af-48ac-bffc-d6bc1eb72474"
 title = "Fix MCP Connection"
 created = "2026-02-23T01:28:41.140379955Z"
 updated = "2026-02-23T01:28:41.140380355Z"

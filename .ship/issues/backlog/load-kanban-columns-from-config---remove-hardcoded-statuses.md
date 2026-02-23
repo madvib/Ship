@@ -1,4 +1,5 @@
 +++
+id = "8e0bf0b1-e018-496d-ac2c-1384a837f3a7"
 title = "Load kanban columns from config — remove hardcoded statuses"
 created = "2026-02-23T03:05:49.486830426Z"
 updated = "2026-02-23T03:05:49.486831426Z"

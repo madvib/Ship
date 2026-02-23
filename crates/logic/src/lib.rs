@@ -10,8 +10,9 @@ pub mod spec;
 pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, get_adr, list_adrs};
 pub use spec::{SpecEntry, create_spec, get_spec, list_specs, update_spec};
 pub use issue::{
-    Issue, IssueEntry, IssueMetadata, add_link, append_note, create_issue, delete_issue,
-    get_issue, list_issues, list_issues_full, migrate_yaml_issues, move_issue, update_issue,
+    Issue, IssueEntry, IssueMetadata, add_link, append_note, backfill_issue_ids, create_issue,
+    delete_issue, get_issue, list_issues, list_issues_full, migrate_yaml_issues, move_issue,
+    update_issue,
 };
 pub use demo::init_demo_project;
 pub use log::{LogEntry, log_action, log_action_by, read_log, read_log_entries};

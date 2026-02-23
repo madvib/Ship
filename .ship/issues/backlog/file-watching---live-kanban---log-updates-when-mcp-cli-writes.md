@@ -1,4 +1,5 @@
 +++
+id = "f2e1f61f-0d66-436f-b92a-ed8827121012"
 title = "File watching — live kanban + log updates when MCP/CLI writes"
 created = "2026-02-23T03:05:56.843174957Z"
 updated = "2026-02-23T03:05:56.843176157Z"

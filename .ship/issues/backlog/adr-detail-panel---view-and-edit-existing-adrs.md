@@ -1,4 +1,5 @@
 +++
+id = "dfd93af8-4c4a-47d3-b3eb-9f8f3dc9fe1f"
 title = "ADR detail panel — view and edit existing ADRs"
 created = "2026-02-23T03:06:29.469958954Z"
 updated = "2026-02-23T03:06:29.469959954Z"

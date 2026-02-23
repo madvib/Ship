@@ -1,4 +1,5 @@
 +++
+id = "f61c2462-589f-48dd-8b91-20bc5a1eb6fd"
 title = "Specs section — list view + split-pane editor with AI chat"
 created = "2026-02-23T03:06:21.624960191Z"
 updated = "2026-02-23T03:06:21.624960691Z"

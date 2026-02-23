@@ -1,4 +1,5 @@
 +++
+id = "7c71f1db-1dcb-4810-b3f9-b1cedba2fb50"
 title = "Full settings UI — project config (statuses, tags, git, templates)"
 created = "2026-02-23T03:06:52.777235079Z"
 updated = "2026-02-23T03:06:52.777235879Z"

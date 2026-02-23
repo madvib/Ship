@@ -4,11 +4,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct IssueMetadata {
+    #[serde(default)]
+    pub id: String,
     pub title: String,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
@@ -126,6 +129,7 @@ pub fn create_issue(
 ) -> Result<PathBuf> {
     let issue = Issue {
         metadata: IssueMetadata {
+            id: Uuid::new_v4().to_string(),
             title: title.to_string(),
             created: Utc::now(),
             updated: Utc::now(),
@@ -276,6 +280,35 @@ pub fn add_link(file_path: PathBuf, target: &str) -> Result<()> {
 }
 
 // ─── Migration ────────────────────────────────────────────────────────────────
+
+/// Assign UUIDs to any TOML issues that have an empty `id` field.
+pub fn backfill_issue_ids(project_dir: &PathBuf) -> Result<usize> {
+    let issues_dir = project_dir.join("issues");
+    if !issues_dir.exists() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    for status_entry in fs::read_dir(&issues_dir)? {
+        let status_path = status_entry?.path();
+        if !status_path.is_dir() {
+            continue;
+        }
+        for entry in fs::read_dir(&status_path)? {
+            let path = entry?.path();
+            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+                if let Ok(mut issue) = get_issue(path.clone()) {
+                    if issue.metadata.id.is_empty() {
+                        issue.metadata.id = Uuid::new_v4().to_string();
+                        let content = issue.to_markdown()?;
+                        fs::write(&path, content)?;
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(count)
+}
 
 /// Convert all legacy YAML-frontmatter issues in a project to TOML in-place.
 pub fn migrate_yaml_issues(project_dir: &PathBuf) -> Result<usize> {

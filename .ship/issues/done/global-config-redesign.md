@@ -1,4 +1,5 @@
 +++
+id = "d8e25797-32a6-43f7-9883-a7992bbb5b2a"
 title = "Global config redesign"
 created = "2026-02-22T07:02:04.503388475Z"
 updated = "2026-02-22T07:31:01.363020323Z"

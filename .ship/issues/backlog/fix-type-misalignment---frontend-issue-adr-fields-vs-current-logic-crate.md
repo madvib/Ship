@@ -1,4 +1,5 @@
 +++
+id = "02344037-baf0-4b3f-8e59-bb2eeacc8a92"
 title = "Fix type misalignment — frontend Issue/ADR fields vs current logic crate"
 created = "2026-02-23T03:05:37.528518678Z"
 updated = "2026-02-23T03:05:37.528519878Z"

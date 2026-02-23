@@ -1,4 +1,5 @@
 +++
+id = "bb00283e-65c9-487e-a1da-95c6fbb4fa2f"
 title = "MCP sidecar auto-start + status indicator in settings"
 created = "2026-02-23T03:06:39.761994897Z"
 updated = "2026-02-23T03:06:39.761995897Z"

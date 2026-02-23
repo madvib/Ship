@@ -1,4 +1,5 @@
 +++
+id = "c30a3b21-74e9-4a60-87f1-815d87dce74b"
 title = "Issue detail — tags, assignee, spec ref, links, markdown preview"
 created = "2026-02-23T03:07:11.305465559Z"
 updated = "2026-02-23T03:07:11.305466459Z"

@@ -1,4 +1,5 @@
 +++
+id = "7f014c79-f1a6-4cba-9bcf-79d6b58f7226"
 title = "MCP sampling for AI generation in UI"
 created = "2026-02-22T07:02:04.476929543Z"
 updated = "2026-02-22T07:28:14.517669591Z"

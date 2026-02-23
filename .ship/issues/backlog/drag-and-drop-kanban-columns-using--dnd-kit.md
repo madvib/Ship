@@ -1,4 +1,5 @@
 +++
+id = "e172c728-92d3-4465-bfb7-3b78add97863"
 title = "Drag-and-drop kanban columns using @dnd-kit"
 created = "2026-02-23T03:06:04.409759882Z"
 updated = "2026-02-23T03:06:04.409760782Z"

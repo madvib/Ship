@@ -4,11 +4,14 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdrMetadata {
+    #[serde(default)]
+    pub id: String,
     pub title: String,
     pub status: String,
     pub date: String,
@@ -68,6 +71,7 @@ pub fn create_adr(
     fs::create_dir_all(&adrs_dir)?;
 
     let metadata = AdrMetadata {
+        id: Uuid::new_v4().to_string(),
         title: title.to_string(),
         status: status.to_string(),
         date: Utc::now().format("%Y-%m-%d").to_string(),

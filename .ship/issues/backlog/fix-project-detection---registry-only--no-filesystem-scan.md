@@ -1,4 +1,5 @@
 +++
+id = "2b5066a4-01cf-447e-ab1e-b949ebb59ea2"
 title = "Fix project detection — registry only, no filesystem scan"
 created = "2026-02-23T03:05:30.049237197Z"
 updated = "2026-02-23T03:05:30.049238097Z"

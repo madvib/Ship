@@ -1,4 +1,5 @@
 +++
+id = "6a3848fa-7c0e-4066-9e9c-0b45cfeb50b2"
 title = "MCP Sampling for UI Generation"
 created = "2026-02-22T05:30:30.844675822Z"
 updated = "2026-02-22T05:30:30.844800639Z"

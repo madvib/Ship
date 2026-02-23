@@ -3,8 +3,8 @@ use clap::{Parser, Subcommand};
 use logic::{
     add_status, append_note, create_adr, create_issue, get_git_config, get_issue, get_project_dir,
     get_project_statuses, init_demo_project, init_project, is_category_committed, list_issues,
-    log_action, migrate_json_config_file, migrate_yaml_issues, move_issue, remove_status,
-    set_category_committed,
+    backfill_issue_ids, log_action, migrate_json_config_file, migrate_yaml_issues, move_issue,
+    remove_status, set_category_committed,
 };
 use std::env;
 use std::path::PathBuf;
@@ -421,10 +421,13 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             let project_dir = get_project_dir(None)?;
             let issues = migrate_yaml_issues(&project_dir)?;
             let config = migrate_json_config_file(&project_dir)?;
+            let ids = backfill_issue_ids(&project_dir)?;
             println!(
-                "Migration complete: {} issue{} converted to TOML{}.",
+                "Migration complete: {} issue{} converted to TOML, {} ID{} backfilled{}.",
                 issues,
                 if issues == 1 { "" } else { "s" },
+                ids,
+                if ids == 1 { "" } else { "s" },
                 if config { ", config.json → config.toml" } else { "" },
             );
         }

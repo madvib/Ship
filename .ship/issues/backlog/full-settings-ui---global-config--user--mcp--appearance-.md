@@ -1,4 +1,5 @@
 +++
+id = "d1950a49-95d5-4c65-980b-5e3fb139fdaa"
 title = "Full settings UI — global config (user, MCP, appearance)"
 created = "2026-02-23T03:07:00.603001738Z"
 updated = "2026-02-23T03:07:00.603002438Z"
