@@ -1,20 +1,30 @@
 pub mod adr;
 pub mod config;
+pub mod demo;
 pub mod issue;
 pub mod log;
+pub mod plugin;
 pub mod project;
+pub mod spec;
 
-// Re-export everything so existing call sites remain unchanged
-pub use adr::{ADR, AdrEntry, create_adr, list_adrs};
+pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, get_adr, list_adrs};
+pub use spec::{SpecEntry, create_spec, get_spec, list_specs, update_spec};
 pub use issue::{
-    Issue, IssueEntry, add_link, create_issue, delete_issue, get_issue, list_issues,
-    list_issues_full, move_issue, update_issue,
+    Issue, IssueEntry, IssueMetadata, add_link, append_note, create_issue, delete_issue,
+    get_issue, list_issues, list_issues_full, migrate_yaml_issues, move_issue, update_issue,
 };
+pub use demo::init_demo_project;
 pub use log::{LogEntry, log_action, read_log, read_log_entries};
+pub use plugin::{Plugin, PluginRegistry};
+pub use config::{
+    AiConfig, GitConfig, ProjectConfig, StatusConfig, add_status, generate_gitignore, get_config,
+    get_git_config, get_project_statuses, is_category_committed, migrate_json_config_file,
+    remove_status, save_config, set_category_committed, set_git_config,
+};
 pub use project::{
-    ISSUE_STATUSES, ProjectEntry, ProjectRegistry, SHIP_DIR_NAME, get_global_dir, get_project_dir,
-    get_project_name, get_registry_path, init_project, list_registered_projects, load_registry,
-    register_project, sanitize_file_name, save_registry, unregister_project,
+    DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry, SHIP_DIR_NAME, get_global_dir,
+    get_project_dir, get_project_name, get_registry_path, init_project, list_registered_projects,
+    load_registry, register_project, sanitize_file_name, save_registry, unregister_project,
 };
 
 #[cfg(test)]
@@ -31,7 +41,7 @@ mod tests {
         assert!(issue_path.exists());
         assert_eq!(issue_path.extension().unwrap(), "md");
         let content = fs::read_to_string(issue_path)?;
-        assert!(content.contains("title: Test Issue"));
+        assert!(content.contains("title = \"Test Issue\""));
         assert!(content.contains("Desc"));
         Ok(())
     }
@@ -54,12 +64,7 @@ mod tests {
     fn test_list_issues_full() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        create_issue(
-            project_dir.clone(),
-            "Full Issue",
-            "Detailed desc",
-            "backlog",
-        )?;
+        create_issue(project_dir.clone(), "Full Issue", "Detailed desc", "backlog")?;
         let entries = list_issues_full(project_dir)?;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].issue.metadata.title, "Full Issue");
@@ -133,7 +138,6 @@ mod tests {
         log_action(project_dir.clone(), "update", "second entry")?;
         let entries = read_log_entries(project_dir)?;
         assert_eq!(entries.len(), 2);
-        // Most recent first
         assert_eq!(entries[0].action, "update");
         assert_eq!(entries[1].action, "create");
         Ok(())
@@ -155,8 +159,9 @@ mod tests {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
         assert!(ship_path.exists());
-        assert!(ship_path.join("Issues/backlog").is_dir());
+        assert!(ship_path.join("issues/backlog").is_dir());
         assert!(ship_path.join("log.md").is_file());
+        assert!(ship_path.join("config.toml").is_file());
         Ok(())
     }
 
@@ -211,7 +216,22 @@ mod tests {
         )?;
         assert!(adr_path.exists());
         let content = fs::read_to_string(adr_path)?;
-        assert!(content.contains("\"title\": \"Use PostgreSQL\""));
+        assert!(content.contains("title = \"Use PostgreSQL\""));
+        Ok(())
+    }
+
+    #[test]
+    fn test_yaml_migration() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        // Write a legacy YAML issue
+        let legacy = "---\ntitle: Legacy Issue\nstatus: backlog\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\nlinks: []\n---\n\nOld body.\n";
+        fs::write(project_dir.join("issues/backlog/legacy-issue.md"), legacy)?;
+        let migrated = migrate_yaml_issues(&project_dir)?;
+        assert_eq!(migrated, 1);
+        let content = fs::read_to_string(project_dir.join("issues/backlog/legacy-issue.md"))?;
+        assert!(content.starts_with("+++\n"));
+        assert!(content.contains("title = \"Legacy Issue\""));
         Ok(())
     }
 }

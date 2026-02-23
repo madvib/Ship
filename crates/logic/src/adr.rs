@@ -1,25 +1,62 @@
 use crate::project::sanitize_file_name;
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use anyhow::{Context, Result, anyhow};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ADR {
-    pub title: String,
-    pub decision: String,
-    pub status: String,
-    pub date: DateTime<Utc>,
-    pub links: Vec<String>,
-}
+// ─── Data types ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AdrMetadata {
+    pub title: String,
+    pub status: String,
+    pub date: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spec: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ADR {
+    pub metadata: AdrMetadata,
+    pub body: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AdrEntry {
     pub file_name: String,
     pub path: String,
     pub adr: ADR,
 }
+
+// ─── Serialisation ────────────────────────────────────────────────────────────
+
+impl ADR {
+    pub fn to_markdown(&self) -> Result<String> {
+        let toml_str =
+            toml::to_string(&self.metadata).context("Failed to serialise ADR metadata as TOML")?;
+        Ok(format!("+++\n{}+++\n\n{}", toml_str, self.body))
+    }
+
+    pub fn from_markdown(content: &str) -> Result<Self> {
+        if !content.starts_with("+++\n") {
+            return Err(anyhow!("Invalid ADR format: missing TOML frontmatter"));
+        }
+        let rest = &content[4..];
+        let end = rest
+            .find("\n+++")
+            .ok_or_else(|| anyhow!("Invalid ADR format: missing closing +++"))?;
+        let toml_str = &rest[..end];
+        let body = rest[end + 4..].trim_start_matches('\n').to_string();
+        let metadata: AdrMetadata =
+            toml::from_str(toml_str).context("Failed to parse ADR TOML frontmatter")?;
+        Ok(ADR { metadata, body })
+    }
+}
+
+// ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 pub fn create_adr(
     project_dir: PathBuf,
@@ -27,51 +64,58 @@ pub fn create_adr(
     decision: &str,
     status: &str,
 ) -> Result<PathBuf> {
-    let adr = ADR {
+    let adrs_dir = project_dir.join("adrs");
+    fs::create_dir_all(&adrs_dir)?;
+
+    let metadata = AdrMetadata {
         title: title.to_string(),
-        decision: decision.to_string(),
         status: status.to_string(),
-        date: Utc::now(),
-        links: Vec::new(),
+        date: Utc::now().format("%Y-%m-%d").to_string(),
+        tags: Vec::new(),
+        spec: None,
     };
 
-    let file_name = format!("{}.json", sanitize_file_name(title));
-    let file_path = project_dir.join("ADR").join(&file_name);
+    let body = format!("## Decision\n\n{}\n", decision);
+    let adr = ADR { metadata, body };
 
-    let json = serde_json::to_string_pretty(&adr)?;
-    fs::write(&file_path, json).context("Failed to write ADR file")?;
+    let file_name = format!("{}.md", sanitize_file_name(title));
+    let file_path = adrs_dir.join(&file_name);
 
+    let content = adr.to_markdown()?;
+    fs::write(&file_path, content).context("Failed to write ADR file")?;
     Ok(file_path)
+}
+
+pub fn get_adr(path: PathBuf) -> Result<ADR> {
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("Failed to read ADR: {}", path.display()))?;
+    ADR::from_markdown(&content)
 }
 
 pub fn list_adrs(project_dir: PathBuf) -> Result<Vec<AdrEntry>> {
     let mut entries = Vec::new();
-    let adr_dir = project_dir.join("ADR");
-
-    if !adr_dir.exists() {
+    let adrs_dir = project_dir.join("adrs");
+    if !adrs_dir.exists() {
         return Ok(entries);
     }
 
-    for entry in fs::read_dir(adr_dir)? {
+    for entry in fs::read_dir(&adrs_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+        if path.is_file() && path.extension().map_or(false, |e| e == "md") {
             let file_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(adr) = serde_json::from_str::<ADR>(&content) {
-                    entries.push(AdrEntry {
-                        file_name,
-                        path: path.to_string_lossy().to_string(),
-                        adr,
-                    });
-                }
+            if let Ok(adr) = get_adr(path.clone()) {
+                entries.push(AdrEntry {
+                    file_name,
+                    path: path.to_string_lossy().to_string(),
+                    adr,
+                });
             }
         }
     }
-
     Ok(entries)
 }

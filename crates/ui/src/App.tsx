@@ -238,7 +238,7 @@ export default function App() {
             <div className="welcome-logo-ring">
               <div className="welcome-logo-glow" />
               <div className="welcome-logo-box">
-                <img src="/ship-logo.png" alt="Ship" className="welcome-logo-img" />
+                <img src="/logo.svg" alt="Ship" className="welcome-logo-img" />
               </div>
             </div>
             <h1 className="welcome-title">Ready for&nbsp;Liftoff?</h1>

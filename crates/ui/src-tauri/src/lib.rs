@@ -208,7 +208,7 @@ fn move_issue_status(
     drop(guard);
 
     let issue_path = project_dir
-        .join("Issues")
+        .join("issues")
         .join(&from_status)
         .join(&file_name);
     let new_path = move_issue(project_dir.clone(), issue_path, &from_status, &to_status)

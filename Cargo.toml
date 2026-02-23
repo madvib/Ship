@@ -3,6 +3,8 @@ members = [
     "crates/logic",
     "crates/cli",
     "crates/mcp",
+    "crates/plugins/time-tracker",
+    "crates/plugins/ghost-issues",
     "crates/ui/src-tauri",
 ]
 resolver = "2"

@@ -28,7 +28,7 @@ export default function Sidebar({
             {/* Logo */}
             <div className="sidebar-logo">
                 <div className="logo-mark">
-                    <img src="/ship-logo.png" alt="Ship" className="logo-img" />
+                    <img src="/logo.svg" alt="Ship" className="logo-img" />
                 </div>
                 <span className="logo-text">Ship</span>
             </div>

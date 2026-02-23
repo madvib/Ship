@@ -5,6 +5,9 @@ use std::fs;
 use std::path::PathBuf;
 
 pub const SHIP_DIR_NAME: &str = ".ship";
+pub const DEFAULT_STATUSES: &[&str] = &["backlog", "in-progress", "blocked", "done"];
+/// Kept for backwards compatibility — prefer DEFAULT_STATUSES or get_project_statuses().
+pub const ISSUE_STATUSES: &[&str] = DEFAULT_STATUSES;
 
 /// Resolves the .ship directory by searching upwards from the given directory.
 /// Also checks for legacy `.project` and migrates it to `.ship` if found.
@@ -18,21 +21,17 @@ pub fn get_project_dir(start_dir: Option<PathBuf>) -> Result<PathBuf> {
         }
     }
 
-    // 2. Traversal logic
+    // 2. Traversal logic — any directory containing a .ship folder is a project
     let mut current_dir = start_dir.unwrap_or(env::current_dir()?);
     loop {
         let ship_path = current_dir.join(SHIP_DIR_NAME);
         if ship_path.exists() && ship_path.is_dir() {
-            // Check if it's a project dir (has Issues or ADR) or just a global dir
-            if ship_path.join("Issues").is_dir() || ship_path.join("ADR").is_dir() {
-                return Ok(ship_path);
-            }
+            return Ok(ship_path);
         }
 
         // Check for legacy .project
         let legacy_path = current_dir.join(".project");
         if legacy_path.exists() && legacy_path.is_dir() {
-            // Found legacy .project, so migrate it to .ship
             let ship_path = current_dir.join(SHIP_DIR_NAME);
             fs::rename(&legacy_path, &ship_path).context("Failed to migrate .project to .ship")?;
             return Ok(ship_path);
@@ -41,12 +40,6 @@ pub fn get_project_dir(start_dir: Option<PathBuf>) -> Result<PathBuf> {
         if let Some(parent) = current_dir.parent() {
             current_dir = parent.to_path_buf();
         } else {
-            // Last resort: search in global config directory if not found in project tree
-            let global = get_global_dir()?;
-            if global.exists() && global.join("Issues").is_dir() {
-                return Ok(global);
-            }
-
             return Err(anyhow!(
                 "Project tracking not initialized in this directory or its parents. Run `ship init` to create a .ship directory."
             ));
@@ -129,11 +122,13 @@ pub fn get_global_dir() -> Result<PathBuf> {
 pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     let ship_path = base_dir.join(SHIP_DIR_NAME);
 
-    fs::create_dir_all(ship_path.join("Issues/backlog"))?;
-    fs::create_dir_all(ship_path.join("Issues/blocked"))?;
-    fs::create_dir_all(ship_path.join("Issues/done"))?;
-    fs::create_dir_all(ship_path.join("Issues/in-progress"))?;
-    fs::create_dir_all(ship_path.join("ADR"))?;
+    fs::create_dir_all(ship_path.join("issues/backlog"))?;
+    fs::create_dir_all(ship_path.join("issues/in-progress"))?;
+    fs::create_dir_all(ship_path.join("issues/review"))?;
+    fs::create_dir_all(ship_path.join("issues/blocked"))?;
+    fs::create_dir_all(ship_path.join("issues/done"))?;
+    fs::create_dir_all(ship_path.join("adrs"))?;
+    fs::create_dir_all(ship_path.join("specs"))?;
     fs::create_dir_all(ship_path.join("templates"))?;
 
     let log_path = ship_path.join("log.md");
@@ -141,12 +136,40 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         fs::write(log_path, "# Project Log\n\n")?;
     }
 
-    let readme_path = ship_path.join("README.md");
-    if !readme_path.exists() {
-        fs::write(readme_path, "# Project Tracking\n\nManaged by Ship CLI.")?;
+    // Write default config if not present
+    let config_path = ship_path.join("config.toml");
+    if !config_path.exists() {
+        let config = crate::config::ProjectConfig::default();
+        crate::config::save_config(&config, Some(ship_path.clone()))?;
+    }
+
+    // Write default templates
+    write_default_templates(&ship_path)?;
+
+    // Write default .gitignore (fully local by default)
+    let gitignore_path = ship_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        let default_git = crate::config::GitConfig::default();
+        crate::config::generate_gitignore(&ship_path, &default_git)?;
     }
 
     Ok(ship_path)
+}
+
+fn write_default_templates(ship_path: &std::path::Path) -> Result<()> {
+    let issue_tmpl = ship_path.join("templates/ISSUE.md");
+    if !issue_tmpl.exists() {
+        fs::write(issue_tmpl, include_str!("templates/ISSUE.md"))?;
+    }
+    let spec_tmpl = ship_path.join("templates/SPEC.md");
+    if !spec_tmpl.exists() {
+        fs::write(spec_tmpl, include_str!("templates/SPEC.md"))?;
+    }
+    let adr_tmpl = ship_path.join("templates/ADR.md");
+    if !adr_tmpl.exists() {
+        fs::write(adr_tmpl, include_str!("templates/ADR.md"))?;
+    }
+    Ok(())
 }
 
 pub fn sanitize_file_name(name: &str) -> String {
