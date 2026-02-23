@@ -1,4 +1,4 @@
-use logic::config::{discover_projects, get_config, save_config, Config, ProjectDiscovery};
+use logic::config::{discover_projects, get_config, save_config, ProjectConfig, ProjectDiscovery};
 use logic::{
     create_adr, create_issue, delete_issue, get_issue, get_project_dir, get_project_name,
     init_project, list_adrs, list_issues_full, log_action, move_issue, read_log_entries,
@@ -181,7 +181,7 @@ fn create_new_issue(
         .to_string();
     Ok(IssueEntry {
         file_name,
-        status: issue.metadata.status.clone(),
+        status,
         path: path.to_string_lossy().to_string(),
         issue,
     })
@@ -313,12 +313,12 @@ fn get_log(state: State<AppState>) -> Result<Vec<LogEntry>, String> {
 // ─── Commands: Settings ───────────────────────────────────────────────────────
 
 #[tauri::command]
-fn get_app_settings() -> Result<Config, String> {
+fn get_app_settings() -> Result<ProjectConfig, String> {
     get_config(None).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn save_app_settings(config: Config) -> Result<(), String> {
+fn save_app_settings(config: ProjectConfig) -> Result<(), String> {
     save_config(&config, None).map_err(|e| e.to_string())
 }
 

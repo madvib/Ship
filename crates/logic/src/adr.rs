@@ -18,13 +18,13 @@ pub struct AdrMetadata {
     pub spec: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ADR {
     pub metadata: AdrMetadata,
     pub body: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdrEntry {
     pub file_name: String,
     pub path: String,

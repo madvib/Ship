@@ -49,6 +49,12 @@ build-migrate: build migrate
 watch:
     cargo watch -x "build -p cli -p mcp"
 
+# ── Tauri ──────────────────────────────────────────────────────────────────────
+
+# Run Tauri dev server (UI hot-reload)
+tauri-dev:
+    cd crates/ui && npm run tauri dev
+
 # ── Ship CLI shortcuts ─────────────────────────────────────────────────────────
 
 # List all issues
