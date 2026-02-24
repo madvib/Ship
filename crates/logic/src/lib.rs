@@ -8,6 +8,7 @@ pub mod log;
 pub mod plugin;
 pub mod project;
 pub mod prompt;
+pub mod skill;
 pub mod spec;
 
 pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, get_adr, list_adrs, update_adr};
@@ -29,6 +30,7 @@ pub use config::{
     remove_status, save_config, set_active_mode, set_category_committed, set_git_config,
 };
 pub use prompt::{Prompt, create_prompt, delete_prompt, get_prompt, list_prompts, update_prompt};
+pub use skill::{Skill, create_skill, delete_skill, get_skill, list_skills, update_skill};
 pub use agent_export::{export_to, import_from_claude, sync_active_mode};
 pub use project::{
     DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry, SHIP_DIR_NAME, get_global_dir,

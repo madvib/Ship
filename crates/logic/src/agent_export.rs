@@ -1,6 +1,7 @@
 use crate::config::{get_config, HookConfig, HookTrigger, McpServerConfig, McpServerType, PermissionConfig};
 use crate::prompt::Prompt;
 use crate::prompt::get_prompt;
+use crate::skill::list_skills;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -292,6 +293,25 @@ fn export_claude(project_dir: &Path, payload: &SyncPayload) -> Result<()> {
         crate::fs_util::write_atomic(&claude_md, content)?;
     }
 
+    // Export skills → .claude/commands/<id>.md
+    export_skills_to_claude(project_dir, project_root)?;
+
+    Ok(())
+}
+
+/// Write each skill to `.claude/commands/<id>.md` for use as slash commands.
+fn export_skills_to_claude(project_dir: &Path, project_root: &Path) -> Result<()> {
+    let skills = list_skills(project_dir)?;
+    if skills.is_empty() {
+        return Ok(());
+    }
+    let commands_dir = project_root.join(".claude").join("commands");
+    fs::create_dir_all(&commands_dir)?;
+    for skill in &skills {
+        let path = commands_dir.join(format!("{}.md", skill.id));
+        let content = format!("<!-- managed by ship — skill: {} -->\n\n{}\n", skill.id, skill.content);
+        crate::fs_util::write_atomic(&path, content)?;
+    }
     Ok(())
 }
 

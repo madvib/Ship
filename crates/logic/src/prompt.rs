@@ -15,6 +15,13 @@ pub struct Prompt {
     pub description: Option<String>,
     /// Markdown content — becomes CLAUDE.md, GEMINI.md, or the codex instructions field
     pub content: String,
+    /// Origin: "custom", "ai-generated", "community", "imported"
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "custom".to_string()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -22,6 +29,8 @@ struct PromptFrontmatter {
     id: String,
     name: String,
     description: Option<String>,
+    #[serde(default = "default_source")]
+    source: String,
 }
 
 fn prompts_dir(project_dir: &Path) -> PathBuf {
@@ -43,6 +52,7 @@ fn parse_prompt(path: &Path) -> Result<Prompt> {
                 name: fm.name,
                 description: fm.description,
                 content: parts[1].trim().to_string(),
+                source: fm.source,
             });
         }
     }
@@ -54,6 +64,7 @@ fn write_prompt(path: &Path, prompt: &Prompt) -> Result<()> {
         id: prompt.id.clone(),
         name: prompt.name.clone(),
         description: prompt.description.clone(),
+        source: prompt.source.clone(),
     };
     let content = format!(
         "+++\n{}\n+++\n\n{}",
@@ -105,6 +116,7 @@ pub fn create_prompt(project_dir: &Path, id: &str, name: &str, content: &str) ->
         name: name.to_string(),
         description: None,
         content: content.to_string(),
+        source: "custom".to_string(),
     };
     write_prompt(&path, &prompt)?;
     Ok(prompt)
