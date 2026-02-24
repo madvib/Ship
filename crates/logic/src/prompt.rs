@@ -131,3 +131,87 @@ pub fn delete_prompt(project_dir: &Path, id: &str) -> Result<()> {
     fs::remove_file(path)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn create_and_get_round_trip() -> Result<()> {
+        let tmp = tempdir()?;
+        let p = create_prompt(tmp.path(), "expert-dev", "Expert Dev", "You are an expert.")?;
+        assert_eq!(p.id, "expert-dev");
+        assert_eq!(p.name, "Expert Dev");
+        assert_eq!(p.content, "You are an expert.");
+
+        let got = get_prompt(tmp.path(), "expert-dev")?;
+        assert_eq!(got.id, p.id);
+        assert_eq!(got.name, p.name);
+        assert_eq!(got.content, p.content);
+        Ok(())
+    }
+
+    #[test]
+    fn list_prompts_returns_all() -> Result<()> {
+        let tmp = tempdir()?;
+        create_prompt(tmp.path(), "alpha", "Alpha", "content a")?;
+        create_prompt(tmp.path(), "beta", "Beta", "content b")?;
+        let prompts = list_prompts(tmp.path())?;
+        assert_eq!(prompts.len(), 2);
+        let ids: Vec<&str> = prompts.iter().map(|p| p.id.as_str()).collect();
+        assert!(ids.contains(&"alpha"));
+        assert!(ids.contains(&"beta"));
+        Ok(())
+    }
+
+    #[test]
+    fn list_prompts_empty_dir_returns_empty() -> Result<()> {
+        let tmp = tempdir()?;
+        let prompts = list_prompts(tmp.path())?;
+        assert!(prompts.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn update_prompt_name_and_content() -> Result<()> {
+        let tmp = tempdir()?;
+        create_prompt(tmp.path(), "p1", "Old Name", "old content")?;
+        let updated = update_prompt(tmp.path(), "p1", Some("New Name"), Some("new content"))?;
+        assert_eq!(updated.name, "New Name");
+        assert_eq!(updated.content, "new content");
+        // Verify persisted
+        let reloaded = get_prompt(tmp.path(), "p1")?;
+        assert_eq!(reloaded.name, "New Name");
+        assert_eq!(reloaded.content, "new content");
+        Ok(())
+    }
+
+    #[test]
+    fn delete_prompt_removes_file() -> Result<()> {
+        let tmp = tempdir()?;
+        create_prompt(tmp.path(), "bye", "Bye", "content")?;
+        assert!(get_prompt(tmp.path(), "bye").is_ok());
+        delete_prompt(tmp.path(), "bye")?;
+        assert!(get_prompt(tmp.path(), "bye").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_create_rejected() -> Result<()> {
+        let tmp = tempdir()?;
+        create_prompt(tmp.path(), "dup", "Dup", "c")?;
+        let result = create_prompt(tmp.path(), "dup", "Dup2", "c2");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
+        Ok(())
+    }
+
+    #[test]
+    fn get_nonexistent_returns_error() -> Result<()> {
+        let tmp = tempdir()?;
+        let result = get_prompt(tmp.path(), "nope");
+        assert!(result.is_err());
+        Ok(())
+    }
+}

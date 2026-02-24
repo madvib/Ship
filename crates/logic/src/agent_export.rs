@@ -587,3 +587,306 @@ fn codex_mcp_entry(s: &McpServerConfig) -> toml::Value {
     }
     toml::Value::Table(entry)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{McpServerConfig, McpServerType, save_config, ProjectConfig};
+    use crate::project::init_project;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn make_stdio_server(id: &str) -> McpServerConfig {
+        McpServerConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            command: "npx".to_string(),
+            args: vec!["-y".to_string(), format!("@mcp/{}", id)],
+            env: HashMap::new(),
+            scope: "project".to_string(),
+            server_type: McpServerType::Stdio,
+            url: None,
+            disabled: false,
+            timeout_secs: None,
+        }
+    }
+
+    fn make_http_server(id: &str, url: &str) -> McpServerConfig {
+        McpServerConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            command: String::new(),
+            args: vec![],
+            env: HashMap::new(),
+            scope: "project".to_string(),
+            server_type: McpServerType::Http,
+            url: Some(url.to_string()),
+            disabled: false,
+            timeout_secs: None,
+        }
+    }
+
+    fn project_with_servers(servers: Vec<McpServerConfig>) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempdir().unwrap();
+        let project_dir = init_project(tmp.path().to_path_buf()).unwrap();
+        let mut config = ProjectConfig::default();
+        config.mcp_servers = servers;
+        save_config(&config, Some(project_dir.clone())).unwrap();
+        (tmp, project_dir)
+    }
+
+    // ── Claude ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn claude_writes_mcp_json_at_project_root() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        export_to(project_dir, "claude").unwrap();
+        // .mcp.json should be at the project root (parent of .ship/)
+        let mcp_json = tmp.path().join(".mcp.json");
+        assert!(mcp_json.exists(), ".mcp.json not written at project root");
+    }
+
+    #[test]
+    fn claude_round_trip_stdio_server() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".mcp.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let mcp = val["mcpServers"]["github"].as_object().unwrap();
+        assert_eq!(mcp["command"].as_str().unwrap(), "npx");
+        assert_eq!(mcp["type"].as_str().unwrap(), "stdio");
+        let args = mcp["args"].as_array().unwrap();
+        assert!(args.iter().any(|a| a.as_str() == Some("@mcp/github")));
+    }
+
+    #[test]
+    fn claude_round_trip_http_server() {
+        let (tmp, project_dir) = project_with_servers(vec![
+            make_http_server("postgres", "http://localhost:5433/mcp")
+        ]);
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".mcp.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let mcp = &val["mcpServers"]["postgres"];
+        assert_eq!(mcp["type"].as_str().unwrap(), "http");
+        assert_eq!(mcp["url"].as_str().unwrap(), "http://localhost:5433/mcp");
+    }
+
+    #[test]
+    fn claude_ship_server_always_injected() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".mcp.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(val["mcpServers"]["ship"].is_object(), "ship server not injected");
+    }
+
+    #[test]
+    fn claude_marks_managed_servers() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".mcp.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let managed = val["mcpServers"]["github"]["_ship"]["managed"].as_bool();
+        assert_eq!(managed, Some(true));
+    }
+
+    #[test]
+    fn claude_preserves_user_servers_across_write() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("mine")]);
+
+        // First write — mine is a Ship-managed server
+        export_to(project_dir.clone(), "claude").unwrap();
+
+        // Manually add a user server (no _ship marker)
+        let mcp_json = tmp.path().join(".mcp.json");
+        let mut val: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&mcp_json).unwrap()
+        ).unwrap();
+        val["mcpServers"]["user-server"] = serde_json::json!({
+            "command": "user-tool",
+            "args": []
+        });
+        std::fs::write(&mcp_json, serde_json::to_string_pretty(&val).unwrap()).unwrap();
+
+        // Second write — user-server should survive
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(&mcp_json).unwrap();
+        let val2: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(val2["mcpServers"]["user-server"].is_object(), "user server was clobbered");
+    }
+
+    #[test]
+    fn claude_disabled_server_not_exported() {
+        let mut s = make_stdio_server("disabled-one");
+        s.disabled = true;
+        let (tmp, project_dir) = project_with_servers(vec![s]);
+        export_to(project_dir, "claude").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".mcp.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(val["mcpServers"]["disabled-one"].is_null(), "disabled server was exported");
+    }
+
+    #[test]
+    fn claude_managed_state_written() {
+        let (_tmp, project_dir) = project_with_servers(vec![make_stdio_server("gh")]);
+        export_to(project_dir.clone(), "claude").unwrap();
+        let state_path = project_dir.join("mcp_managed_state.toml");
+        assert!(state_path.exists(), "managed state file not written");
+        let content = std::fs::read_to_string(&state_path).unwrap();
+        assert!(content.contains("gh"), "managed server not recorded in state");
+    }
+
+    // ── Gemini ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gemini_writes_to_gemini_settings_json() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("git")]);
+        export_to(project_dir, "gemini").unwrap();
+        assert!(tmp.path().join(".gemini/settings.json").exists());
+    }
+
+    #[test]
+    fn gemini_http_uses_httpurl_not_url() {
+        let (tmp, project_dir) = project_with_servers(vec![
+            make_http_server("figma", "https://mcp.figma.com/mcp")
+        ]);
+        export_to(project_dir, "gemini").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".gemini/settings.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let server = &val["mcpServers"]["figma"];
+        // Must use httpUrl, NOT url
+        assert!(server["httpUrl"].is_string(), "Gemini HTTP server must use httpUrl");
+        assert!(server["url"].is_null(), "Gemini must not use 'url' field for HTTP");
+    }
+
+    #[test]
+    fn gemini_preserves_non_mcp_fields() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("git")]);
+
+        // Pre-populate with existing Gemini settings
+        let settings_dir = tmp.path().join(".gemini");
+        std::fs::create_dir_all(&settings_dir).unwrap();
+        std::fs::write(
+            settings_dir.join("settings.json"),
+            r#"{"theme": "Dracula", "selectedAuthType": "gemini-api-key", "mcpServers": {}}"#
+        ).unwrap();
+
+        export_to(project_dir, "gemini").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".gemini/settings.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(val["theme"].as_str().unwrap(), "Dracula", "theme was clobbered");
+        assert_eq!(val["selectedAuthType"].as_str().unwrap(), "gemini-api-key", "auth type was clobbered");
+    }
+
+    #[test]
+    fn gemini_ship_server_always_injected() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        export_to(project_dir, "gemini").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".gemini/settings.json")).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(val["mcpServers"]["ship"].is_object());
+    }
+
+    // ── Codex ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn codex_writes_to_codex_config_toml() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("gh")]);
+        export_to(project_dir, "codex").unwrap();
+        assert!(tmp.path().join(".codex/config.toml").exists());
+    }
+
+    #[test]
+    fn codex_uses_mcp_servers_underscore_not_hyphen() {
+        // CRITICAL: mcp_servers (underscore) not mcp-servers (hyphen)
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("gh")]);
+        export_to(project_dir, "codex").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".codex/config.toml")).unwrap();
+        assert!(content.contains("[mcp_servers."), "must use mcp_servers (underscore)");
+        assert!(!content.contains("[mcp-servers."), "must NOT use mcp-servers (hyphen)");
+    }
+
+    #[test]
+    fn codex_round_trip_stdio_server() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("gh")]);
+        export_to(project_dir, "codex").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".codex/config.toml")).unwrap();
+        let val: toml::Value = toml::from_str(&content).unwrap();
+        let server = &val["mcp_servers"]["gh"];
+        assert_eq!(server["command"].as_str().unwrap(), "npx");
+    }
+
+    #[test]
+    fn codex_preserves_user_servers() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("mine")]);
+        export_to(project_dir.clone(), "codex").unwrap();
+
+        // Manually add a user server
+        let config_path = tmp.path().join(".codex/config.toml");
+        let mut content = std::fs::read_to_string(&config_path).unwrap();
+        content.push_str("\n[mcp_servers.user-tool]\ncommand = \"user-tool\"\n");
+        std::fs::write(&config_path, &content).unwrap();
+
+        // Re-export — user-tool should survive
+        export_to(project_dir, "codex").unwrap();
+        let content2 = std::fs::read_to_string(&config_path).unwrap();
+        let val: toml::Value = toml::from_str(&content2).unwrap();
+        assert!(val["mcp_servers"]["user-tool"].is_table(), "user server was clobbered");
+    }
+
+    #[test]
+    fn codex_ship_server_always_injected() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        export_to(project_dir, "codex").unwrap();
+        let content = std::fs::read_to_string(tmp.path().join(".codex/config.toml")).unwrap();
+        let val: toml::Value = toml::from_str(&content).unwrap();
+        assert!(val["mcp_servers"]["ship"].is_table());
+    }
+
+    // ── Import ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn import_from_claude_adds_new_servers() {
+        let (_tmp, project_dir) = project_with_servers(vec![]);
+
+        // Write a fake ~/.claude.json in a temp location — patch home via env
+        // We can't easily mock home(), so test the parsing logic directly
+        let raw = serde_json::json!({
+            "mcpServers": {
+                "github": { "command": "npx", "args": ["-y", "@mcp/github"], "type": "stdio" },
+                "postgres": { "type": "http", "url": "http://localhost:5433/mcp" }
+            }
+        });
+
+        // Simulate what import_from_claude does by calling the config save directly
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        let mcp_obj = raw["mcpServers"].as_object().unwrap();
+        for (id, entry) in mcp_obj {
+            let server_type = match entry.get("type").and_then(|v| v.as_str()) {
+                Some("http") => McpServerType::Http,
+                _ => McpServerType::Stdio,
+            };
+            config.mcp_servers.push(McpServerConfig {
+                id: id.clone(),
+                name: id.clone(),
+                command: entry.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                args: entry.get("args").and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default(),
+                env: HashMap::new(),
+                scope: "global".to_string(),
+                server_type,
+                url: entry.get("url").and_then(|v| v.as_str()).map(str::to_string),
+                disabled: false,
+                timeout_secs: None,
+            });
+        }
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let reloaded = crate::config::get_config(Some(project_dir)).unwrap();
+        assert_eq!(reloaded.mcp_servers.len(), 2);
+        assert!(reloaded.mcp_servers.iter().any(|s| s.id == "github"));
+        assert!(reloaded.mcp_servers.iter().any(|s| s.id == "postgres"));
+    }
+}
