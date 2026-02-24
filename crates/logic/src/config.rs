@@ -2,12 +2,13 @@ use crate::fs_util::write_atomic;
 use crate::{SHIP_DIR_NAME, get_global_dir};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct StatusConfig {
     pub id: String,
     pub name: String,
@@ -20,7 +21,7 @@ fn default_color() -> String {
 }
 
 /// Controls which parts of .ship/ are committed to git.
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
 pub struct GitConfig {
     /// Paths/globs that should be gitignored (relative to .ship/).
     #[serde(default)]
@@ -30,40 +31,31 @@ pub struct GitConfig {
     pub commit: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+/// Configuration for the AI pass-through CLI.
+/// Ship does not call any AI APIs directly — it spawns the configured CLI binary.
+/// Supported providers: "claude" (Claude Code CLI), "gemini", "codex".
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
 pub struct AiConfig {
-    pub anthropic_api_key: Option<String>,
-    pub model: Option<String>,
-    pub max_tokens: Option<u32>,
-}
-
-impl Default for AiConfig {
-    fn default() -> Self {
-        Self {
-            anthropic_api_key: None,
-            model: Some("claude-haiku-4-5-20251001".to_string()),
-            max_tokens: Some(1024),
-        }
-    }
+    /// Which AI CLI to use. Defaults to "claude".
+    pub provider: Option<String>,
+    /// Override the binary path if it's not on PATH. Defaults to the provider name.
+    pub cli_path: Option<String>,
 }
 
 impl AiConfig {
-    pub fn effective_model(&self) -> &str {
-        self.model.as_deref().unwrap_or("claude-haiku-4-5-20251001")
+    pub fn effective_provider(&self) -> &str {
+        self.provider.as_deref().unwrap_or("claude")
     }
 
-    pub fn effective_max_tokens(&self) -> u32 {
-        self.max_tokens.unwrap_or(1024)
-    }
-
-    pub fn resolve_api_key(&self) -> Option<String> {
-        self.anthropic_api_key
-            .clone()
-            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok())
+    /// The binary to invoke — cli_path override, or falls back to the provider name.
+    pub fn effective_cli(&self) -> &str {
+        self.cli_path
+            .as_deref()
+            .unwrap_or_else(|| self.effective_provider())
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ProjectConfig {
     #[serde(default = "default_version")]
     pub version: String,
@@ -103,9 +95,11 @@ impl Default for ProjectConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ProjectDiscovery {
     pub name: String,
+    /// Stored as PathBuf internally; serialized as a string path on the wire.
+    #[specta(type = String)]
     pub path: PathBuf,
 }
 

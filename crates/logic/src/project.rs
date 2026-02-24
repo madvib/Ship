@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -47,14 +48,15 @@ pub fn get_project_dir(start_dir: Option<PathBuf>) -> Result<PathBuf> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ProjectRegistry {
     pub projects: Vec<ProjectEntry>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Type)]
 pub struct ProjectEntry {
     pub name: String,
+    #[specta(type = String)]
     pub path: PathBuf,
 }
 

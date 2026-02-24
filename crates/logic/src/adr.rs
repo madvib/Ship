@@ -3,13 +3,14 @@ use crate::project::sanitize_file_name;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AdrMetadata {
     #[serde(default)]
     pub id: String,
@@ -22,13 +23,13 @@ pub struct AdrMetadata {
     pub spec: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ADR {
     pub metadata: AdrMetadata,
     pub body: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct AdrEntry {
     pub file_name: String,
     pub path: String,

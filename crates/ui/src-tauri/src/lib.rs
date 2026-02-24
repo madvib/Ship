@@ -5,6 +5,7 @@ use logic::{
     update_issue, AdrEntry, Issue, IssueEntry, LogEntry,
 };
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -20,7 +21,7 @@ pub struct AppState {
 
 // ─── Project Info ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct ProjectInfo {
     pub name: String,
     pub path: String,
@@ -30,6 +31,7 @@ pub struct ProjectInfo {
 // ─── Commands: Project ────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn list_projects() -> Result<Vec<ProjectDiscovery>, String> {
     let home = dirs::home_dir().unwrap_or_default();
     let current = std::env::current_dir().unwrap_or(home.clone());
@@ -54,6 +56,7 @@ fn list_projects() -> Result<Vec<ProjectDiscovery>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_active_project(state: State<AppState>) -> Result<Option<ProjectInfo>, String> {
     let guard = state.active_project.lock().unwrap();
     match &*guard {
@@ -70,6 +73,7 @@ fn get_active_project(state: State<AppState>) -> Result<Option<ProjectInfo>, Str
 }
 
 #[tauri::command]
+#[specta::specta]
 fn set_active_project(path: String, state: State<AppState>) -> Result<ProjectInfo, String> {
     let ship_path = PathBuf::from(&path);
     if !ship_path.exists() {
@@ -88,6 +92,7 @@ fn set_active_project(path: String, state: State<AppState>) -> Result<ProjectInf
 /// Opens a folder picker. If the chosen directory has no .ship, initialises one.
 /// Sets the result as the active project.
 #[tauri::command]
+#[specta::specta]
 async fn pick_and_open_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -120,6 +125,7 @@ async fn pick_and_open_project(
 
 /// Auto-detect current project from the working directory (for dogfooding).
 #[tauri::command]
+#[specta::specta]
 fn detect_current_project(state: State<AppState>) -> Result<Option<ProjectInfo>, String> {
     match get_project_dir(None) {
         Ok(ship_path) => {
@@ -140,6 +146,7 @@ fn detect_current_project(state: State<AppState>) -> Result<Option<ProjectInfo>,
 // ─── Commands: Issues ─────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn list_items(state: State<AppState>) -> Result<Vec<IssueEntry>, String> {
     let guard = state.active_project.lock().unwrap();
     let project_dir = guard
@@ -151,11 +158,13 @@ fn list_items(state: State<AppState>) -> Result<Vec<IssueEntry>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn get_issue_by_path(path: String) -> Result<Issue, String> {
     get_issue(PathBuf::from(path)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn create_new_issue(
     title: String,
     description: String,
@@ -188,12 +197,14 @@ fn create_new_issue(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn update_issue_by_path(path: String, issue: Issue) -> Result<(), String> {
     update_issue(PathBuf::from(&path), issue.clone()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn move_issue_status(
     file_name: String,
     from_status: String,
@@ -230,6 +241,7 @@ fn move_issue_status(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn delete_issue_by_path(path: String, state: State<AppState>) -> Result<(), String> {
     let guard = state.active_project.lock().unwrap();
     let project_dir = guard.as_ref().cloned();
@@ -251,6 +263,7 @@ fn delete_issue_by_path(path: String, state: State<AppState>) -> Result<(), Stri
 // ─── Commands: ADRs ───────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn list_adrs_cmd(state: State<AppState>) -> Result<Vec<AdrEntry>, String> {
     let guard = state.active_project.lock().unwrap();
     let project_dir = guard
@@ -262,6 +275,7 @@ fn list_adrs_cmd(state: State<AppState>) -> Result<Vec<AdrEntry>, String> {
 }
 
 #[tauri::command]
+#[specta::specta]
 fn create_new_adr(
     title: String,
     decision: String,
@@ -300,6 +314,7 @@ fn create_new_adr(
 // ─── Commands: Log ────────────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn get_log(state: State<AppState>) -> Result<Vec<LogEntry>, String> {
     let guard = state.active_project.lock().unwrap();
     let project_dir = guard
@@ -313,11 +328,13 @@ fn get_log(state: State<AppState>) -> Result<Vec<LogEntry>, String> {
 // ─── Commands: Settings ───────────────────────────────────────────────────────
 
 #[tauri::command]
+#[specta::specta]
 fn get_app_settings() -> Result<ProjectConfig, String> {
     get_config(None).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn save_app_settings(config: ProjectConfig) -> Result<(), String> {
     save_config(&config, None).map_err(|e| e.to_string())
 }
@@ -326,11 +343,8 @@ fn save_app_settings(config: ProjectConfig) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .manage(AppState::default())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![
+    let builder = tauri_specta::Builder::<tauri::Wry>::new().commands(
+        tauri_specta::collect_commands![
             // Project
             list_projects,
             get_active_project,
@@ -352,7 +366,24 @@ pub fn run() {
             // Settings
             get_app_settings,
             save_app_settings,
-        ])
+        ],
+    );
+
+    // In debug builds, regenerate src/bindings.ts automatically.
+    #[cfg(debug_assertions)]
+    builder
+        .export(
+            specta_typescript::Typescript::default()
+                .header("// This file is auto-generated by tauri-specta. Do not edit manually."),
+            "../src/bindings.ts",
+        )
+        .expect("Failed to export TypeScript bindings");
+
+    tauri::Builder::default()
+        .manage(AppState::default())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(builder.invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -3,6 +3,7 @@ use crate::project::sanitize_file_name;
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -10,14 +11,14 @@ use uuid::Uuid;
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 /// A typed link between issues or to external resources.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Type)]
 pub struct IssueLink {
     #[serde(rename = "type")]
     pub type_: String,
     pub target: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
 pub struct IssueMetadata {
     #[serde(default)]
     pub id: String,
@@ -34,14 +35,14 @@ pub struct IssueMetadata {
     pub links: Vec<IssueLink>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct Issue {
     #[serde(flatten)]
     pub metadata: IssueMetadata,
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct IssueEntry {
     pub file_name: String,
     pub status: String,

@@ -1074,8 +1074,9 @@ impl ShipServer {
 }
 
 impl ShipServer {
-    /// Generate text via MCP sampling (peer.create_message) if supported,
-    /// falling back to direct Anthropic API call if available, otherwise error.
+    /// Generate text via MCP sampling (peer.create_message).
+    /// Requires the MCP client to support sampling (e.g. Claude Code).
+    /// Returns an error message string if sampling is unavailable.
     async fn generate_with_sampling(
         &self,
         peer: Peer<RoleServer>,
@@ -1083,7 +1084,6 @@ impl ShipServer {
         prompt: &str,
         max_tokens: u32,
     ) -> String {
-        // Try MCP sampling first
         if peer.peer_info().map_or(false, |info| info.capabilities.sampling.is_some()) {
             let params = CreateMessageRequestParams {
                 messages: vec![SamplingMessage::user_text(prompt)],
@@ -1109,68 +1109,10 @@ impl ShipServer {
                         .map(|t| t.text.clone())
                         .unwrap_or_else(|| "No content returned from sampling.".to_string());
                 }
-                Err(e) => {
-                    // Fall through to API fallback
-                    eprintln!("[ship:ai] Sampling failed: {}, trying API fallback", e);
-                }
+                Err(e) => return format!("Sampling failed: {}", e),
             }
         }
-
-        // Fallback: direct Anthropic API via config
-        let project_dir = self.get_effective_project_dir().await.ok();
-        let ai_config = project_dir
-            .as_deref()
-            .and_then(|d| get_config(Some(d.to_path_buf())).ok())
-            .and_then(|c| c.ai)
-            .unwrap_or_default();
-
-        match ai_config.resolve_api_key() {
-            Some(key) => call_anthropic_api(&key, ai_config.effective_model(), system, prompt, max_tokens).await,
-            None => "AI generation unavailable: MCP sampling not supported by client and no ANTHROPIC_API_KEY configured. Set it in global config or as an environment variable.".to_string(),
-        }
-    }
-}
-
-async fn call_anthropic_api(
-    api_key: &str,
-    model: &str,
-    system: &str,
-    prompt: &str,
-    max_tokens: u32,
-) -> String {
-    let client = reqwest::Client::new();
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": [{"role": "user", "content": prompt}]
-    });
-
-    match client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            if resp.status().is_success() {
-                match resp.json::<serde_json::Value>().await {
-                    Ok(json) => json["content"][0]["text"]
-                        .as_str()
-                        .unwrap_or("Empty response")
-                        .to_string(),
-                    Err(e) => format!("Failed to parse API response: {}", e),
-                }
-            } else {
-                let status = resp.status();
-                let body = resp.text().await.unwrap_or_default();
-                format!("Anthropic API error {}: {}", status, body)
-            }
-        }
-        Err(e) => format!("HTTP request failed: {}", e),
+        "AI generation unavailable: the connected MCP client does not support sampling. Use Claude Code or another sampling-capable client.".to_string()
     }
 }
 

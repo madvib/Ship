@@ -3,13 +3,14 @@ use crate::project::sanitize_file_name;
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // ─── Data types ───────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct SpecMetadata {
     #[serde(default)]
     pub id: String,
@@ -43,13 +44,13 @@ impl Default for SpecMetadata {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Type)]
 pub struct Spec {
     pub metadata: SpecMetadata,
     pub body: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Type)]
 pub struct SpecEntry {
     pub file_name: String,
     pub path: String,

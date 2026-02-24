@@ -1,10 +1,11 @@
 use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 use std::fs;
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct LogEntry {
     pub timestamp: String,
     pub actor: String,
