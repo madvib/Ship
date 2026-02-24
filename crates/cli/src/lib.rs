@@ -1,10 +1,11 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use logic::{
-    add_status, append_note, create_adr, create_issue, get_git_config, get_issue, get_project_dir,
-    get_project_statuses, init_demo_project, init_project, is_category_committed, list_issues,
-    backfill_issue_ids, log_action, migrate_json_config_file, migrate_yaml_issues, move_issue,
-    remove_status, set_category_committed,
+    add_mode, add_status, append_note, backfill_issue_ids, create_adr, create_issue,
+    get_active_mode, get_config, get_git_config, get_issue, get_project_dir, get_project_statuses,
+    init_demo_project, init_project, is_category_committed, list_issues,
+    log_action, migrate_json_config_file, migrate_yaml_issues, move_issue, remove_mode,
+    remove_status, set_active_mode, set_category_committed,
 };
 use std::env;
 use std::path::PathBuf;
@@ -65,6 +66,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: TimeCommands,
     },
+    /// Manage workflow modes
+    Mode {
+        #[command(subcommand)]
+        action: ModeCommands,
+    },
     /// Start the MCP server on stdio
     Mcp,
     /// Migrate legacy YAML issues and JSON config to TOML
@@ -113,6 +119,35 @@ pub enum ConfigCommands {
         #[command(subcommand)]
         action: StatusCommands,
     },
+    /// Export MCP server registry to an AI client's config file
+    Export {
+        /// Target AI client: claude, codex, or gemini
+        #[arg(short, long)]
+        target: String,
+    },
+    /// Show current AI provider configuration
+    Ai,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ModeCommands {
+    /// List all defined modes
+    List,
+    /// Add a new mode
+    Add {
+        /// Mode ID (e.g. planning, dev, review)
+        id: String,
+        /// Display name
+        name: String,
+    },
+    /// Remove a mode by ID
+    Remove { id: String },
+    /// Set the active mode
+    Set { id: String },
+    /// Clear the active mode (use all tools)
+    Clear,
+    /// Show the currently active mode
+    Get,
 }
 
 #[derive(Subcommand, Debug)]
@@ -408,6 +443,68 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         println!("Removed status: {}", name);
                     }
                 },
+                ConfigCommands::Export { target } => {
+                    let dir = project_dir.ok_or_else(|| anyhow::anyhow!("No Ship project found in current directory"))?;
+                    logic::agent_export::export_to(dir, &target)?;
+                    println!("Exported MCP server registry to {} config.", target);
+                }
+                ConfigCommands::Ai => {
+                    let cfg = get_config(project_dir)?;
+                    let ai = cfg.ai.unwrap_or_default();
+                    println!("AI provider : {}", ai.effective_provider());
+                    if let Some(path) = &ai.cli_path {
+                        println!("CLI path    : {}", path);
+                    } else {
+                        println!("CLI path    : (default — uses provider name on PATH)");
+                    }
+                }
+            }
+        }
+        Some(Commands::Mode { action }) => {
+            let project_dir = get_project_dir(None).ok();
+            match action {
+                ModeCommands::List => {
+                    let cfg = get_config(project_dir.clone())?;
+                    let modes = cfg.modes;
+                    let active_id = cfg.active_mode.as_deref().unwrap_or("");
+                    if modes.is_empty() {
+                        println!("No modes configured.");
+                    } else {
+                        for m in &modes {
+                            let marker = if m.id == active_id { " *" } else { "" };
+                            println!("  {}{} — {}", m.id, marker, m.name);
+                        }
+                    }
+                }
+                ModeCommands::Add { id, name } => {
+                    let mode = logic::ModeConfig {
+                        id: id.clone(),
+                        name: name.clone(),
+                        description: None,
+                        active_tools: vec![],
+                        mcp_servers: vec![],
+                    };
+                    add_mode(project_dir, mode)?;
+                    println!("Mode added: {} ({})", id, name);
+                }
+                ModeCommands::Remove { id } => {
+                    remove_mode(project_dir, &id)?;
+                    println!("Mode removed: {}", id);
+                }
+                ModeCommands::Set { id } => {
+                    set_active_mode(project_dir, Some(&id))?;
+                    println!("Active mode set to: {}", id);
+                }
+                ModeCommands::Clear => {
+                    set_active_mode(project_dir, None)?;
+                    println!("Active mode cleared (all tools available).");
+                }
+                ModeCommands::Get => {
+                    match get_active_mode(project_dir)? {
+                        Some(m) => println!("Active mode: {} ({})", m.id, m.name),
+                        None => println!("No active mode set."),
+                    }
+                }
             }
         }
         Some(Commands::Time { action }) => {
