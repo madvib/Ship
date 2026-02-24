@@ -78,3 +78,12 @@ export const updateSpecCmd = (fileName: string, content: string): Promise<SpecDo
 
 export const deleteSpecCmd = (fileName: string): Promise<void> =>
   invoke('delete_spec_cmd', { fileName });
+
+export const generateIssueDescriptionCmd = (title: string): Promise<string> =>
+  invoke('generate_issue_description_cmd', { title });
+
+export const generateAdrCmd = (title: string, context: string): Promise<string> =>
+  invoke('generate_adr_cmd', { title, context });
+
+export const brainstormIssuesCmd = (topic: string): Promise<string[]> =>
+  invoke('brainstorm_issues_cmd', { topic });

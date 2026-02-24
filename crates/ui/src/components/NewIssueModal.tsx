@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { StatusConfig } from '../types';
+import { generateIssueDescriptionCmd } from '../platform/tauri/commands';
 import DetailSheet from './DetailSheet';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -126,6 +127,15 @@ export default function NewIssueModal({ onClose, statuses, onSubmit, defaultStat
           placeholder="Steps to reproduce, context, links..."
           rows={22}
           defaultMode="split"
+          mcpEnabled={!!title.trim()}
+          onMcpSample={async () => {
+            try {
+              return await generateIssueDescriptionCmd(title.trim());
+            } catch (err) {
+              setError(String(err));
+              return null;
+            }
+          }}
         />
       </form>
     </DetailSheet>

@@ -10,12 +10,18 @@ export interface StatusConfig {
     color: string;
 }
 
+export interface AiConfig {
+    provider?: string | null;
+    cli_path?: string | null;
+}
+
 export interface ProjectConfig {
     version: string;
     name?: string | null;
     description?: string | null;
     statuses: StatusConfig[];
     git?: GitConfig;
+    ai?: AiConfig | null;
 }
 
 export interface GitConfig {

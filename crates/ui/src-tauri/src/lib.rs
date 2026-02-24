@@ -1,4 +1,4 @@
-use logic::config::{generate_gitignore, get_config, save_config, ProjectConfig, ProjectDiscovery};
+use logic::config::{generate_gitignore, get_config, save_config, AiConfig, ProjectConfig, ProjectDiscovery};
 use logic::{
     create_adr, create_issue, create_spec, delete_issue, get_issue, get_project_dir,
     get_project_name, get_spec_raw as get_spec_content, init_project, list_adrs, list_issues_full,
@@ -156,6 +156,26 @@ fn spec_document_from_path(path: PathBuf) -> Result<SpecDocument, String> {
         path: path.to_string_lossy().to_string(),
         content,
     })
+}
+
+// ─── AI helper ────────────────────────────────────────────────────────────────
+
+fn invoke_ai_cli(ai: &AiConfig, prompt: &str) -> Result<String, String> {
+    let cli = ai.effective_cli().to_string();
+    let mut cmd = std::process::Command::new(&cli);
+    match ai.effective_provider() {
+        "codex" => { cmd.arg("exec").arg(prompt); }
+        _ => { cmd.arg("-p").arg(prompt); }
+    }
+    let output = cmd
+        .output()
+        .map_err(|e| format!("Failed to launch '{}': {}", cli, e))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(format!("AI CLI error: {}", stderr.trim()))
+    }
 }
 
 // ─── Commands: Project ────────────────────────────────────────────────────────
@@ -842,6 +862,77 @@ fn save_app_settings(config: ProjectConfig) -> Result<(), String> {
     save_config(&config, None).map_err(|e| e.to_string())
 }
 
+// ─── Commands: AI ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+async fn generate_issue_description_cmd(
+    title: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let dir = get_active_dir(&state)?;
+    let config = get_config(Some(dir)).map_err(|e| e.to_string())?;
+    let ai = config.ai.unwrap_or_default();
+    let prompt = format!(
+        "Write a concise issue description for a software task titled: \"{}\". \
+         Return only the description body in markdown, no title or preamble.",
+        title
+    );
+    tokio::task::spawn_blocking(move || invoke_ai_cli(&ai, &prompt))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn generate_adr_cmd(
+    title: String,
+    context: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let dir = get_active_dir(&state)?;
+    let config = get_config(Some(dir)).map_err(|e| e.to_string())?;
+    let ai = config.ai.unwrap_or_default();
+    let ctx = if context.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" Context: {}", context.trim())
+    };
+    let prompt = format!(
+        "Write an Architecture Decision Record body for the decision: \"{}\".{} \
+         Include sections: ## Status, ## Context, ## Decision, ## Consequences. \
+         Return only the markdown body, no title or preamble.",
+        title, ctx
+    );
+    tokio::task::spawn_blocking(move || invoke_ai_cli(&ai, &prompt))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn brainstorm_issues_cmd(
+    topic: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let dir = get_active_dir(&state)?;
+    let config = get_config(Some(dir)).map_err(|e| e.to_string())?;
+    let ai = config.ai.unwrap_or_default();
+    let prompt = format!(
+        "List 5 actionable software task titles for: \"{}\". \
+         Return one task title per line, no numbering, bullets, or extra text.",
+        topic
+    );
+    let output = tokio::task::spawn_blocking(move || invoke_ai_cli(&ai, &prompt))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(output
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect())
+}
+
 // ─── App Entry ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -883,6 +974,10 @@ pub fn run() {
             get_project_config,
             save_project_config,
             save_app_settings,
+            // AI
+            generate_issue_description_cmd,
+            generate_adr_cmd,
+            brainstorm_issues_cmd,
         ],
     );
 
