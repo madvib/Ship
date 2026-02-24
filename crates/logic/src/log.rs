@@ -13,6 +13,8 @@ pub struct LogEntry {
     pub details: String,
 }
 
+pub const MAX_LOG_ENTRIES: usize = 200;
+
 pub fn log_action(project_dir: PathBuf, action: &str, details: &str) -> Result<()> {
     log_action_by(project_dir, "ship", action, details)
 }
@@ -29,6 +31,7 @@ pub fn log_action_by(project_dir: PathBuf, actor: &str, action: &str, details: &
 
     use std::io::Write;
     file.write_all(entry.as_bytes())?;
+    prune_log_file(&log_path, MAX_LOG_ENTRIES)?;
     Ok(())
 }
 
@@ -41,33 +44,59 @@ pub fn read_log(project_dir: PathBuf) -> Result<String> {
     Ok(fs::read_to_string(log_path)?)
 }
 
+fn parse_log_line(line: &str) -> Option<LogEntry> {
+    if line.starts_with("# ") || line.trim().is_empty() {
+        return None;
+    }
+    // Format: "2026-02-22T14:30:00Z [actor] action: details"
+    let mut parts = line.splitn(4, ' ');
+    let (Some(ts), Some(actor_bracket), Some(action_colon), Some(details)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return None;
+    };
+
+    Some(LogEntry {
+        timestamp: ts.to_string(),
+        actor: actor_bracket
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_string(),
+        action: action_colon.trim_end_matches(':').to_string(),
+        details: details.to_string(),
+    })
+}
+
+fn prune_log_file(log_path: &PathBuf, max_entries: usize) -> Result<()> {
+    let content = fs::read_to_string(log_path).unwrap_or_default();
+    let mut lines: Vec<&str> = content
+        .lines()
+        .filter(|line| parse_log_line(line).is_some())
+        .collect();
+
+    if lines.len() <= max_entries {
+        return Ok(());
+    }
+
+    let keep_from = lines.len().saturating_sub(max_entries);
+    let trimmed = lines.split_off(keep_from);
+    let mut rewritten = trimmed.join("\n");
+    if !rewritten.is_empty() {
+        rewritten.push('\n');
+    }
+    fs::write(log_path, rewritten)?;
+    Ok(())
+}
+
 /// Parse log entries from the log.md file into structured data.
-/// Each line is expected to follow the format: `- [timestamp] **action**: details`
 pub fn read_log_entries(project_dir: PathBuf) -> Result<Vec<LogEntry>> {
     let content = read_log(project_dir)?;
-    let mut entries = Vec::new();
-
-    for line in content.lines() {
-        if line.starts_with("# ") || line.trim().is_empty() {
-            continue;
-        }
-        // Format: "2026-02-22T14:30:00Z [actor] action: details"
-        let mut parts = line.splitn(4, ' ');
-        if let (Some(ts), Some(actor_bracket), Some(action_colon), Some(details)) =
-            (parts.next(), parts.next(), parts.next(), parts.next())
-        {
-            let actor = actor_bracket.trim_start_matches('[').trim_end_matches(']').to_string();
-            let action = action_colon.trim_end_matches(':').to_string();
-            entries.push(LogEntry {
-                timestamp: ts.to_string(),
-                actor,
-                action,
-                details: details.to_string(),
-            });
-        }
-    }
+    let mut entries: Vec<LogEntry> = content.lines().filter_map(parse_log_line).collect();
 
     // Return most recent first
     entries.reverse();
+    if entries.len() > MAX_LOG_ENTRIES {
+        entries.truncate(MAX_LOG_ENTRIES);
+    }
     Ok(entries)
 }

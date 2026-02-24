@@ -1,91 +1,133 @@
-import { useState } from 'react';
-import { IssueStatus, STATUS_CONFIG } from '../types';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { StatusConfig } from '../types';
+import DetailSheet from './DetailSheet';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import MarkdownEditor from './MarkdownEditor';
 
 interface NewIssueModalProps {
-    onClose: () => void;
-    onSubmit: (title: string, description: string, status: IssueStatus) => void;
-    defaultStatus?: IssueStatus;
+  onClose: () => void;
+  statuses: StatusConfig[];
+  onSubmit: (title: string, description: string, status: string) => void | Promise<void>;
+  defaultStatus?: string;
 }
 
-const STATUSES: IssueStatus[] = ['backlog', 'in-progress', 'blocked', 'done'];
+export default function NewIssueModal({ onClose, statuses, onSubmit, defaultStatus }: NewIssueModalProps) {
+  const initialStatus = defaultStatus ?? statuses[0]?.id ?? 'backlog';
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [status, setStatus] = useState<string>(initialStatus);
+  const [error, setError] = useState<string | null>(null);
 
-export default function NewIssueModal({ onClose, onSubmit, defaultStatus = 'backlog' }: NewIssueModalProps) {
-    const [title, setTitle] = useState('');
-    const [description, setDescription] = useState('');
-    const [status, setStatus] = useState<IssueStatus>(defaultStatus);
-    const [error, setError] = useState('');
+  const submit = useCallback(async () => {
+    if (!title.trim()) {
+      setError('Title is required.');
+      return;
+    }
+    await onSubmit(title.trim(), description.trim(), status);
+  }, [description, onSubmit, status, title]);
 
-    const handleSubmit = (e: React.ChangeEvent) => {
-        e.preventDefault();
-        if (!title.trim()) {
-            setError('Title is required');
-            return;
-        }
-        onSubmit(title.trim(), description.trim(), status);
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    await submit();
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void submit();
+      }
     };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, submit]);
 
-    return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                    <h2 className="modal-title">New Issue</h2>
-                    <button className="modal-close" onClick={onClose}>✕</button>
-                </div>
-
-                <form onSubmit={handleSubmit} className="modal-form">
-                    {error && <div className="form-error">{error}</div>}
-
-                    <div className="form-group">
-                        <label className="form-label">Title <span className="required">*</span></label>
-                        <input
-                            autoFocus
-                            type="text"
-                            className="form-input"
-                            placeholder="Short, descriptive title"
-                            value={title}
-                            onChange={(e) => { setTitle(e.target.value); setError(''); }}
-                        />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="form-label">Description</label>
-                        <textarea
-                            className="form-textarea"
-                            placeholder="Steps to reproduce, context, links..."
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            rows={5}
-                        />
-                    </div>
-
-                    <div className="form-group">
-                        <label className="form-label">Initial Status</label>
-                        <div className="status-row">
-                            {STATUSES.map((s) => {
-                                const c = STATUS_CONFIG[s];
-                                return (
-                                    <button
-                                        type="button"
-                                        key={s}
-                                        className={`status-chip ${status === s
-                                            ? `${c.bg} ${c.color} ${c.border} ring-1 ring-current`
-                                            : 'bg-zinc-900 text-zinc-500 border border-zinc-800'
-                                            }`}
-                                        onClick={() => setStatus(s)}
-                                    >
-                                        {c.label}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    <div className="modal-actions">
-                        <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-                        <button type="submit" className="btn-primary">Create Issue</button>
-                    </div>
-                </form>
-            </div>
+  return (
+    <DetailSheet
+      label="New Issue"
+      title={<h2 className="text-xl font-semibold tracking-tight">Create New Issue</h2>}
+      meta={
+        <p className="text-muted-foreground text-xs">
+          Capture context and pick an initial workflow status.
+        </p>
+      }
+      onClose={onClose}
+      className="max-w-[1400px]"
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="text-muted-foreground mr-auto text-xs">Cmd/Ctrl+Enter to create</span>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="new-issue-form">
+            Create Issue
+          </Button>
         </div>
-    );
+      }
+    >
+      <form id="new-issue-form" onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+
+        <div className="grid gap-4 md:grid-cols-[1fr_220px]">
+          <div className="space-y-2">
+            <Label htmlFor="issue-title">
+              Title <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              id="issue-title"
+              autoFocus
+              value={title}
+              placeholder="Short, descriptive title"
+              onChange={(event) => {
+                setTitle(event.target.value);
+                setError(null);
+              }}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Initial Status</Label>
+            <Select value={status} onValueChange={(value) => value && setStatus(value)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {statuses.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <MarkdownEditor
+          label="Description"
+          value={description}
+          onChange={setDescription}
+          placeholder="Steps to reproduce, context, links..."
+          rows={22}
+          defaultMode="split"
+        />
+      </form>
+    </DetailSheet>
+  );
 }

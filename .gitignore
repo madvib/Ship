@@ -57,8 +57,6 @@ typings/
 # Mac files
 .DS_Store
 
-# Vibe config
-.vibe/
 dist/
 
 # Added by cargo

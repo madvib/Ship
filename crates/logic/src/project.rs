@@ -88,15 +88,37 @@ pub fn save_registry(registry: &ProjectRegistry) -> Result<()> {
 
 pub fn register_project(name: String, path: PathBuf) -> Result<()> {
     let mut registry = load_registry()?;
-    let entry = ProjectEntry {
-        name,
-        path: fs::canonicalize(path)?,
-    };
+    let canonical_path = fs::canonicalize(path)?;
 
-    if !registry.projects.contains(&entry) {
-        registry.projects.push(entry);
-        save_registry(&registry)?;
+    // De-duplicate entries by canonical path and keep first occurrence.
+    let mut seen_target = false;
+    registry.projects.retain(|project| {
+        let project_path = fs::canonicalize(&project.path).unwrap_or_else(|_| project.path.clone());
+        if project_path == canonical_path {
+            if seen_target {
+                false
+            } else {
+                seen_target = true;
+                true
+            }
+        } else {
+            true
+        }
+    });
+
+    if let Some(existing) = registry.projects.iter_mut().find(|project| {
+        fs::canonicalize(&project.path).unwrap_or_else(|_| project.path.clone()) == canonical_path
+    }) {
+        existing.name = name;
+        existing.path = canonical_path;
+    } else {
+        registry.projects.push(ProjectEntry {
+            name,
+            path: canonical_path,
+        });
     }
+
+    save_registry(&registry)?;
     Ok(())
 }
 
@@ -194,4 +216,55 @@ pub fn get_project_name(ship_path: &std::path::Path) -> String {
         .and_then(|p| p.file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Unknown Project".to_string())
+}
+
+// ─── Global App State ─────────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct AppState {
+    #[serde(default)]
+    pub active_project: Option<PathBuf>,
+    #[serde(default)]
+    pub recent_projects: Vec<PathBuf>,
+}
+
+pub fn load_app_state() -> Result<AppState> {
+    let path = get_global_dir()?.join("app_state.json");
+    if !path.exists() {
+        return Ok(AppState::default());
+    }
+    let content = fs::read_to_string(path)?;
+    serde_json::from_str(&content).context("Failed to parse app state")
+}
+
+pub fn save_app_state(state: &AppState) -> Result<()> {
+    let path = get_global_dir()?.join("app_state.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(state)?;
+    fs::write(path, json)?;
+    Ok(())
+}
+
+pub fn set_active_project_global(path: PathBuf) -> Result<()> {
+    let mut state = load_app_state()?;
+    state.active_project = Some(path.clone());
+    // Add to recent projects if not already there
+    if !state.recent_projects.contains(&path) {
+        state.recent_projects.insert(0, path);
+        // Keep only last 10
+        state.recent_projects.truncate(10);
+    }
+    save_app_state(&state)
+}
+
+pub fn get_active_project_global() -> Result<Option<PathBuf>> {
+    let state = load_app_state()?;
+    Ok(state.active_project)
+}
+
+pub fn get_recent_projects_global() -> Result<Vec<PathBuf>> {
+    let state = load_app_state()?;
+    Ok(state.recent_projects)
 }

@@ -27,6 +27,8 @@ pub use project::{
     DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry, SHIP_DIR_NAME, get_global_dir,
     get_project_dir, get_project_name, get_registry_path, init_project, list_registered_projects,
     load_registry, register_project, sanitize_file_name, save_registry, unregister_project,
+    AppState as GlobalAppState, get_active_project_global, get_recent_projects_global,
+    load_app_state, save_app_state, set_active_project_global,
 };
 
 #[cfg(test)]

@@ -1,105 +1,224 @@
-import { NavSection, Project } from '../types';
+import type { ComponentType } from 'react';
+import {
+  ChevronRight,
+  FileCode2,
+  FileCog,
+  FileStack,
+  FolderSearch,
+  FolderGit2,
+  FolderOpen,
+  FolderPlus,
+  LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ScrollText,
+} from 'lucide-react';
+import { Project } from '../types';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Separator } from './ui/separator';
+import { cn } from '@/lib/utils';
+import {
+  AppRoutePath,
+  ACTIVITY_ROUTE as ACTIVITY_PATH,
+  ADRS_ROUTE as ADRS_PATH,
+  ISSUES_ROUTE as ISSUES_PATH,
+  OVERVIEW_ROUTE as OVERVIEW_PATH,
+  PROJECTS_ROUTE as PROJECTS_PATH,
+  SETTINGS_ROUTE as SETTINGS_PATH,
+  SPECS_ROUTE as SPECS_PATH,
+} from '../lib/constants/routes';
 
 interface SidebarProps {
-    activeSection: NavSection;
-    onSectionChange: (s: NavSection) => void;
-    activeProject: Project | null;
-    recentProjects: Project[];
-    onOpenProject: () => void;
-    onSelectProject: (p: Project) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  activePath: AppRoutePath;
+  onNavigate: (path: AppRoutePath) => void;
+  activeProject: Project | null;
+  recentProjects: Project[];
+  onOpenProject: () => void;
+  onNewProject: () => void;
+  onSelectProject: (project: Project) => void;
 }
 
-const NAV_ITEMS: { id: NavSection; label: string; icon: string }[] = [
-    { id: 'issues', label: 'Issues', icon: '⚡' },
-    { id: 'adrs', label: 'Decisions', icon: '📐' },
-    { id: 'log', label: 'Activity', icon: '📋' },
+const NAV_ITEMS: {
+  path: AppRoutePath;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+}[] = [
+  { path: OVERVIEW_PATH, label: 'Overview', icon: LayoutDashboard },
+  { path: ISSUES_PATH, label: 'Issues', icon: FolderGit2 },
+  { path: SPECS_PATH, label: 'Specs', icon: FileCode2 },
+  { path: ADRS_PATH, label: 'Decisions', icon: FileStack },
+  { path: ACTIVITY_PATH, label: 'Activity', icon: ScrollText },
 ];
 
 export default function Sidebar({
-    activeSection,
-    onSectionChange,
-    activeProject,
-    recentProjects,
-    onOpenProject,
-    onSelectProject,
+  collapsed,
+  onToggleCollapse,
+  activePath,
+  onNavigate,
+  activeProject,
+  recentProjects,
+  onOpenProject,
+  onNewProject,
+  onSelectProject,
 }: SidebarProps) {
-    return (
-        <aside className="sidebar">
-            {/* Logo */}
-            <div className="sidebar-logo">
-                <div className="logo-mark">
-                    <img src="/logo.svg" alt="Ship" className="logo-img" />
-                </div>
-                <span className="logo-text">Ship</span>
-            </div>
+  const otherProjects = recentProjects
+    .filter((project) => project.path !== activeProject?.path)
+    .slice(0, 6);
 
-            {/* Project Switcher */}
-            <div className="sidebar-section">
-                <p className="sidebar-label">Project</p>
-                {activeProject ? (
-                    <div className="active-project-card">
-                        <div className="active-project-dot" />
-                        <div className="active-project-info">
-                            <span className="active-project-name">{activeProject.name}</span>
-                            <span className="active-project-count">
-                                {activeProject.issue_count ?? 0} issues
-                            </span>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="no-project-hint">No project selected</div>
-                )}
+  return (
+    <aside className={cn('sidebar flex h-full min-h-0 flex-col gap-4 p-3', collapsed && 'items-center px-2')}>
+      <header
+        className={cn(
+          'flex w-full items-center gap-2 rounded-lg border bg-card/60 px-2 py-2',
+          collapsed && 'w-auto flex-col gap-1 px-1.5 py-1.5'
+        )}
+      >
+        <div className="bg-primary/10 border-primary/30 flex size-10 items-center justify-center rounded-md border">
+          <img src="/logo.svg" alt="Ship" className="size-8 object-contain" />
+        </div>
+        {!collapsed && (
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight">Ship</p>
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className={cn('ml-auto', collapsed && 'ml-0')}
+          onClick={onToggleCollapse}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </Button>
+      </header>
 
-                {recentProjects.length > 0 && (
-                    <div className="recent-projects">
-                        {recentProjects
-                            .filter((p) => p.name !== activeProject?.name)
-                            .slice(0, 4)
-                            .map((p) => (
-                                <button
-                                    key={p.path}
-                                    className="recent-project-btn"
-                                    onClick={() => onSelectProject(p)}
-                                    title={p.path}
-                                >
-                                    <span className="recent-project-dot" />
-                                    {p.name}
-                                </button>
-                            ))}
-                    </div>
-                )}
+      <section className={cn('w-full space-y-3 rounded-lg border bg-card/40 p-2.5', collapsed && 'p-2')}>
+        <div className="flex items-center justify-between">
+          {!collapsed && (
+            <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">Project</p>
+          )}
+          {activeProject && !collapsed && (
+            <Badge variant="outline" className="text-[10px]">
+              Active
+            </Badge>
+          )}
+        </div>
 
-                <button className="open-project-btn" onClick={onOpenProject}>
-                    <span>＋</span> Open Project
-                </button>
-            </div>
+        {!collapsed && (
+          <>
+            {activeProject ? (
+              <div className="space-y-1 rounded-md border bg-background/60 px-3 py-2">
+                <p className="truncate text-sm font-medium">{activeProject.name}</p>
+                <p className="text-muted-foreground text-xs">
+                  {typeof activeProject.issue_count === 'number'
+                    ? `${activeProject.issue_count} issues`
+                    : 'Issue count unavailable'}
+                </p>
+              </div>
+            ) : (
+              <div className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs">
+                No project selected
+              </div>
+            )}
 
-            <div className="sidebar-divider" />
-
-            {/* Navigation */}
-            <nav className="sidebar-nav">
-                {NAV_ITEMS.map((item) => (
-                    <button
-                        key={item.id}
-                        className={`nav-item ${activeSection === item.id ? 'nav-item-active' : ''}`}
-                        onClick={() => onSectionChange(item.id)}
-                    >
-                        <span className="nav-item-icon">{item.icon}</span>
-                        {item.label}
-                    </button>
+            {otherProjects.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-muted-foreground px-1 text-[11px] font-medium uppercase tracking-wide">
+                  Recent
+                </p>
+                {otherProjects.map((project) => (
+                  <Button
+                    key={project.path}
+                    variant="ghost"
+                    className="h-auto w-full justify-start px-2 py-1.5 text-left"
+                    title={project.path}
+                    onClick={() => onSelectProject(project)}
+                  >
+                    <span className="truncate text-sm">{project.name}</span>
+                  </Button>
                 ))}
-            </nav>
+              </div>
+            )}
+          </>
+        )}
 
-            <div className="sidebar-spacer" />
+        <div className={cn('grid gap-2', collapsed ? 'grid-cols-1' : 'grid-cols-2')}>
+          <Button
+            variant="outline"
+            size={collapsed ? 'icon-sm' : 'sm'}
+            className={cn('w-full', !collapsed && 'justify-start')}
+            onClick={onOpenProject}
+            title="Open project"
+            aria-label="Open project"
+          >
+            <FolderOpen className="size-4" />
+            {!collapsed && 'Open'}
+          </Button>
+          <Button
+            variant="secondary"
+            size={collapsed ? 'icon-sm' : 'sm'}
+            className={cn('w-full', !collapsed && 'justify-start')}
+            onClick={onNewProject}
+            title="Create project"
+            aria-label="Create project"
+          >
+            <FolderPlus className="size-4" />
+            {!collapsed && 'New'}
+          </Button>
+        </div>
 
-            {/* Settings at bottom */}
-            <button
-                className={`nav-item nav-item-settings ${activeSection === 'settings' ? 'nav-item-active' : ''}`}
-                onClick={() => onSectionChange('settings')}
+        <Button
+          variant={activePath === PROJECTS_PATH ? 'secondary' : 'ghost'}
+          size={collapsed ? 'icon-sm' : 'sm'}
+          className={cn('w-full', !collapsed && 'justify-start')}
+          onClick={() => onNavigate(PROJECTS_PATH)}
+          title="Projects"
+          aria-label="Projects"
+        >
+          <FolderSearch className="size-4" />
+          {!collapsed && 'Projects'}
+        </Button>
+      </section>
+
+      <Separator className="w-full" />
+
+      <nav className={cn('flex w-full flex-1 flex-col gap-1.5', collapsed && 'items-center')}>
+        {NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const active = activePath === item.path;
+          return (
+            <Button
+              key={item.path}
+              variant={active ? 'secondary' : 'ghost'}
+              size={collapsed ? 'icon-sm' : 'default'}
+              className={cn('w-full', !collapsed && 'justify-start', active && 'font-medium')}
+              onClick={() => onNavigate(item.path)}
+              title={item.label}
+              aria-label={item.label}
             >
-                <span className="nav-item-icon">⚙</span>
-                Settings
-            </button>
-        </aside>
-    );
+              <Icon className="size-4" />
+              {!collapsed && item.label}
+              {!collapsed && active && <ChevronRight className="ml-auto size-3.5" />}
+            </Button>
+          );
+        })}
+      </nav>
+
+      <Button
+        variant={activePath === SETTINGS_PATH ? 'secondary' : 'ghost'}
+        size={collapsed ? 'icon-sm' : 'default'}
+        className={cn('w-full', !collapsed && 'justify-start', activePath === SETTINGS_PATH && 'font-medium')}
+        onClick={() => onNavigate(SETTINGS_PATH)}
+        title="Settings"
+        aria-label="Settings"
+      >
+        <FileCog className="size-4" />
+        {!collapsed && 'Settings'}
+      </Button>
+    </aside>
+  );
 }

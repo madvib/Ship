@@ -2,7 +2,7 @@
 id = "e172c728-92d3-4465-bfb7-3b78add97863"
 title = "Drag-and-drop kanban columns using @dnd-kit"
 created = "2026-02-23T03:06:04.409759882Z"
-updated = "2026-02-23T03:06:04.409760782Z"
+updated = "2026-02-23T05:17:42.030303Z"
 tags = []
 links = []
 +++
@@ -35,3 +35,5 @@ pnpm add @dnd-kit/core @dnd-kit/sortable @dnd-kit/utilities
 
 ## References
 Spec: `ui-vision---production-roadmap.md` — View 1: Kanban Board
+
+Blocked in this environment: installing @dnd-kit packages fails with ENOTFOUND against registry.npmjs.org, so dependency fetch is currently unavailable. Deferring implementation until npm registry access is available.
