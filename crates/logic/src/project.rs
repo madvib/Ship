@@ -151,6 +151,8 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     fs::create_dir_all(ship_path.join("issues/review"))?;
     fs::create_dir_all(ship_path.join("issues/blocked"))?;
     fs::create_dir_all(ship_path.join("issues/done"))?;
+    fs::create_dir_all(ship_path.join("releases"))?;
+    fs::create_dir_all(ship_path.join("features"))?;
     fs::create_dir_all(ship_path.join("adrs"))?;
     fs::create_dir_all(ship_path.join("specs"))?;
     fs::create_dir_all(ship_path.join("templates"))?;
@@ -170,7 +172,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     // Write default templates
     write_default_templates(&ship_path)?;
 
-    // Write default .gitignore (fully local by default)
+    // Write default .gitignore (opinionated alpha defaults)
     let gitignore_path = ship_path.join(".gitignore");
     if !gitignore_path.exists() {
         let default_git = crate::config::GitConfig::default();
@@ -189,9 +191,27 @@ fn write_default_templates(ship_path: &std::path::Path) -> Result<()> {
     if !spec_tmpl.exists() {
         fs::write(spec_tmpl, include_str!("templates/SPEC.md"))?;
     }
+    let release_tmpl = ship_path.join("templates/RELEASE.md");
+    if !release_tmpl.exists() {
+        fs::write(release_tmpl, include_str!("templates/RELEASE.md"))?;
+    }
+    let vision_tmpl = ship_path.join("templates/VISION.md");
+    if !vision_tmpl.exists() {
+        fs::write(vision_tmpl, include_str!("templates/VISION.md"))?;
+    }
+    let feature_tmpl = ship_path.join("templates/FEATURE.md");
+    if !feature_tmpl.exists() {
+        fs::write(feature_tmpl, include_str!("templates/FEATURE.md"))?;
+    }
     let adr_tmpl = ship_path.join("templates/ADR.md");
     if !adr_tmpl.exists() {
         fs::write(adr_tmpl, include_str!("templates/ADR.md"))?;
+    }
+
+    // Seed a project-level vision doc if missing.
+    let vision_doc = ship_path.join("specs/vision.md");
+    if !vision_doc.exists() {
+        fs::write(vision_doc, include_str!("templates/VISION.md"))?;
     }
     Ok(())
 }

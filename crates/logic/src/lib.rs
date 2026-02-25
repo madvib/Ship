@@ -2,41 +2,52 @@ pub mod adr;
 pub mod agent_export;
 pub mod config;
 pub mod demo;
+pub mod feature;
 mod fs_util;
 pub mod issue;
 pub mod log;
 pub mod plugin;
 pub mod project;
 pub mod prompt;
+pub mod release;
 pub mod spec;
 
 pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, get_adr, list_adrs, update_adr};
-pub use spec::{Spec, SpecEntry, SpecMetadata, create_spec, get_spec, get_spec_raw, list_specs, update_spec};
+pub use agent_export::{export_to, import_from_claude, sync_active_mode};
+pub use config::{
+    AgentLayerConfig, AiConfig, GitConfig, HookConfig, HookTrigger, McpServerConfig, McpServerType,
+    ModeConfig, PermissionConfig, ProjectConfig, StatusConfig, add_hook, add_mcp_server, add_mode,
+    add_status, generate_gitignore, get_active_mode, get_config, get_effective_config,
+    get_git_config, get_project_statuses, is_category_committed, list_hooks, list_mcp_servers,
+    migrate_json_config_file, remove_hook, remove_mcp_server, remove_mode, remove_status,
+    save_config, set_active_mode, set_category_committed, set_git_config,
+};
+pub use demo::init_demo_project;
+pub use feature::{
+    Feature, FeatureEntry, FeatureMetadata, create_feature, get_feature, get_feature_raw,
+    list_features, update_feature,
+};
 pub use issue::{
     Issue, IssueEntry, IssueLink, IssueMetadata, add_link, append_note, backfill_issue_ids,
     create_issue, delete_issue, get_issue, list_issues, list_issues_full, migrate_yaml_issues,
     move_issue, update_issue,
 };
-pub use demo::init_demo_project;
 pub use log::{LogEntry, log_action, log_action_by, read_log, read_log_entries};
 pub use plugin::{Plugin, PluginRegistry};
-pub use config::{
-    AgentLayerConfig, AiConfig, GitConfig, HookConfig, HookTrigger, McpServerConfig,
-    McpServerType, ModeConfig, PermissionConfig, ProjectConfig, StatusConfig,
-    add_hook, add_mcp_server, add_mode, add_status, generate_gitignore, get_active_mode,
-    get_config, get_effective_config, get_git_config, get_project_statuses,
-    is_category_committed, list_hooks, list_mcp_servers, migrate_json_config_file, remove_hook,
-    remove_mcp_server, remove_mode, remove_status, save_config, set_active_mode,
-    set_category_committed, set_git_config,
+pub use project::{
+    AppState as GlobalAppState, DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry,
+    SHIP_DIR_NAME, get_active_project_global, get_global_dir, get_project_dir, get_project_name,
+    get_recent_projects_global, get_registry_path, init_project, list_registered_projects,
+    load_app_state, load_registry, register_project, sanitize_file_name, save_app_state,
+    save_registry, set_active_project_global, unregister_project,
 };
 pub use prompt::{Prompt, create_prompt, delete_prompt, get_prompt, list_prompts, update_prompt};
-pub use agent_export::{export_to, import_from_claude, sync_active_mode};
-pub use project::{
-    DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry, SHIP_DIR_NAME, get_global_dir,
-    get_project_dir, get_project_name, get_registry_path, init_project, list_registered_projects,
-    load_registry, register_project, sanitize_file_name, save_registry, unregister_project,
-    AppState as GlobalAppState, get_active_project_global, get_recent_projects_global,
-    load_app_state, save_app_state, set_active_project_global,
+pub use release::{
+    Release, ReleaseEntry, ReleaseMetadata, create_release, get_release, get_release_raw,
+    list_releases, update_release,
+};
+pub use spec::{
+    Spec, SpecEntry, SpecMetadata, create_spec, get_spec, get_spec_raw, list_specs, update_spec,
 };
 
 #[cfg(test)]
@@ -123,7 +134,12 @@ mod tests {
     fn test_list_issues_full() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        create_issue(project_dir.clone(), "Full Issue", "Detailed desc", "backlog")?;
+        create_issue(
+            project_dir.clone(),
+            "Full Issue",
+            "Detailed desc",
+            "backlog",
+        )?;
         let entries = list_issues_full(project_dir)?;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].issue.metadata.title, "Full Issue");
@@ -212,7 +228,12 @@ mod tests {
     fn test_create_adr() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        let adr_path = create_adr(project_dir, "Use PostgreSQL", "Chosen for robustness", "accepted")?;
+        let adr_path = create_adr(
+            project_dir,
+            "Use PostgreSQL",
+            "Chosen for robustness",
+            "accepted",
+        )?;
         assert!(adr_path.exists());
         let content = fs::read_to_string(adr_path)?;
         assert!(content.contains("title = \"Use PostgreSQL\""));
@@ -359,10 +380,11 @@ mod tests {
         create_spec(project_dir.clone(), "Spec Alpha", "")?;
         create_spec(project_dir.clone(), "Spec Beta", "")?;
         let specs = list_specs(project_dir)?;
-        assert_eq!(specs.len(), 2);
+        assert!(specs.len() >= 3); // includes seeded vision.md
         let titles: Vec<&str> = specs.iter().map(|s| s.title.as_str()).collect();
         assert!(titles.contains(&"Spec Alpha"));
         assert!(titles.contains(&"Spec Beta"));
+        assert!(titles.iter().any(|t| t.to_lowercase().contains("vision")));
         Ok(())
     }
 
@@ -372,6 +394,145 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let p1 = create_spec(project_dir.clone(), "Auth Flow", "")?;
         let p2 = create_spec(project_dir.clone(), "Auth Flow!", "")?;
+        assert_ne!(p1, p2);
+        assert!(p1.exists());
+        assert!(p2.exists());
+        Ok(())
+    }
+
+    // ── Release tests ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_create_release() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_release(project_dir, "v0.1.0-alpha", "")?;
+        assert!(path.exists());
+        let content = fs::read_to_string(&path)?;
+        assert!(content.starts_with("+++\n"));
+        assert!(content.contains("version = \"v0.1.0-alpha\""));
+        assert!(content.contains("status = \"planned\""));
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_release_empty_version_rejected() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let result = create_release(project_dir, "", "");
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_and_update_release() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_release(project_dir, "v0.2.0-alpha", "initial")?;
+        let initial = get_release(path.clone())?;
+        assert!(!initial.metadata.id.is_empty());
+        assert_eq!(initial.metadata.version, "v0.2.0-alpha");
+        update_release(path.clone(), "updated")?;
+        let updated = get_release(path)?;
+        assert_eq!(updated.body, "updated");
+        assert!(updated.metadata.updated >= initial.metadata.updated);
+        Ok(())
+    }
+
+    #[test]
+    fn test_list_releases() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
+        create_release(project_dir.clone(), "v0.2.0-alpha", "")?;
+        let releases = list_releases(project_dir)?;
+        assert_eq!(releases.len(), 2);
+        let versions: Vec<&str> = releases.iter().map(|r| r.version.as_str()).collect();
+        assert!(versions.contains(&"v0.1.0-alpha"));
+        assert!(versions.contains(&"v0.2.0-alpha"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_release_collision_gets_suffix() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let p1 = create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
+        let p2 = create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
+        assert_ne!(p1, p2);
+        assert!(p1.exists());
+        assert!(p2.exists());
+        Ok(())
+    }
+
+    // ── Feature tests ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_create_feature() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_feature(
+            project_dir,
+            "Agent Config",
+            "",
+            Some("v0.1.0-alpha.md"),
+            Some("agent-config.md"),
+        )?;
+        assert!(path.exists());
+        let feature = get_feature(path)?;
+        assert_eq!(feature.metadata.title, "Agent Config");
+        assert_eq!(feature.metadata.status, "active");
+        assert_eq!(
+            feature.metadata.release,
+            Some("v0.1.0-alpha.md".to_string())
+        );
+        assert_eq!(feature.metadata.spec, Some("agent-config.md".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_feature_empty_title_rejected() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let result = create_feature(project_dir, "", "", None, None);
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_and_update_feature() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_feature(project_dir, "UI Agent Panel", "initial", None, None)?;
+        let initial = get_feature(path.clone())?;
+        assert!(!initial.metadata.id.is_empty());
+        update_feature(path.clone(), "updated")?;
+        let updated = get_feature(path)?;
+        assert_eq!(updated.body, "updated");
+        assert!(updated.metadata.updated >= initial.metadata.updated);
+        Ok(())
+    }
+
+    #[test]
+    fn test_list_features() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        create_feature(project_dir.clone(), "Feature One", "", None, None)?;
+        create_feature(project_dir.clone(), "Feature Two", "", None, None)?;
+        let features = list_features(project_dir)?;
+        assert_eq!(features.len(), 2);
+        let titles: Vec<&str> = features.iter().map(|f| f.title.as_str()).collect();
+        assert!(titles.contains(&"Feature One"));
+        assert!(titles.contains(&"Feature Two"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_feature_collision_gets_suffix() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let p1 = create_feature(project_dir.clone(), "Ship Agents", "", None, None)?;
+        let p2 = create_feature(project_dir.clone(), "Ship Agents!", "", None, None)?;
         assert_ne!(p1, p2);
         assert!(p1.exists());
         assert!(p2.exists());
@@ -449,9 +610,13 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
-        // Default config: nothing in commit list, so everything is ignored
+        // Default config: issues/log stay local; features/specs/adrs are committed.
         assert!(gitignore.contains("issues"));
         assert!(gitignore.contains("log.md"));
+        assert!(!gitignore.contains("releases"));
+        assert!(!gitignore.contains("features"));
+        assert!(!gitignore.contains("specs"));
+        assert!(!gitignore.contains("adrs"));
         Ok(())
     }
 
@@ -503,11 +668,30 @@ mod tests {
         assert!(ship_path.exists());
         assert!(ship_path.join("issues/backlog").is_dir());
         assert!(ship_path.join("issues/review").is_dir());
+        assert!(ship_path.join("releases").is_dir());
+        assert!(ship_path.join("features").is_dir());
         assert!(ship_path.join("adrs").is_dir());
         assert!(ship_path.join("specs").is_dir());
         assert!(ship_path.join("templates").is_dir());
+        assert!(ship_path.join("templates/RELEASE.md").is_file());
+        assert!(ship_path.join("templates/FEATURE.md").is_file());
+        assert!(ship_path.join("templates/VISION.md").is_file());
+        assert!(ship_path.join("specs/vision.md").is_file());
         assert!(ship_path.join("log.md").is_file());
         assert!(ship_path.join("config.toml").is_file());
+        Ok(())
+    }
+
+    #[test]
+    fn test_init_demo_project_seeds_alpha_primitives() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = init_demo_project(tmp.path().to_path_buf())?;
+        let releases = list_releases(ship_path.clone())?;
+        let features = list_features(ship_path.clone())?;
+        let specs = list_specs(ship_path)?;
+        assert!(!releases.is_empty());
+        assert!(!features.is_empty());
+        assert!(specs.len() >= 2); // includes seeded vision + agent config spec
         Ok(())
     }
 

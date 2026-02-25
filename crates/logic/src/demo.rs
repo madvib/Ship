@@ -1,4 +1,6 @@
-use crate::{create_adr, create_issue, init_project, log_action};
+use crate::{
+    create_adr, create_feature, create_issue, create_release, create_spec, init_project, log_action,
+};
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -85,6 +87,53 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
             .unwrap_or(false);
         if !exists {
             create_adr(project_dir.clone(), title, decision, status)?;
+        }
+    }
+
+    // Sample release
+    let release_version = "v0.1.0-alpha";
+    let release_slug = crate::sanitize_file_name(release_version);
+    let release_file = project_dir
+        .join("releases")
+        .join(format!("{}.md", release_slug));
+    if !release_file.exists() {
+        create_release(
+            project_dir.clone(),
+            release_version,
+            "## Goal\n\nShip alpha with core runtime, MCP, CLI, and UI agent configuration.\n\n## Scope\n\n- [x] Runtime + MCP bridge\n- [x] CLI + project primitives\n- [ ] Agent module UX polish\n\n## Included Features\n\n- [ ] Unified agent config panel\n- [ ] Feature delivery flow\n\n## Notes\n\nFocus on architecture confidence and test coverage.\n",
+        )?;
+    }
+
+    // Sample specs
+    let spec_title = "Agent Configuration and Modes";
+    let spec_slug = crate::sanitize_file_name(spec_title);
+    let spec_file = project_dir.join("specs").join(format!("{}.md", spec_slug));
+    if !spec_file.exists() {
+        create_spec(
+            project_dir.clone(),
+            spec_title,
+            "## Overview\n\nDefine a unified agent config layer for provider/model, prompts, context, rules, skills, MCP servers, and modes.\n\n## Goals\n\n- One global and project-scoped config model\n- Pass-through generation via claude/codex/gemini CLIs\n- Clear mode semantics tied to workflow policy\n\n## Non-Goals\n\n- Full workflow customization engine in alpha\n\n## Approach\n\nBuild release/feature/spec primitives and wire them through CLI, MCP, and UI.\n\n## Open Questions\n\n- How to best express mode overrides per checked-out feature?\n",
+        )?;
+    }
+
+    // Sample features
+    let features = vec![
+        (
+            "Unified Agent Configuration UI",
+            "v0-1-0-alpha.md",
+            "agent-configuration-and-modes.md",
+        ),
+        (
+            "Project Workflow Primitives",
+            "v0-1-0-alpha.md",
+            "agent-configuration-and-modes.md",
+        ),
+    ];
+    for (title, release, spec) in features {
+        let slug = crate::sanitize_file_name(title);
+        let path = project_dir.join("features").join(format!("{}.md", slug));
+        if !path.exists() {
+            create_feature(project_dir.clone(), title, "", Some(release), Some(spec))?;
         }
     }
 

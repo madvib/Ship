@@ -1,7 +1,7 @@
 # Shipwright — Vision (Canonical)
 
 **Status:** Active  
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-25
 
 ---
 
@@ -37,6 +37,40 @@ When the code changes, project state changes with it. When an agent starts, it r
 - The fastest teams have one source of truth for work, decisions, and context.
 
 Shipwright exists to make software delivery more continuous, less lossy, and more reliable under heavy AI usage.
+
+---
+
+## Core Primitives (Alpha)
+
+Alpha ships one opinionated set of primitives and semantics:
+
+1. **Vision** — project-level intent and constraints that outlive individual features.
+2. **Release** — canonical version scope (e.g. `v0.1.0-alpha`) containing feature goals.
+3. **Feature** — the delivery container for a bounded outcome, with markdown todos.
+4. **Spec** — implementation contract for a feature.
+5. **Issue** — short-lived execution unit (local by default, can be promoted to git).
+6. **ADR** — durable architecture decision record.
+7. **Mode** — agent execution profile (not a PM primitive) that can be mapped to workflow phases.
+8. **Event log** — append-only project event stream, with eventual global event service trajectory.
+
+Vision defines the project. Releases define delivery epochs. Features define delivery chunks. Specs and ADRs preserve rationale. Issues drive execution.
+
+---
+
+## Alpha Workflow: One Path
+
+Ship one workflow before customization:
+
+`Vision -> Release -> Feature -> Spec -> Issues -> ADRs -> Close Feature -> Ship Release`
+
+Rules:
+
+- Vision is canonical as a single project document.
+- Releases are canonical version-scoped documents (for example: `v0.1.0-alpha`).
+- Feature is the default git-committed planning artifact.
+- Issues are execution scratch by default (local-only) to avoid git noise.
+- Mode and workflow policy are injected into agent context for consistent behavior.
+- Automatic mode switching based on checked-out feature is explicitly deferred.
 
 ---
 
@@ -112,6 +146,12 @@ Parallel implementation has created friction. For alpha:
 4. MCP server registry with clean export semantics
 5. High-confidence primitives through robust tests
 
+Additions for workflow hardening:
+
+6. Feature-first delivery flow with markdown todos
+7. Opinionated default git policy that keeps execution noise local
+8. Workflow policy surfaced consistently in CLI/UI/MCP agent context
+
 ---
 
 ## Quality Bar (Non-Negotiable)
@@ -133,6 +173,7 @@ If a feature increases speed but weakens primitives, we fix the primitives first
 - Public SDK for external extension authors
 - MCP sampling as the primary generation path
 - Multi-cloud orchestration and enterprise packaging
+- Graph visualization and link-topology UI (capture now, implement later)
 
 ---
 
@@ -141,5 +182,7 @@ If a feature increases speed but weakens primitives, we fix the primitives first
 Alpha implementation detail lives in:
 
 - `.ship/specs/alpha-ai-config-and-modes.md`
+- `.ship/specs/alpha-feature-delivery-workflow.md`
+- `.ship/specs/future-ideas.md`
 
 Older deep-dive docs are retained as archived references only.

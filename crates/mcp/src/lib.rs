@@ -1,11 +1,12 @@
 use anyhow::{Result, anyhow};
 use ghost_issues;
 use logic::{
-    add_status, append_note, create_adr, create_issue, create_spec, delete_issue, get_adr,
-    get_config, get_git_config, get_issue, get_project_dir, get_project_name, get_project_statuses,
-    get_spec_raw, is_category_committed, list_adrs, list_issues, list_issues_full,
-    list_registered_projects, list_specs, log_action, log_action_by, move_issue, read_log,
-    register_project, remove_status, set_category_committed, update_spec,
+    add_status, append_note, create_adr, create_feature, create_issue, create_release, create_spec,
+    delete_issue, get_adr, get_config, get_feature_raw, get_git_config, get_issue, get_project_dir,
+    get_project_name, get_project_statuses, get_release_raw, get_spec_raw, is_category_committed,
+    list_adrs, list_features, list_issues, list_issues_full, list_registered_projects,
+    list_releases, list_specs, log_action, log_action_by, move_issue, read_log, register_project,
+    remove_status, set_category_committed, update_feature, update_release, update_spec,
 };
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::transport::stdio;
@@ -140,7 +141,7 @@ pub struct BrainstormRequest {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GitIncludeRequest {
-    /// Category to change: issues, adrs, log, config, plugins
+    /// Category to change: issues, releases, features, specs, adrs, log.md, config.toml, templates, plugins
     pub category: String,
     /// true = commit to git, false = local only (gitignored)
     pub commit: bool,
@@ -203,6 +204,54 @@ pub struct GetSpecRequest {
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateSpecRequest {
     /// Spec filename (e.g. "my-feature.md")
+    pub file_name: String,
+    /// Full replacement content
+    pub content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CreateReleaseRequest {
+    /// Version label (e.g. "v0.1.0-alpha")
+    pub version: String,
+    /// Initial markdown content (optional — defaults to a scaffold)
+    pub content: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetReleaseRequest {
+    /// Release filename (e.g. "v0-1-0-alpha.md")
+    pub file_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateReleaseRequest {
+    /// Release filename (e.g. "v0-1-0-alpha.md")
+    pub file_name: String,
+    /// Full replacement content
+    pub content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CreateFeatureRequest {
+    /// Feature title
+    pub title: String,
+    /// Initial markdown content (optional — defaults to a scaffold)
+    pub content: Option<String>,
+    /// Linked release filename (optional)
+    pub release: Option<String>,
+    /// Linked spec filename (optional)
+    pub spec: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetFeatureRequest {
+    /// Feature filename (e.g. "agent-mode-ui.md")
+    pub file_name: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdateFeatureRequest {
+    /// Feature filename (e.g. "agent-mode-ui.md")
     pub file_name: String,
     /// Full replacement content
     pub content: String,
@@ -301,7 +350,13 @@ impl ShipServer {
                     *counts.entry(status.clone()).or_insert(0) += 1;
                 }
                 let statuses = get_project_statuses(Some(project_dir.clone())).unwrap_or_default();
-                let adrs = list_adrs(project_dir).map(|a| a.len()).unwrap_or(0);
+                let adrs = list_adrs(project_dir.clone()).map(|a| a.len()).unwrap_or(0);
+                let features = list_features(project_dir.clone())
+                    .map(|f| f.len())
+                    .unwrap_or(0);
+                let releases = list_releases(project_dir.clone())
+                    .map(|r| r.len())
+                    .unwrap_or(0);
                 let mut out = format!("Project: {}\n", name);
                 out.push_str(&format!("Total issues: {}\n", issues.len()));
                 for status in &statuses {
@@ -312,6 +367,8 @@ impl ShipServer {
                     ));
                 }
                 out.push_str(&format!("ADRs: {}\n", adrs));
+                out.push_str(&format!("Features: {}\n", features));
+                out.push_str(&format!("Releases: {}\n", releases));
                 out
             }
             Err(e) => format!("Error: {}", e),
@@ -333,13 +390,36 @@ impl ShipServer {
         let statuses: Vec<String> = config.statuses.iter().map(|s| s.id.clone()).collect();
 
         let issues = list_issues_full(project_dir.clone()).unwrap_or_default();
+        let releases = list_releases(project_dir.clone()).unwrap_or_default();
+        let features = list_features(project_dir.clone()).unwrap_or_default();
         let specs = list_specs(project_dir.clone()).unwrap_or_default();
         let adrs = list_adrs(project_dir.clone()).unwrap_or_default();
 
         let mut out = format!("# Project: {}\n\n", name);
 
+        // Agent mode / workflow context
+        out.push_str("## Agent Mode\n");
+        if let Some(active_id) = config.active_mode.as_deref() {
+            if let Some(mode) = config.modes.iter().find(|m| m.id == active_id) {
+                out.push_str(&format!("- Active: {} ({})\n", mode.name, mode.id));
+            } else {
+                out.push_str(&format!(
+                    "- Active: {} (not found in mode registry)\n",
+                    active_id
+                ));
+            }
+        } else {
+            out.push_str("- Active: none\n");
+        }
+        if !config.modes.is_empty() {
+            out.push_str("- Available:\n");
+            for mode in &config.modes {
+                out.push_str(&format!("  - {} ({})\n", mode.name, mode.id));
+            }
+        }
+
         // Issue summary
-        out.push_str("## Open Issues\n");
+        out.push_str("\n## Open Issues\n");
         let open: Vec<_> = issues.iter().filter(|e| e.status != "done").collect();
         if open.is_empty() {
             out.push_str("No open issues.\n");
@@ -352,6 +432,29 @@ impl ShipServer {
                         out.push_str(&format!("- {} ({})\n", e.issue.metadata.title, e.file_name));
                     }
                 }
+            }
+        }
+
+        // Releases
+        out.push_str("\n## Releases\n");
+        if releases.is_empty() {
+            out.push_str("No releases.\n");
+        } else {
+            for r in &releases {
+                out.push_str(&format!(
+                    "- [{}] {} ({})\n",
+                    r.status, r.version, r.file_name
+                ));
+            }
+        }
+
+        // Features
+        out.push_str("\n## Features\n");
+        if features.is_empty() {
+            out.push_str("No features.\n");
+        } else {
+            for f in &features {
+                out.push_str(&format!("- [{}] {} ({})\n", f.status, f.title, f.file_name));
             }
         }
 
@@ -736,6 +839,171 @@ impl ShipServer {
         }
     }
 
+    // ─── Release Tools ────────────────────────────────────────────────────────
+
+    /// List all releases
+    #[tool(description = "List all releases in the active project")]
+    async fn list_releases(&self) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        match list_releases(project_dir) {
+            Ok(releases) => {
+                if releases.is_empty() {
+                    return "No releases found.".to_string();
+                }
+                let mut out = String::from("Releases:\n");
+                for r in releases {
+                    out.push_str(&format!(
+                        "- [{}] {} ({})\n",
+                        r.status, r.version, r.file_name
+                    ));
+                }
+                out
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Get the full content of a release
+    #[tool(description = "Get the full markdown content of a release by filename")]
+    async fn get_release(&self, Parameters(req): Parameters<GetReleaseRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let path = project_dir.join("releases").join(&req.file_name);
+        match get_release_raw(path) {
+            Ok(content) => content,
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Create a new release
+    #[tool(description = "Create a new release document in the active project")]
+    async fn create_release(&self, Parameters(req): Parameters<CreateReleaseRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let content = req.content.as_deref().unwrap_or("");
+        match create_release(project_dir.clone(), &req.version, content) {
+            Ok(file) => {
+                let fname = file
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                log_action_by(project_dir, "agent", "release create", fname).ok();
+                format!("Created release: {}", fname)
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Update a release's content
+    #[tool(description = "Update the content of an existing release")]
+    async fn update_release(&self, Parameters(req): Parameters<UpdateReleaseRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let path = project_dir.join("releases").join(&req.file_name);
+        match update_release(path, &req.content) {
+            Ok(_) => {
+                log_action_by(project_dir, "agent", "release update", &req.file_name).ok();
+                format!("Updated release: {}", req.file_name)
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    // ─── Feature Tools ────────────────────────────────────────────────────────
+
+    /// List all features
+    #[tool(description = "List all features in the active project")]
+    async fn list_features(&self) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        match list_features(project_dir) {
+            Ok(features) => {
+                if features.is_empty() {
+                    return "No features found.".to_string();
+                }
+                let mut out = String::from("Features:\n");
+                for f in features {
+                    let release = f.release.unwrap_or_else(|| "unassigned".to_string());
+                    out.push_str(&format!(
+                        "- [{}] {} ({}) release={}\n",
+                        f.status, f.title, f.file_name, release
+                    ));
+                }
+                out
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Get the full content of a feature
+    #[tool(description = "Get the full markdown content of a feature by filename")]
+    async fn get_feature(&self, Parameters(req): Parameters<GetFeatureRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let path = project_dir.join("features").join(&req.file_name);
+        match get_feature_raw(path) {
+            Ok(content) => content,
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Create a new feature
+    #[tool(description = "Create a new feature document in the active project")]
+    async fn create_feature(&self, Parameters(req): Parameters<CreateFeatureRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let content = req.content.as_deref().unwrap_or("");
+        match create_feature(
+            project_dir.clone(),
+            &req.title,
+            content,
+            req.release.as_deref(),
+            req.spec.as_deref(),
+        ) {
+            Ok(file) => {
+                let fname = file
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("unknown");
+                log_action_by(project_dir, "agent", "feature create", fname).ok();
+                format!("Created feature: {}", fname)
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Update a feature's content
+    #[tool(description = "Update the content of an existing feature")]
+    async fn update_feature(&self, Parameters(req): Parameters<UpdateFeatureRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let path = project_dir.join("features").join(&req.file_name);
+        match update_feature(path, &req.content) {
+            Ok(_) => {
+                log_action_by(project_dir, "agent", "feature update", &req.file_name).ok();
+                format!("Updated feature: {}", req.file_name)
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
     // ─── ADR / Log Tools ──────────────────────────────────────────────────────
 
     /// Get the full content of an ADR
@@ -1000,6 +1268,8 @@ impl ShipServer {
             Ok(git) => {
                 let cats = [
                     "issues",
+                    "releases",
+                    "features",
                     "adrs",
                     "specs",
                     "log.md",
@@ -1024,7 +1294,7 @@ impl ShipServer {
 
     /// Update git commit settings for the active project
     #[tool(
-        description = "Set whether a category (issues/adrs/log/config/plugins) is committed to git or kept local. Updates .ship/.gitignore automatically."
+        description = "Set whether a category (issues/releases/features/specs/adrs/log.md/config.toml/templates/plugins) is committed to git or kept local. Updates .ship/.gitignore automatically."
     )]
     async fn git_config_set(&self, Parameters(req): Parameters<GitIncludeRequest>) -> String {
         let project_dir = match self.get_effective_project_dir().await {
@@ -1033,6 +1303,8 @@ impl ShipServer {
         };
         let known = [
             "issues",
+            "releases",
+            "features",
             "adrs",
             "specs",
             "log.md",
@@ -1209,7 +1481,7 @@ impl ServerHandler for ShipServer {
                 ..Default::default()
             },
             instructions: Some(
-                "Tools for managing Ship project issues, ADRs, and time tracking. \
+                "Tools for managing Ship project issues, releases, features, specs, ADRs, and time tracking. \
                  Call open_project first if the project is not auto-detected."
                     .into(),
             ),

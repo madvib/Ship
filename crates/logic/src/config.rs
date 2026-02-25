@@ -22,7 +22,7 @@ fn default_color() -> String {
 }
 
 /// Controls which parts of .ship/ are committed to git.
-#[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct GitConfig {
     /// Paths/globs that should be gitignored (relative to .ship/).
     #[serde(default)]
@@ -30,6 +30,25 @@ pub struct GitConfig {
     /// Paths/globs that should be committed (relative to .ship/).
     #[serde(default)]
     pub commit: Vec<String>,
+}
+
+impl Default for GitConfig {
+    fn default() -> Self {
+        // Opinionated alpha default:
+        // - Keep delivery/context artifacts in git.
+        // - Keep volatile issue execution data local unless explicitly included.
+        Self {
+            ignore: Vec::new(),
+            commit: vec![
+                "releases".to_string(),
+                "features".to_string(),
+                "specs".to_string(),
+                "adrs".to_string(),
+                "config.toml".to_string(),
+                "templates".to_string(),
+            ],
+        }
+    }
 }
 
 /// Configuration for the AI pass-through CLI.
@@ -343,7 +362,10 @@ fn merge_modes(base: &[ModeConfig], overlay: &[ModeConfig]) -> Vec<ModeConfig> {
     merged
 }
 
-fn merge_mcp_servers(base: &[McpServerConfig], overlay: &[McpServerConfig]) -> Vec<McpServerConfig> {
+fn merge_mcp_servers(
+    base: &[McpServerConfig],
+    overlay: &[McpServerConfig],
+) -> Vec<McpServerConfig> {
     let mut merged = base.to_vec();
     for server in overlay {
         if let Some(existing) = merged.iter_mut().find(|s| s.id == server.id) {
@@ -513,6 +535,8 @@ pub fn is_category_committed(git: &GitConfig, category: &str) -> bool {
 pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
     let known = [
         "issues",
+        "releases",
+        "features",
         "adrs",
         "specs",
         "log.md",

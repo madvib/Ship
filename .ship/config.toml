@@ -25,7 +25,7 @@ color = "green"
 
 [git]
 ignore = []
-commit = []
+commit = ["releases", "features", "specs", "adrs", "config.toml", "templates"]
 
 [agent]
 skills = []

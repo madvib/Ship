@@ -335,7 +335,7 @@ async fn pick_and_open_project(
     Ok(info)
 }
 
-/// Auto-detect current project from the working directory (for dogfooding).
+/// Auto-detect current project from the working directory (for local e2e).
 #[tauri::command]
 #[specta::specta]
 fn detect_current_project(

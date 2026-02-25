@@ -2,7 +2,7 @@
 
 **Status:** Active  
 **Version:** 0.1  
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-25
 
 ---
 
@@ -66,6 +66,11 @@ Define the single source of truth for alpha behavior around:
 - Preserve user-owned config data where possible
 - Shipwright-managed entries are tracked and safely rewritten
 - Codex key is `mcp_servers` (underscore), never `mcp-servers`
+
+7. Workflow policy context
+- Mode remains an agent runtime concern, not a PM object
+- Active workflow policy/phase must be available in agent context
+- Automatic mode switching is deferred; alpha uses explicit mode changes
 
 ---
 

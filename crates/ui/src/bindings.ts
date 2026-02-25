@@ -76,7 +76,7 @@ async createProjectWithOptions(directory: string, name: string | null, descripti
 }
 },
 /**
- * Auto-detect current project from the working directory (for dogfooding).
+ * Auto-detect current project from the working directory (for local e2e).
  */
 async detectCurrentProject() : Promise<Result<ProjectInfo | null, string>> {
     try {
