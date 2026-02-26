@@ -23,6 +23,29 @@ assert_contains() {
   fi
 }
 
+assert_path_exists() {
+  if [[ ! -e "$1" ]]; then
+    echo "ASSERTION FAILED: expected path to exist: $1" >&2
+    exit 1
+  fi
+}
+
+assert_path_not_in_gitignore() {
+  local gitignore="$WORK_DIR/.ship/.gitignore"
+  if grep -qE "^$1$" "$gitignore"; then
+    echo "ASSERTION FAILED: expected '$1' NOT in .ship/.gitignore" >&2
+    exit 1
+  fi
+}
+
+assert_path_in_gitignore() {
+  local gitignore="$WORK_DIR/.ship/.gitignore"
+  if ! grep -qE "^$1$" "$gitignore"; then
+    echo "ASSERTION FAILED: expected '$1' in .ship/.gitignore" >&2
+    exit 1
+  fi
+}
+
 run_ship() {
   (cd "$WORK_DIR" && "$SHIP_BIN" "$@")
 }
@@ -35,30 +58,20 @@ export HOME="$HOME_DIR"
 echo "Initializing isolated test workspace at $WORK_DIR"
 out="$(run_ship init .)"
 assert_contains "$out" "Initialized and tracked Ship project"
-if [[ ! -d "$WORK_DIR/.ship/features" ]]; then
-  echo "ASSERTION FAILED: expected .ship/features directory" >&2
-  exit 1
-fi
-if [[ ! -d "$WORK_DIR/.ship/releases" ]]; then
-  echo "ASSERTION FAILED: expected .ship/releases directory" >&2
-  exit 1
-fi
-if [[ ! -f "$WORK_DIR/.ship/templates/FEATURE.md" ]]; then
-  echo "ASSERTION FAILED: expected .ship/templates/FEATURE.md template" >&2
-  exit 1
-fi
-if [[ ! -f "$WORK_DIR/.ship/templates/RELEASE.md" ]]; then
-  echo "ASSERTION FAILED: expected .ship/templates/RELEASE.md template" >&2
-  exit 1
-fi
-if [[ ! -f "$WORK_DIR/.ship/specs/vision.md" ]]; then
-  echo "ASSERTION FAILED: expected seeded .ship/specs/vision.md" >&2
-  exit 1
-fi
-if [[ ! -f "$WORK_DIR/.ship/events.ndjson" ]]; then
-  echo "ASSERTION FAILED: expected .ship/events.ndjson event stream file" >&2
-  exit 1
-fi
+
+# Namespace structure
+assert_path_exists "$WORK_DIR/.ship/workflow/features"
+assert_path_exists "$WORK_DIR/.ship/workflow/specs"
+assert_path_exists "$WORK_DIR/.ship/workflow/issues/backlog"
+assert_path_exists "$WORK_DIR/.ship/project/releases"
+assert_path_exists "$WORK_DIR/.ship/project/adrs"
+assert_path_exists "$WORK_DIR/.ship/project/notes"
+assert_path_exists "$WORK_DIR/.ship/project/vision.md"
+assert_path_exists "$WORK_DIR/.ship/agents/modes"
+assert_path_exists "$WORK_DIR/.ship/agents/skills"
+assert_path_exists "$WORK_DIR/.ship/templates/FEATURE.md"
+assert_path_exists "$WORK_DIR/.ship/templates/RELEASE.md"
+assert_path_exists "$WORK_DIR/.ship/events.ndjson"
 
 echo "Validating workflow/status customization..."
 run_ship config status add qa >/dev/null
@@ -75,9 +88,9 @@ echo "Validating spec workflow baseline..."
 run_ship spec create "Agent Config Spec" >/dev/null
 spec_list_out="$(run_ship spec list)"
 assert_contains "$spec_list_out" "[draft] Agent Config Spec"
-spec_file="$(find "$WORK_DIR/.ship/specs" -maxdepth 1 -name 'agent-config-spec*.md' -print | head -n 1)"
+spec_file="$(find "$WORK_DIR/.ship/workflow/specs" -maxdepth 1 -name 'agent-config-spec*.md' -print | head -n 1)"
 if [[ -z "${spec_file:-}" ]]; then
-  echo "ASSERTION FAILED: expected generated spec file in .ship/specs" >&2
+  echo "ASSERTION FAILED: expected generated spec file in .ship/workflow/specs" >&2
   exit 1
 fi
 spec_get_out="$(run_ship spec get "$(basename "$spec_file")")"
@@ -87,9 +100,9 @@ echo "Validating release workflow..."
 run_ship release create "v0.1.0-alpha" >/dev/null
 release_list_out="$(run_ship release list)"
 assert_contains "$release_list_out" "[planned] v0.1.0-alpha"
-release_file="$(find "$WORK_DIR/.ship/releases" -maxdepth 1 -name 'v0-1-0-alpha*.md' -print | head -n 1)"
+release_file="$(find "$WORK_DIR/.ship/project/releases" -maxdepth 1 -name 'v0-1-0-alpha*.md' -print | head -n 1)"
 if [[ -z "${release_file:-}" ]]; then
-  echo "ASSERTION FAILED: expected generated release file in .ship/releases" >&2
+  echo "ASSERTION FAILED: expected generated release file in .ship/project/releases" >&2
   exit 1
 fi
 release_get_out="$(run_ship release get "$(basename "$release_file")")"
@@ -99,9 +112,9 @@ echo "Validating feature workflow..."
 run_ship feature create "Agent Config UI" --release "$(basename "$release_file")" --spec "$(basename "$spec_file")" >/dev/null
 feature_list_out="$(run_ship feature list)"
 assert_contains "$feature_list_out" "[active] Agent Config UI"
-feature_file="$(find "$WORK_DIR/.ship/features" -maxdepth 1 -name 'agent-config-ui*.md' -print | head -n 1)"
+feature_file="$(find "$WORK_DIR/.ship/workflow/features" -maxdepth 1 -name 'agent-config-ui*.md' -print | head -n 1)"
 if [[ -z "${feature_file:-}" ]]; then
-  echo "ASSERTION FAILED: expected generated feature file in .ship/features" >&2
+  echo "ASSERTION FAILED: expected generated feature file in .ship/workflow/features" >&2
   exit 1
 fi
 feature_get_out="$(run_ship feature get "$(basename "$feature_file")")"
@@ -113,33 +126,16 @@ echo "Validating MCP workflow parity..."
 HOME="$ORIG_HOME" cargo test --manifest-path "$ROOT_DIR/Cargo.toml" -p mcp mcp_release_feature_flow_emits_events >/dev/null
 
 echo "Validating git scope controls..."
-# Default policy: issues local; adrs/features committed.
-if ! grep -Eq '^issues$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected issues to be gitignored by default" >&2
-  exit 1
-fi
-if ! grep -Eq '^events.ndjson$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected events.ndjson to be gitignored by default" >&2
-  exit 1
-fi
-if grep -Eq '^adrs$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected adrs to be committed by default" >&2
-  exit 1
-fi
-if grep -Eq '^features$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected features to be committed by default" >&2
-  exit 1
-fi
-if grep -Eq '^releases$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected releases to be committed by default" >&2
-  exit 1
-fi
+# Default: issues local; adrs/features/specs/releases committed
+assert_path_in_gitignore "workflow/issues"
+assert_path_in_gitignore "events.ndjson"
+assert_path_in_gitignore "ship.db"
+assert_path_not_in_gitignore "project/adrs"
+assert_path_not_in_gitignore "workflow/features"
+assert_path_not_in_gitignore "project/releases"
 
 run_ship git exclude adrs >/dev/null
-if ! grep -Eq '^adrs$' "$WORK_DIR/.ship/.gitignore"; then
-  echo "ASSERTION FAILED: expected adrs to be gitignored in .ship/.gitignore" >&2
-  exit 1
-fi
+assert_path_in_gitignore "project/adrs"
 
 echo "Validating issue CRUD baseline..."
 run_ship issue create "Workflow issue" "Validate end-to-end flow" >/dev/null
@@ -151,7 +147,7 @@ assert_contains "$events_out" "Release.Create"
 assert_contains "$events_out" "Feature.Create"
 
 echo "Validating filesystem ingest flow..."
-cat > "$WORK_DIR/.ship/specs/manual-sync.md" <<'EOF'
+cat > "$WORK_DIR/.ship/workflow/specs/manual-sync.md" <<'EOF'
 +++
 title = "Manual Sync"
 status = "draft"

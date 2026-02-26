@@ -640,14 +640,15 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
-        // Default config: issues/log/events stay local; features/specs/adrs are committed.
-        assert!(gitignore.contains("issues"));
+        // Default config: issues/log/events stay local; features/specs/adrs/releases committed.
+        assert!(gitignore.contains("workflow/issues"));
         assert!(gitignore.contains("log.md"));
         assert!(gitignore.contains("events.ndjson"));
-        assert!(!gitignore.contains("releases"));
-        assert!(!gitignore.contains("features"));
-        assert!(!gitignore.contains("specs"));
-        assert!(!gitignore.contains("adrs"));
+        assert!(gitignore.contains("ship.db"));
+        assert!(!gitignore.contains("project/releases"));
+        assert!(!gitignore.contains("workflow/features"));
+        assert!(!gitignore.contains("workflow/specs"));
+        assert!(!gitignore.contains("project/adrs"));
         Ok(())
     }
 

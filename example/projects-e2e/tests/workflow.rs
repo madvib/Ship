@@ -1,0 +1,128 @@
+mod helpers;
+use helpers::TestProject;
+use runtime::project::*;
+
+/// After init, all namespace directories exist in the right places.
+#[test]
+fn init_creates_namespace_structure() {
+    let p = TestProject::new().unwrap();
+
+    // workflow/
+    p.assert_ship_file("workflow/issues/backlog");
+    p.assert_ship_file("workflow/issues/in-progress");
+    p.assert_ship_file("workflow/issues/blocked");
+    p.assert_ship_file("workflow/issues/done");
+    p.assert_ship_file("workflow/specs");
+    p.assert_ship_file("workflow/features");
+
+    // project/
+    p.assert_ship_file("project/releases");
+    p.assert_ship_file("project/adrs");
+    p.assert_ship_file("project/notes");
+    p.assert_ship_file("project/vision.md");
+
+    // agents/
+    p.assert_ship_file("agents/modes");
+    p.assert_ship_file("agents/skills");
+    p.assert_ship_file("agents/prompts");
+
+    // shared
+    p.assert_ship_file("log.md");
+    p.assert_ship_file("events.ndjson");
+    p.assert_ship_file("config.toml");
+}
+
+/// Vision document is seeded in project/ not workflow/specs/.
+#[test]
+fn vision_doc_lives_in_project_namespace() {
+    let p = TestProject::new().unwrap();
+    p.assert_ship_file("project/vision.md");
+    p.assert_no_ship_file("specs/vision.md"); // old flat path must not exist
+}
+
+/// Core loop: release → feature → spec → issue, all resolve to correct paths.
+#[test]
+fn core_loop_paths_resolve_correctly() {
+    let p = TestProject::new().unwrap();
+
+    let release = runtime::create_release(p.ship_dir.clone(), "v0.1.0-alpha", "").unwrap();
+    assert!(release.starts_with(releases_dir(&p.ship_dir)));
+
+    let feature = runtime::create_feature(
+        p.ship_dir.clone(),
+        "Auth Redesign",
+        "",
+        Some(release.file_name().unwrap().to_str().unwrap()),
+        None,
+    )
+    .unwrap();
+    assert!(feature.starts_with(features_dir(&p.ship_dir)));
+
+    let spec = runtime::create_spec(p.ship_dir.clone(), "Auth Spec", "").unwrap();
+    assert!(spec.starts_with(specs_dir(&p.ship_dir)));
+
+    let issue = runtime::create_issue(p.ship_dir.clone(), "Implement login", "", "backlog").unwrap();
+    assert!(issue.starts_with(issues_dir(&p.ship_dir).join("backlog")));
+}
+
+/// Issues move between statuses (folder rename), path reflects new status.
+#[test]
+fn issue_move_updates_path() {
+    let p = TestProject::new().unwrap();
+
+    let path = runtime::create_issue(p.ship_dir.clone(), "My Issue", "", "backlog").unwrap();
+    assert!(path.to_string_lossy().contains("backlog"));
+
+    let new_path = runtime::move_issue(p.ship_dir.clone(), path, "backlog", "in-progress").unwrap();
+    assert!(new_path.to_string_lossy().contains("in-progress"));
+    assert!(new_path.exists());
+}
+
+/// ADRs land in project/adrs/.
+#[test]
+fn adrs_land_in_project_namespace() {
+    let p = TestProject::new().unwrap();
+
+    let adr = runtime::create_adr(p.ship_dir.clone(), "Use TOML", "Simpler for AI agents", "accepted").unwrap();
+    assert!(adr.starts_with(adrs_dir(&p.ship_dir)));
+    p.assert_ship_file_contains(
+        adr.strip_prefix(&p.ship_dir).unwrap().to_str().unwrap(),
+        "Use TOML",
+    );
+}
+
+/// .ship/.gitignore uses namespace paths, not flat names.
+#[test]
+fn gitignore_uses_namespace_paths() {
+    let p = TestProject::new().unwrap();
+    let gitignore = std::fs::read_to_string(p.ship_dir.join(".gitignore")).unwrap();
+
+    // Issues local by default
+    assert!(gitignore.contains("workflow/issues"), "issues should be gitignored");
+    assert!(gitignore.contains("events.ndjson"));
+    assert!(gitignore.contains("ship.db"));
+
+    // These are committed by default — must NOT appear in gitignore
+    assert!(!gitignore.contains("project/adrs"));
+    assert!(!gitignore.contains("workflow/features"));
+    assert!(!gitignore.contains("project/releases"));
+    assert!(!gitignore.contains("workflow/specs"));
+}
+
+/// Events track creates in both workflow/ and project/ namespaces.
+#[test]
+fn events_track_both_namespaces() {
+    use runtime::{create_feature, create_release, latest_event_seq, list_events_since};
+
+    let p = TestProject::new().unwrap();
+    let seq0 = latest_event_seq(&p.ship_dir).unwrap();
+
+    create_release(p.ship_dir.clone(), "v0.1.0", "").unwrap();
+    create_feature(p.ship_dir.clone(), "Feature A", "", None, None).unwrap();
+
+    let events = list_events_since(&p.ship_dir, seq0, None).unwrap();
+    assert!(events.len() >= 2);
+    let entities: Vec<_> = events.iter().map(|e| format!("{:?}", e.entity)).collect();
+    assert!(entities.iter().any(|e| e.contains("Release")));
+    assert!(entities.iter().any(|e| e.contains("Feature")));
+}

@@ -596,32 +596,36 @@ pub fn is_category_committed(git: &GitConfig, category: &str) -> bool {
 }
 
 /// Write `.ship/.gitignore`. Everything not in `git.commit` is ignored by default.
+/// Keys use the new namespace paths (e.g. "workflow/issues", "project/adrs").
 pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
-    let known = [
-        "issues",
-        "releases",
-        "features",
-        "adrs",
-        "specs",
-        "log.md",
-        "events.ndjson",
-        "config.toml",
-        "templates",
-        "plugins",
+    // (key, namespace path) — key is what appears in git.commit config
+    let known: &[(&str, &str)] = &[
+        ("issues",       "workflow/issues"),
+        ("specs",        "workflow/specs"),
+        ("features",     "workflow/features"),
+        ("releases",     "project/releases"),
+        ("adrs",         "project/adrs"),
+        ("log.md",       "log.md"),
+        ("events.ndjson","events.ndjson"),
+        ("config.toml",  "config.toml"),
+        ("templates",    "templates"),
+        ("plugins",      "plugins"),
     ];
     let mut lines = vec![
         "# Managed by Ship — edit via `ship git include/exclude`".to_string(),
         String::new(),
     ];
-    for item in known {
-        if !git.commit.contains(&item.to_string()) {
-            lines.push(item.to_string());
+    for (key, path) in known {
+        if !git.commit.contains(&key.to_string()) {
+            lines.push(path.to_string());
         }
     }
-    // Always ignore internal dirs that are never committed
+    // Always ignore SQLite runtime files
     lines.push(String::new());
-    lines.push("# Internal".to_string());
-    lines.push("workflow/".to_string());
+    lines.push("# Runtime — never commit".to_string());
+    lines.push("ship.db".to_string());
+    lines.push("ship.db-shm".to_string());
+    lines.push("ship.db-wal".to_string());
     let content = lines.join("\n") + "\n";
     write_atomic(&ship_dir.join(".gitignore"), content)?;
     Ok(())

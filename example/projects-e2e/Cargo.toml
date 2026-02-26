@@ -1,0 +1,19 @@
+[package]
+name = "e2e"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dev-dependencies]
+runtime = { path = "../../crates/runtime" }
+anyhow = "1.0"
+tempfile = "3.3"
+serde_json = "1.0"
+
+[[test]]
+name = "workflow"
+path = "tests/workflow.rs"
+
+[[test]]
+name = "agent_config"
+path = "tests/agent_config.rs"
