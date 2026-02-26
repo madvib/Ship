@@ -1,4 +1,5 @@
 use crate::fs_util::write_atomic;
+use crate::{EventAction, EventEntity, append_event};
 use crate::{SHIP_DIR_NAME, get_global_dir};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -460,6 +461,44 @@ pub fn get_project_statuses(project_dir: Option<PathBuf>) -> Result<Vec<String>>
     Ok(config.statuses.iter().map(|s| s.id.clone()).collect())
 }
 
+fn emit_config_event(
+    project_dir: &Option<PathBuf>,
+    action: EventAction,
+    subject: &str,
+    details: Option<String>,
+) -> Result<()> {
+    if let Some(dir) = project_dir {
+        append_event(
+            dir,
+            "logic",
+            EventEntity::Config,
+            action,
+            subject.to_string(),
+            details,
+        )?;
+    }
+    Ok(())
+}
+
+fn emit_mode_event(
+    project_dir: &Option<PathBuf>,
+    action: EventAction,
+    subject: &str,
+    details: Option<String>,
+) -> Result<()> {
+    if let Some(dir) = project_dir {
+        append_event(
+            dir,
+            "logic",
+            EventEntity::Mode,
+            action,
+            subject.to_string(),
+            details,
+        )?;
+    }
+    Ok(())
+}
+
 pub fn add_status(project_dir: Option<PathBuf>, status: &str) -> Result<()> {
     let sanitized = status.to_lowercase().replace(' ', "-");
     let mut config = get_config(project_dir.clone())?;
@@ -469,7 +508,13 @@ pub fn add_status(project_dir: Option<PathBuf>, status: &str) -> Result<()> {
             name: id_to_name(&sanitized),
             color: default_color_for(&sanitized),
         });
-        save_config(&config, project_dir)?;
+        save_config(&config, project_dir.clone())?;
+        emit_config_event(
+            &project_dir,
+            EventAction::Add,
+            "status",
+            Some(format!("id={}", sanitized)),
+        )?;
     }
     Ok(())
 }
@@ -493,7 +538,13 @@ pub fn remove_status(project_dir: Option<PathBuf>, status: &str) -> Result<()> {
     }
     let mut config = get_config(project_dir.clone())?;
     config.statuses.retain(|s| s.id != status);
-    save_config(&config, project_dir)?;
+    save_config(&config, project_dir.clone())?;
+    emit_config_event(
+        &project_dir,
+        EventAction::Remove,
+        "status",
+        Some(format!("id={}", status)),
+    )?;
     Ok(())
 }
 
@@ -524,7 +575,20 @@ pub fn set_category_committed(project_dir: &Path, category: &str, commit: bool) 
             git.ignore.push(category.to_string());
         }
     }
-    set_git_config(project_dir, git)
+    set_git_config(project_dir, git)?;
+    append_event(
+        project_dir,
+        "logic",
+        EventEntity::Config,
+        if commit {
+            EventAction::Set
+        } else {
+            EventAction::Clear
+        },
+        "git_category",
+        Some(format!("category={}", category)),
+    )?;
+    Ok(())
 }
 
 pub fn is_category_committed(git: &GitConfig, category: &str) -> bool {
@@ -540,6 +604,7 @@ pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
         "adrs",
         "specs",
         "log.md",
+        "events.ndjson",
         "config.toml",
         "templates",
         "plugins",
@@ -608,8 +673,16 @@ pub fn add_mode(project_dir: Option<PathBuf>, mode: ModeConfig) -> Result<()> {
     if config.modes.iter().any(|m| m.id == mode.id) {
         return Err(anyhow!("Mode '{}' already exists", mode.id));
     }
+    let mode_id = mode.id.clone();
     config.modes.push(mode);
-    save_config(&config, project_dir)
+    save_config(&config, project_dir.clone())?;
+    emit_mode_event(
+        &project_dir,
+        EventAction::Add,
+        "mode",
+        Some(format!("id={}", mode_id)),
+    )?;
+    Ok(())
 }
 
 pub fn remove_mode(project_dir: Option<PathBuf>, id: &str) -> Result<()> {
@@ -618,7 +691,14 @@ pub fn remove_mode(project_dir: Option<PathBuf>, id: &str) -> Result<()> {
     if config.active_mode.as_deref() == Some(id) {
         config.active_mode = None;
     }
-    save_config(&config, project_dir)
+    save_config(&config, project_dir.clone())?;
+    emit_mode_event(
+        &project_dir,
+        EventAction::Remove,
+        "mode",
+        Some(format!("id={}", id)),
+    )?;
+    Ok(())
 }
 
 pub fn set_active_mode(project_dir: Option<PathBuf>, id: Option<&str>) -> Result<()> {
@@ -641,6 +721,16 @@ pub fn set_active_mode(project_dir: Option<PathBuf>, id: Option<&str>) -> Result
     if let Some(ref dir) = project_dir {
         let _ = crate::agent_export::sync_active_mode(dir);
     }
+    emit_mode_event(
+        &project_dir,
+        if id.is_some() {
+            EventAction::Set
+        } else {
+            EventAction::Clear
+        },
+        "active_mode",
+        Some(format!("id={}", id.unwrap_or("none"))),
+    )?;
     Ok(())
 }
 

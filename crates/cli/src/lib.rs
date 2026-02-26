@@ -4,10 +4,10 @@ use logic::{
     add_mode, add_status, append_note, backfill_issue_ids, create_adr, create_feature,
     create_issue, create_release, create_spec, get_active_mode, get_config, get_feature_raw,
     get_git_config, get_issue, get_project_dir, get_project_statuses, get_release_raw,
-    get_spec_raw, init_demo_project, init_project, is_category_committed, list_features,
-    list_issues, list_releases, list_specs, log_action, migrate_json_config_file,
-    migrate_yaml_issues, move_issue, remove_mode, remove_status, set_active_mode,
-    set_category_committed, update_feature, update_release,
+    get_spec_raw, ingest_external_events, init_demo_project, init_project, is_category_committed,
+    list_events_since, list_features, list_issues, list_releases, list_specs, log_action,
+    migrate_json_config_file, migrate_yaml_issues, move_issue, remove_mode, remove_status,
+    set_active_mode, set_category_committed, update_feature, update_release,
 };
 use std::env;
 use std::path::PathBuf;
@@ -51,6 +51,11 @@ pub enum Commands {
     Feature {
         #[command(subcommand)]
         action: FeatureCommands,
+    },
+    /// Inspect the project event stream
+    Event {
+        #[command(subcommand)]
+        action: EventCommands,
     },
     /// Manage tracked projects
     Projects {
@@ -100,12 +105,12 @@ pub enum GitCommands {
     Status,
     /// Include a category in git commits
     Include {
-        /// One of: issues, releases, features, specs, adrs, log.md, config.toml, templates, plugins
+        /// One of: issues, releases, features, specs, adrs, log.md, events.ndjson, config.toml, templates, plugins
         category: String,
     },
     /// Exclude a category from git commits (adds to .ship/.gitignore)
     Exclude {
-        /// One of: issues, releases, features, specs, adrs, log.md, config.toml, templates, plugins
+        /// One of: issues, releases, features, specs, adrs, log.md, events.ndjson, config.toml, templates, plugins
         category: String,
     },
 }
@@ -307,6 +312,21 @@ pub enum FeatureCommands {
         #[arg(short, long)]
         content: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EventCommands {
+    /// List events from the append-only event stream
+    List {
+        /// Only include events with seq greater than this value
+        #[arg(long, default_value_t = 0)]
+        since: u64,
+        /// Maximum number of events to show
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Scan tracked files and emit events for external filesystem changes
+    Ingest,
 }
 
 #[derive(Subcommand, Debug)]
@@ -552,6 +572,60 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 }
             }
         }
+        Some(Commands::Event { action }) => {
+            let project_dir = get_project_dir(None)?;
+            match action {
+                EventCommands::List { since, limit } => {
+                    let events = list_events_since(&project_dir, since, Some(limit))?;
+                    if events.is_empty() {
+                        println!("No events found.");
+                    } else {
+                        for e in events {
+                            let details = e
+                                .details
+                                .as_ref()
+                                .map(|d| format!(" — {}", d))
+                                .unwrap_or_default();
+                            println!(
+                                "#{:04} {} [{}] {:?}.{:?} {}{}",
+                                e.seq,
+                                e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                                e.actor,
+                                e.entity,
+                                e.action,
+                                e.subject,
+                                details
+                            );
+                        }
+                    }
+                }
+                EventCommands::Ingest => {
+                    let events = ingest_external_events(&project_dir)?;
+                    if events.is_empty() {
+                        println!("No external filesystem changes detected.");
+                    } else {
+                        println!("Ingested {} filesystem event(s).", events.len());
+                        for e in events {
+                            let details = e
+                                .details
+                                .as_ref()
+                                .map(|d| format!(" — {}", d))
+                                .unwrap_or_default();
+                            println!(
+                                "#{:04} {} [{}] {:?}.{:?} {}{}",
+                                e.seq,
+                                e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                                e.actor,
+                                e.entity,
+                                e.action,
+                                e.subject,
+                                details
+                            );
+                        }
+                    }
+                }
+            }
+        }
         Some(Commands::Projects { action }) => match action {
             ProjectCommands::List => {
                 let projects = logic::list_registered_projects()?;
@@ -590,6 +664,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         "adrs",
                         "specs",
                         "log.md",
+                        "events.ndjson",
                         "config.toml",
                         "templates",
                         "plugins",

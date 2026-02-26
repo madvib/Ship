@@ -30,6 +30,7 @@ From this directory:
 cargo run --manifest-path ../../Cargo.toml -p cli -- issue list
 cargo run --manifest-path ../../Cargo.toml -p cli -- config status list
 cargo run --manifest-path ../../Cargo.toml -p cli -- mode list
+cargo run --manifest-path ../../Cargo.toml -p cli -- event list --since 0 --limit 20
 cargo run --manifest-path ../../Cargo.toml -p cli -- mcp
 ```
 
@@ -54,3 +55,8 @@ Run the end-to-end check suite from repo root:
 ```bash
 ./example/projects-e2e/e2e/project-features.sh
 ```
+
+This suite validates:
+- CLI release/feature/spec/issue workflows
+- MCP release+feature tool parity (via `cargo test -p mcp`)
+- Filesystem ingest into the event stream

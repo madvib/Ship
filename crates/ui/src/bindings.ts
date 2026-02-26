@@ -214,6 +214,94 @@ async deleteSpecCmd(fileName: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async listReleasesCmd() : Promise<Result<ReleaseInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_releases_cmd") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getReleaseCmd(fileName: string) : Promise<Result<ReleaseDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_release_cmd", { fileName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createReleaseCmd(version: string, content: string) : Promise<Result<ReleaseDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_release_cmd", { version, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateReleaseCmd(fileName: string, content: string) : Promise<Result<ReleaseDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_release_cmd", { fileName, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listFeaturesCmd() : Promise<Result<FeatureInfo[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_features_cmd") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getFeatureCmd(fileName: string) : Promise<Result<FeatureDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_feature_cmd", { fileName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createFeatureCmd(title: string, content: string, release: string | null, spec: string | null) : Promise<Result<FeatureDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_feature_cmd", { title, content, release, spec }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateFeatureCmd(fileName: string, content: string) : Promise<Result<FeatureDocument, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_feature_cmd", { fileName, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getTemplateCmd(kind: string) : Promise<Result<string, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_template_cmd", { kind }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listEventsCmd(since: number | null, limit: number | null) : Promise<Result<EventRecord[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_events_cmd", { since, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async ingestEventsCmd() : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("ingest_events_cmd") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async getLog() : Promise<Result<LogEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_log") };
@@ -401,6 +489,11 @@ model: string | null;
  * Override the binary path if it's not on PATH. Defaults to the provider name.
  */
 cli_path: string | null }
+export type EventAction = "init" | "create" | "update" | "delete" | "move" | "note" | "link" | "add" | "remove" | "set" | "clear" | "scan" | "promote" | "start" | "stop" | "log"
+export type EventEntity = "project" | "issue" | "spec" | "adr" | "feature" | "release" | "config" | "mode" | "prompt" | "plugin" | "ghost" | "time" | "agent" | "mcp"
+export type EventRecord = { seq: number; timestamp: string; actor: string; entity: EventEntity; action: EventAction; subject: string; details?: string | null }
+export type FeatureDocument = { file_name: string; title: string; status: string; release: string | null; path: string; updated: string; content: string }
+export type FeatureInfo = { file_name: string; title: string; status: string; release: string | null; path: string; updated: string }
 /**
  * Controls which parts of .ship/ are committed to git.
  */
@@ -502,6 +595,8 @@ export type ProjectDiscovery = { name: string;
  */
 path: string; issue_count?: number }
 export type ProjectInfo = { name: string; path: string; issue_count: number }
+export type ReleaseDocument = { file_name: string; version: string; status: string; path: string; updated: string; content: string }
+export type ReleaseInfo = { file_name: string; version: string; status: string; path: string; updated: string }
 export type SpecDocument = { file_name: string; title: string; path: string; content: string }
 export type SpecInfo = { file_name: string; title: string; path: string }
 export type StatusConfig = { id: string; name: string; color?: string }

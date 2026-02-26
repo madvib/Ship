@@ -55,6 +55,10 @@ if [[ ! -f "$WORK_DIR/.ship/specs/vision.md" ]]; then
   echo "ASSERTION FAILED: expected seeded .ship/specs/vision.md" >&2
   exit 1
 fi
+if [[ ! -f "$WORK_DIR/.ship/events.ndjson" ]]; then
+  echo "ASSERTION FAILED: expected .ship/events.ndjson event stream file" >&2
+  exit 1
+fi
 
 echo "Validating workflow/status customization..."
 run_ship config status add qa >/dev/null
@@ -105,10 +109,17 @@ assert_contains "$feature_get_out" "title = \"Agent Config UI\""
 assert_contains "$feature_get_out" "release = \"$(basename "$release_file")\""
 assert_contains "$feature_get_out" "spec = \"$(basename "$spec_file")\""
 
+echo "Validating MCP workflow parity..."
+HOME="$ORIG_HOME" cargo test --manifest-path "$ROOT_DIR/Cargo.toml" -p mcp mcp_release_feature_flow_emits_events >/dev/null
+
 echo "Validating git scope controls..."
 # Default policy: issues local; adrs/features committed.
 if ! grep -Eq '^issues$' "$WORK_DIR/.ship/.gitignore"; then
   echo "ASSERTION FAILED: expected issues to be gitignored by default" >&2
+  exit 1
+fi
+if ! grep -Eq '^events.ndjson$' "$WORK_DIR/.ship/.gitignore"; then
+  echo "ASSERTION FAILED: expected events.ndjson to be gitignored by default" >&2
   exit 1
 fi
 if grep -Eq '^adrs$' "$WORK_DIR/.ship/.gitignore"; then
@@ -134,6 +145,31 @@ echo "Validating issue CRUD baseline..."
 run_ship issue create "Workflow issue" "Validate end-to-end flow" >/dev/null
 issues_out="$(run_ship issue list)"
 assert_contains "$issues_out" "[backlog] workflow-issue.md"
+events_out="$(run_ship event list --since 0 --limit 100)"
+assert_contains "$events_out" "Issue.Create"
+assert_contains "$events_out" "Release.Create"
+assert_contains "$events_out" "Feature.Create"
+
+echo "Validating filesystem ingest flow..."
+cat > "$WORK_DIR/.ship/specs/manual-sync.md" <<'EOF'
++++
+title = "Manual Sync"
+status = "draft"
+created = "2026-02-25T00:00:00Z"
+updated = "2026-02-25T00:00:00Z"
+author = ""
+tags = []
++++
+
+## Overview
+
+Manual edit for ingest verification.
+EOF
+ingest_out="$(run_ship event ingest)"
+assert_contains "$ingest_out" "Ingested"
+events_after_ingest="$(run_ship event list --since 0 --limit 200)"
+assert_contains "$events_after_ingest" "[filesystem]"
+assert_contains "$events_after_ingest" "Spec.Create manual-sync.md"
 
 echo "PASS: project feature e2e checks completed"
 echo "Workspace: $WORK_DIR"

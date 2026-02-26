@@ -24,8 +24,15 @@ name = "Done"
 color = "green"
 
 [git]
-ignore = []
-commit = ["releases", "features", "specs", "adrs", "config.toml", "templates"]
+ignore = ["events.ndjson"]
+commit = [
+    "releases",
+    "features",
+    "specs",
+    "adrs",
+    "config.toml",
+    "templates",
+]
 
 [agent]
 skills = []

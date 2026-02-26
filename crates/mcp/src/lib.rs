@@ -3,10 +3,11 @@ use ghost_issues;
 use logic::{
     add_status, append_note, create_adr, create_feature, create_issue, create_release, create_spec,
     delete_issue, get_adr, get_config, get_feature_raw, get_git_config, get_issue, get_project_dir,
-    get_project_name, get_project_statuses, get_release_raw, get_spec_raw, is_category_committed,
-    list_adrs, list_features, list_issues, list_issues_full, list_registered_projects,
-    list_releases, list_specs, log_action, log_action_by, move_issue, read_log, register_project,
-    remove_status, set_category_committed, update_feature, update_release, update_spec,
+    get_project_name, get_project_statuses, get_release_raw, get_spec_raw, ingest_external_events,
+    is_category_committed, list_adrs, list_events_since, list_features, list_issues,
+    list_issues_full, list_registered_projects, list_releases, list_specs, log_action,
+    log_action_by, move_issue, read_log, register_project, remove_status, set_category_committed,
+    update_feature, update_release, update_spec,
 };
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::transport::stdio;
@@ -141,7 +142,7 @@ pub struct BrainstormRequest {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GitIncludeRequest {
-    /// Category to change: issues, releases, features, specs, adrs, log.md, config.toml, templates, plugins
+    /// Category to change: issues, releases, features, specs, adrs, log.md, events.ndjson, config.toml, templates, plugins
     pub category: String,
     /// true = commit to git, false = local only (gitignored)
     pub commit: bool,
@@ -263,6 +264,14 @@ pub struct GetAdrRequest {
     pub file_name: String,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct ListEventsRequest {
+    /// Only return events where seq > since
+    pub since: Option<u64>,
+    /// Maximum number of events to return (default 100)
+    pub limit: Option<usize>,
+}
+
 // ─── Server ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -377,7 +386,7 @@ impl ShipServer {
 
     /// Get full project context for an agent starting a new session
     #[tool(
-        description = "Get full project context: name, statuses, open issues, specs, ADRs, and recent log. Call this at the start of a session to understand the project without being told what exists."
+        description = "Get full project context: name, statuses, open issues, releases, features, specs, ADRs, recent log, and recent events. Call this at the start of a session to understand the project without being told what exists."
     )]
     async fn get_project_info(&self) -> String {
         let project_dir = match self.get_effective_project_dir().await {
@@ -496,6 +505,29 @@ impl ShipServer {
                 out.push_str("\n## Recent Activity\n");
                 for line in recent {
                     out.push_str(&format!("{}\n", line));
+                }
+            }
+        }
+
+        if let Ok(events) = list_events_since(&project_dir, 0, Some(10)) {
+            if !events.is_empty() {
+                out.push_str("\n## Recent Events\n");
+                for e in events {
+                    let details = e
+                        .details
+                        .as_ref()
+                        .map(|d| format!(" — {}", d))
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "- #{} {} [{}] {:?}.{:?} {}{}\n",
+                        e.seq,
+                        e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        e.actor,
+                        e.entity,
+                        e.action,
+                        e.subject,
+                        details
+                    ));
                 }
             }
         }
@@ -1042,6 +1074,67 @@ impl ShipServer {
         }
     }
 
+    /// List events from the append-only event stream
+    #[tool(
+        description = "List events from the append-only project event stream. Supports cursor-style reads via the since sequence."
+    )]
+    async fn list_events(&self, Parameters(req): Parameters<ListEventsRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        let since = req.since.unwrap_or(0);
+        let limit = req.limit.unwrap_or(100);
+        match list_events_since(&project_dir, since, Some(limit)) {
+            Ok(events) => {
+                if events.is_empty() {
+                    return "No events found.".to_string();
+                }
+                let mut out = String::from("Events:\n");
+                for e in events {
+                    let details = e
+                        .details
+                        .as_ref()
+                        .map(|d| format!(" — {}", d))
+                        .unwrap_or_default();
+                    out.push_str(&format!(
+                        "- #{} {} [{}] {:?}.{:?} {}{}\n",
+                        e.seq,
+                        e.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                        e.actor,
+                        e.entity,
+                        e.action,
+                        e.subject,
+                        details
+                    ));
+                }
+                out
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Ingest external filesystem changes into the event stream
+    #[tool(
+        description = "Scan tracked project files and emit events for changes made outside Ship commands (direct filesystem edits)."
+    )]
+    async fn ingest_events(&self) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        match ingest_external_events(&project_dir) {
+            Ok(events) => {
+                if events.is_empty() {
+                    "No external filesystem changes detected.".to_string()
+                } else {
+                    format!("Ingested {} filesystem event(s).", events.len())
+                }
+            }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
     // ─── Ghost Issues Tools ───────────────────────────────────────────────────
 
     /// Scan the codebase for TODO/FIXME/HACK/BUG comments
@@ -1273,6 +1366,7 @@ impl ShipServer {
                     "adrs",
                     "specs",
                     "log.md",
+                    "events.ndjson",
                     "config.toml",
                     "templates",
                     "plugins",
@@ -1294,7 +1388,7 @@ impl ShipServer {
 
     /// Update git commit settings for the active project
     #[tool(
-        description = "Set whether a category (issues/releases/features/specs/adrs/log.md/config.toml/templates/plugins) is committed to git or kept local. Updates .ship/.gitignore automatically."
+        description = "Set whether a category (issues/releases/features/specs/adrs/log.md/events.ndjson/config.toml/templates/plugins) is committed to git or kept local. Updates .ship/.gitignore automatically."
     )]
     async fn git_config_set(&self, Parameters(req): Parameters<GitIncludeRequest>) -> String {
         let project_dir = match self.get_effective_project_dir().await {
@@ -1308,6 +1402,7 @@ impl ShipServer {
             "adrs",
             "specs",
             "log.md",
+            "events.ndjson",
             "config.toml",
             "templates",
             "plugins",
@@ -1481,7 +1576,7 @@ impl ServerHandler for ShipServer {
                 ..Default::default()
             },
             instructions: Some(
-                "Tools for managing Ship project issues, releases, features, specs, ADRs, and time tracking. \
+                "Tools for managing Ship project issues, releases, features, specs, ADRs, event stream, and time tracking. \
                  Call open_project first if the project is not auto-detected."
                     .into(),
             ),
@@ -1504,4 +1599,71 @@ pub async fn run_server() -> Result<()> {
         .map_err(|e| anyhow!("MCP Server runtime error: {:?}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use logic::{
+        EventAction, EventEntity, init_project, list_events_since, list_features, list_releases,
+    };
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn mcp_release_feature_flow_emits_events() {
+        let tmp = tempdir().expect("tempdir");
+        let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
+
+        let server = ShipServer::new();
+        *server.active_project.lock().await = Some(project_dir.clone());
+
+        let release_result = server
+            .create_release(Parameters(CreateReleaseRequest {
+                version: "v0.3.0-alpha".to_string(),
+                content: None,
+            }))
+            .await;
+        assert!(
+            release_result.contains("Created release:"),
+            "unexpected release response: {}",
+            release_result
+        );
+
+        let releases = list_releases(project_dir.clone()).expect("list releases");
+        assert_eq!(releases.len(), 1);
+        let release_file = releases[0].file_name.clone();
+
+        let feature_result = server
+            .create_feature(Parameters(CreateFeatureRequest {
+                title: "Filesystem Routing Migration".to_string(),
+                content: None,
+                release: Some(release_file),
+                spec: None,
+            }))
+            .await;
+        assert!(
+            feature_result.contains("Created feature:"),
+            "unexpected feature response: {}",
+            feature_result
+        );
+
+        let features = list_features(project_dir.clone()).expect("list features");
+        assert_eq!(features.len(), 1);
+
+        let events = list_events_since(&project_dir, 0, Some(200)).expect("list events");
+        assert!(
+            events
+                .iter()
+                .any(|event| event.entity == EventEntity::Release
+                    && event.action == EventAction::Create),
+            "missing Release.Create event"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| event.entity == EventEntity::Feature
+                    && event.action == EventAction::Create),
+            "missing Feature.Create event"
+        );
+    }
 }

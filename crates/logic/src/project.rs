@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const SHIP_DIR_NAME: &str = ".ship";
 pub const DEFAULT_STATUSES: &[&str] = &["backlog", "in-progress", "blocked", "done"];
@@ -161,6 +161,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     if !log_path.exists() {
         fs::write(log_path, "# Project Log\n\n")?;
     }
+    crate::events::ensure_event_log(&ship_path)?;
 
     // Write default config if not present
     let config_path = ship_path.join("config.toml");
@@ -178,6 +179,16 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         let default_git = crate::config::GitConfig::default();
         crate::config::generate_gitignore(&ship_path, &default_git)?;
     }
+
+    // Best-effort init marker in the event stream.
+    let _ = crate::events::append_event(
+        &ship_path,
+        "logic",
+        crate::events::EventEntity::Project,
+        crate::events::EventAction::Init,
+        "project",
+        Some("Project initialized".to_string()),
+    );
 
     Ok(ship_path)
 }
@@ -214,6 +225,41 @@ fn write_default_templates(ship_path: &std::path::Path) -> Result<()> {
         fs::write(vision_doc, include_str!("templates/VISION.md"))?;
     }
     Ok(())
+}
+
+fn template_file_name(kind: &str) -> Result<&'static str> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "issue" | "issues" => Ok("ISSUE.md"),
+        "adr" | "adrs" => Ok("ADR.md"),
+        "spec" | "specs" => Ok("SPEC.md"),
+        "release" | "releases" => Ok("RELEASE.md"),
+        "feature" | "features" => Ok("FEATURE.md"),
+        "vision" => Ok("VISION.md"),
+        _ => Err(anyhow!("Unknown template kind: {}", kind)),
+    }
+}
+
+fn template_fallback(file_name: &str) -> Result<&'static str> {
+    match file_name {
+        "ISSUE.md" => Ok(include_str!("templates/ISSUE.md")),
+        "ADR.md" => Ok(include_str!("templates/ADR.md")),
+        "SPEC.md" => Ok(include_str!("templates/SPEC.md")),
+        "RELEASE.md" => Ok(include_str!("templates/RELEASE.md")),
+        "FEATURE.md" => Ok(include_str!("templates/FEATURE.md")),
+        "VISION.md" => Ok(include_str!("templates/VISION.md")),
+        _ => Err(anyhow!("No fallback for template: {}", file_name)),
+    }
+}
+
+/// Reads a project template from `.ship/templates`, with built-in fallback if missing.
+pub fn read_template(ship_path: &Path, kind: &str) -> Result<String> {
+    let file_name = template_file_name(kind)?;
+    let template_path = ship_path.join("templates").join(file_name);
+    if template_path.exists() {
+        return fs::read_to_string(template_path)
+            .with_context(|| format!("Failed to read template: {}", file_name));
+    }
+    Ok(template_fallback(file_name)?.to_string())
 }
 
 pub fn sanitize_file_name(name: &str) -> String {

@@ -2,6 +2,7 @@ pub mod adr;
 pub mod agent_export;
 pub mod config;
 pub mod demo;
+pub mod events;
 pub mod feature;
 mod fs_util;
 pub mod issue;
@@ -12,7 +13,7 @@ pub mod prompt;
 pub mod release;
 pub mod spec;
 
-pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, get_adr, list_adrs, update_adr};
+pub use adr::{ADR, AdrEntry, AdrMetadata, create_adr, delete_adr, get_adr, list_adrs, update_adr};
 pub use agent_export::{export_to, import_from_claude, sync_active_mode};
 pub use config::{
     AgentLayerConfig, AiConfig, GitConfig, HookConfig, HookTrigger, McpServerConfig, McpServerType,
@@ -23,6 +24,11 @@ pub use config::{
     save_config, set_active_mode, set_category_committed, set_git_config,
 };
 pub use demo::init_demo_project;
+pub use events::{
+    EVENTS_FILE_NAME, EventAction, EventEntity, EventRecord, append_event, ensure_event_log,
+    event_log_path, ingest_external_events, latest_event_seq, list_events_since, read_events,
+    sync_event_snapshot,
+};
 pub use feature::{
     Feature, FeatureEntry, FeatureMetadata, create_feature, get_feature, get_feature_raw,
     list_features, update_feature,
@@ -38,8 +44,8 @@ pub use project::{
     AppState as GlobalAppState, DEFAULT_STATUSES, ISSUE_STATUSES, ProjectEntry, ProjectRegistry,
     SHIP_DIR_NAME, get_active_project_global, get_global_dir, get_project_dir, get_project_name,
     get_recent_projects_global, get_registry_path, init_project, list_registered_projects,
-    load_app_state, load_registry, register_project, sanitize_file_name, save_app_state,
-    save_registry, set_active_project_global, unregister_project,
+    load_app_state, load_registry, read_template, register_project, sanitize_file_name,
+    save_app_state, save_registry, set_active_project_global, unregister_project,
 };
 pub use prompt::{Prompt, create_prompt, delete_prompt, get_prompt, list_prompts, update_prompt};
 pub use release::{
@@ -47,7 +53,8 @@ pub use release::{
     list_releases, update_release,
 };
 pub use spec::{
-    Spec, SpecEntry, SpecMetadata, create_spec, get_spec, get_spec_raw, list_specs, update_spec,
+    Spec, SpecEntry, SpecMetadata, create_spec, delete_spec, get_spec, get_spec_raw, list_specs,
+    update_spec,
 };
 
 #[cfg(test)]
@@ -302,6 +309,17 @@ mod tests {
     }
 
     #[test]
+    fn test_delete_adr() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_adr(project_dir.clone(), "Delete ADR", "decision", "accepted")?;
+        assert!(path.exists());
+        delete_adr(path.clone())?;
+        assert!(!path.exists());
+        Ok(())
+    }
+
+    #[test]
     fn test_adr_collision_gets_suffix() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
@@ -370,6 +388,17 @@ mod tests {
         let updated = get_spec(path)?;
         assert_eq!(updated.body, "updated body");
         assert!(updated.metadata.updated >= original.metadata.updated);
+        Ok(())
+    }
+
+    #[test]
+    fn test_delete_spec() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let path = create_spec(project_dir, "Delete Spec", "content")?;
+        assert!(path.exists());
+        delete_spec(path.clone())?;
+        assert!(!path.exists());
         Ok(())
     }
 
@@ -610,9 +639,10 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
-        // Default config: issues/log stay local; features/specs/adrs are committed.
+        // Default config: issues/log/events stay local; features/specs/adrs are committed.
         assert!(gitignore.contains("issues"));
         assert!(gitignore.contains("log.md"));
+        assert!(gitignore.contains("events.ndjson"));
         assert!(!gitignore.contains("releases"));
         assert!(!gitignore.contains("features"));
         assert!(!gitignore.contains("specs"));
@@ -678,7 +708,55 @@ mod tests {
         assert!(ship_path.join("templates/VISION.md").is_file());
         assert!(ship_path.join("specs/vision.md").is_file());
         assert!(ship_path.join("log.md").is_file());
+        assert!(ship_path.join("events.ndjson").is_file());
         assert!(ship_path.join("config.toml").is_file());
+        Ok(())
+    }
+
+    #[test]
+    fn test_event_stream_since() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = init_project(tmp.path().to_path_buf())?;
+        let seq0 = latest_event_seq(&ship_path)?;
+        create_release(ship_path.clone(), "v0.1.0-alpha", "")?;
+        create_feature(ship_path.clone(), "Event Stream Feature", "", None, None)?;
+        let events = list_events_since(&ship_path, seq0, None)?;
+        assert!(events.len() >= 2);
+        assert!(events.iter().all(|e| e.seq > seq0));
+        assert!(events.windows(2).all(|w| w[0].seq < w[1].seq));
+        Ok(())
+    }
+
+    #[test]
+    fn test_ingest_external_events_detects_filesystem_changes() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = init_project(tmp.path().to_path_buf())?;
+
+        // Ensure snapshot is synced to current state.
+        let baseline = ingest_external_events(&ship_path)?;
+        assert!(baseline.is_empty());
+
+        let manual = ship_path.join("features").join("manual-sync.md");
+        fs::write(&manual, "+++\ntitle = \"Manual\"\n+++\n\nbody\n")?;
+        let created = ingest_external_events(&ship_path)?;
+        assert_eq!(created.len(), 1);
+        assert_eq!(created[0].actor, "filesystem");
+        assert_eq!(created[0].entity, EventEntity::Feature);
+        assert_eq!(created[0].action, EventAction::Create);
+
+        fs::write(&manual, "+++\ntitle = \"Manual\"\n+++\n\nchanged\n")?;
+        let updated = ingest_external_events(&ship_path)?;
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].actor, "filesystem");
+        assert_eq!(updated[0].entity, EventEntity::Feature);
+        assert_eq!(updated[0].action, EventAction::Update);
+
+        fs::remove_file(&manual)?;
+        let deleted = ingest_external_events(&ship_path)?;
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].actor, "filesystem");
+        assert_eq!(deleted[0].entity, EventEntity::Feature);
+        assert_eq!(deleted[0].action, EventAction::Delete);
         Ok(())
     }
 

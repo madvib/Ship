@@ -1,5 +1,6 @@
 use crate::fs_util::write_atomic;
 use crate::project::sanitize_file_name;
+use crate::{EventAction, EventEntity, append_event};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,13 @@ pub struct FeatureEntry {
     pub status: String,
     pub release: Option<String>,
     pub updated: DateTime<Utc>,
+}
+
+fn ship_dir_from_feature_path(path: &Path) -> Option<PathBuf> {
+    // .ship/features/<file>.md -> go up two levels
+    path.parent()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -167,6 +175,19 @@ pub fn create_feature(
     let base = sanitize_file_name(title);
     let file_path = unique_path(&features_dir, &base);
     write_atomic(&file_path, feature.to_markdown()?)?;
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    append_event(
+        &project_dir,
+        "logic",
+        EventEntity::Feature,
+        EventAction::Create,
+        file_name,
+        Some(format!("title={}", title)),
+    )?;
     Ok(file_path)
 }
 
@@ -186,9 +207,26 @@ pub fn get_feature_raw(path: PathBuf) -> Result<String> {
 pub fn update_feature(path: PathBuf, body: &str) -> Result<()> {
     let mut feature = get_feature(path.clone())?;
     feature.metadata.updated = Utc::now();
+    let title = feature.metadata.title.clone();
     feature.body = body.to_string();
     write_atomic(&path, feature.to_markdown()?)
-        .with_context(|| format!("Failed to write feature: {}", path.display()))
+        .with_context(|| format!("Failed to write feature: {}", path.display()))?;
+    if let Some(project_dir) = ship_dir_from_feature_path(&path) {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        append_event(
+            &project_dir,
+            "logic",
+            EventEntity::Feature,
+            EventAction::Update,
+            file_name,
+            Some(format!("title={}", title)),
+        )?;
+    }
+    Ok(())
 }
 
 /// List all feature files in `.ship/features/`.

@@ -11,6 +11,7 @@ For alpha, the focus is one loop:
 - Markdown documents with TOML frontmatter for features, issues, specs, and ADRs
 - Local `.ship/` project state (no accounts, no cloud dependency)
 - CLI for project setup and issue/ADR workflows
+- Append-only event stream (`.ship/events.ndjson`) for cross-surface sync
 - MCP server over stdio (`ship mcp`) for agent access to project context
 - Tauri UI under active development
 
@@ -51,6 +52,12 @@ ship issue note <file_name> <note>
 ship adr create <title>
 ship spec create <title>
 ship spec list
+ship release create <version>
+ship release list
+ship feature create <title>
+ship feature list
+ship event list --since 0 --limit 50
+ship event ingest
 ship projects
 ship mcp
 ship config
@@ -81,7 +88,8 @@ Run `ship --help` for the full command set.
 ├── specs/
 │   └── vision.md
 ├── adrs/
-└── log.md
+├── log.md
+└── events.ndjson
 ```
 
 All `.ship` paths are lowercase.
@@ -89,7 +97,7 @@ All `.ship` paths are lowercase.
 Default git policy is opinionated for alpha:
 
 - committed: `releases`, `features`, `specs`, `adrs`, `config.toml`, `templates`
-- local-only: `issues`, `log.md`, `plugins`
+- local-only: `issues`, `log.md`, `events.ndjson`, `plugins`
 
 ## UI Development
 

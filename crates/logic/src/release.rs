@@ -1,5 +1,6 @@
 use crate::fs_util::write_atomic;
 use crate::project::sanitize_file_name;
+use crate::{EventAction, EventEntity, append_event};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,13 @@ pub struct ReleaseEntry {
     pub version: String,
     pub status: String,
     pub updated: DateTime<Utc>,
+}
+
+fn ship_dir_from_release_path(path: &Path) -> Option<PathBuf> {
+    // .ship/releases/<file>.md -> go up two levels
+    path.parent()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -156,6 +164,19 @@ pub fn create_release(project_dir: PathBuf, version: &str, body: &str) -> Result
     let base = sanitize_file_name(version);
     let file_path = unique_path(&releases_dir, &base);
     write_atomic(&file_path, release.to_markdown()?)?;
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    append_event(
+        &project_dir,
+        "logic",
+        EventEntity::Release,
+        EventAction::Create,
+        file_name,
+        Some(format!("version={}", version)),
+    )?;
     Ok(file_path)
 }
 
@@ -175,9 +196,26 @@ pub fn get_release_raw(path: PathBuf) -> Result<String> {
 pub fn update_release(path: PathBuf, body: &str) -> Result<()> {
     let mut release = get_release(path.clone())?;
     release.metadata.updated = Utc::now();
+    let version = release.metadata.version.clone();
     release.body = body.to_string();
     write_atomic(&path, release.to_markdown()?)
-        .with_context(|| format!("Failed to write release: {}", path.display()))
+        .with_context(|| format!("Failed to write release: {}", path.display()))?;
+    if let Some(project_dir) = ship_dir_from_release_path(&path) {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        append_event(
+            &project_dir,
+            "logic",
+            EventEntity::Release,
+            EventAction::Update,
+            file_name,
+            Some(format!("version={}", version)),
+        )?;
+    }
+    Ok(())
 }
 
 /// List all release files in `.ship/releases/`.

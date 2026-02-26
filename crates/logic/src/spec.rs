@@ -1,5 +1,6 @@
 use crate::fs_util::write_atomic;
 use crate::project::sanitize_file_name;
+use crate::{EventAction, EventEntity, append_event};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,13 @@ pub struct SpecEntry {
     pub title: String,
     pub status: String,
     pub updated: DateTime<Utc>,
+}
+
+fn ship_dir_from_spec_path(path: &Path) -> Option<PathBuf> {
+    // .ship/specs/<file>.md -> go up two levels
+    path.parent()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -165,6 +173,19 @@ pub fn create_spec(project_dir: PathBuf, title: &str, body: &str) -> Result<Path
     let base = sanitize_file_name(title);
     let file_path = unique_path(&specs_dir, &base);
     write_atomic(&file_path, spec.to_markdown()?)?;
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    append_event(
+        &project_dir,
+        "logic",
+        EventEntity::Spec,
+        EventAction::Create,
+        file_name,
+        Some(format!("title={}", title)),
+    )?;
     Ok(file_path)
 }
 
@@ -184,9 +205,46 @@ pub fn get_spec_raw(path: PathBuf) -> Result<String> {
 pub fn update_spec(path: PathBuf, body: &str) -> Result<()> {
     let mut spec = get_spec(path.clone())?;
     spec.metadata.updated = Utc::now();
+    let title = spec.metadata.title.clone();
     spec.body = body.to_string();
     write_atomic(&path, spec.to_markdown()?)
-        .with_context(|| format!("Failed to write spec: {}", path.display()))
+        .with_context(|| format!("Failed to write spec: {}", path.display()))?;
+    if let Some(project_dir) = ship_dir_from_spec_path(&path) {
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        append_event(
+            &project_dir,
+            "logic",
+            EventEntity::Spec,
+            EventAction::Update,
+            file_name,
+            Some(format!("title={}", title)),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn delete_spec(path: PathBuf) -> Result<()> {
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    fs::remove_file(&path).with_context(|| format!("Failed to delete spec: {}", path.display()))?;
+    if let Some(project_dir) = ship_dir_from_spec_path(&path) {
+        append_event(
+            &project_dir,
+            "logic",
+            EventEntity::Spec,
+            EventAction::Delete,
+            file_name,
+            None,
+        )?;
+    }
+    Ok(())
 }
 
 /// List all spec files in `.ship/specs/`.
