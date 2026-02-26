@@ -147,7 +147,7 @@ pub fn create_feature(
 ) -> Result<PathBuf> {
     validate_title(title)?;
 
-    let features_dir = project_dir.join("features");
+    let features_dir = crate::project::features_dir(&project_dir);
     fs::create_dir_all(&features_dir)?;
 
     let now = Utc::now();
@@ -231,7 +231,7 @@ pub fn update_feature(path: PathBuf, body: &str) -> Result<()> {
 
 /// List all feature files in `.ship/features/`.
 pub fn list_features(project_dir: PathBuf) -> Result<Vec<FeatureEntry>> {
-    let features_dir = project_dir.join("features");
+    let features_dir = crate::project::features_dir(&project_dir);
     if !features_dir.exists() {
         return Ok(vec![]);
     }

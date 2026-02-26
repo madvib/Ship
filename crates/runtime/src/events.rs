@@ -10,7 +10,13 @@ use walkdir::WalkDir;
 
 pub const EVENTS_FILE_NAME: &str = "events.ndjson";
 const EVENT_INDEX_FILE: &str = "workflow/event_index.json";
-const TRACKED_DIRS: &[&str] = &["issues", "specs", "adrs", "features", "releases"];
+const TRACKED_DIRS: &[&str] = &[
+    "workflow/issues",
+    "workflow/specs",
+    "workflow/features",
+    "project/adrs",
+    "project/releases",
+];
 const TRACKED_FILES: &[&str] = &["config.toml"];
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
@@ -300,7 +306,7 @@ pub fn sync_event_snapshot(project_dir: &Path) -> Result<usize> {
 }
 
 fn classify_path(rel_path: &str) -> Option<(EventEntity, String, Option<String>)> {
-    if let Some(rest) = rel_path.strip_prefix("issues/") {
+    if let Some(rest) = rel_path.strip_prefix("workflow/issues/") {
         let mut parts = rest.splitn(2, '/');
         let status = parts.next().unwrap_or("").to_string();
         let file_name = parts.next().unwrap_or("").to_string();
@@ -310,28 +316,28 @@ fn classify_path(rel_path: &str) -> Option<(EventEntity, String, Option<String>)
             Some(format!("status={} path={}", status, rel_path)),
         ));
     }
-    if let Some(file) = rel_path.strip_prefix("specs/") {
+    if let Some(file) = rel_path.strip_prefix("workflow/specs/") {
         return Some((
             EventEntity::Spec,
             file.to_string(),
             Some(format!("path={}", rel_path)),
         ));
     }
-    if let Some(file) = rel_path.strip_prefix("adrs/") {
+    if let Some(file) = rel_path.strip_prefix("project/adrs/") {
         return Some((
             EventEntity::Adr,
             file.to_string(),
             Some(format!("path={}", rel_path)),
         ));
     }
-    if let Some(file) = rel_path.strip_prefix("features/") {
+    if let Some(file) = rel_path.strip_prefix("workflow/features/") {
         return Some((
             EventEntity::Feature,
             file.to_string(),
             Some(format!("path={}", rel_path)),
         ));
     }
-    if let Some(file) = rel_path.strip_prefix("releases/") {
+    if let Some(file) = rel_path.strip_prefix("project/releases/") {
         return Some((
             EventEntity::Release,
             file.to_string(),

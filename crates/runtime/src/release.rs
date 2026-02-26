@@ -137,7 +137,7 @@ fn unique_path(dir: &Path, base: &str) -> PathBuf {
 pub fn create_release(project_dir: PathBuf, version: &str, body: &str) -> Result<PathBuf> {
     validate_version(version)?;
 
-    let releases_dir = project_dir.join("releases");
+    let releases_dir = crate::project::releases_dir(&project_dir);
     fs::create_dir_all(&releases_dir)?;
 
     let now = Utc::now();
@@ -220,7 +220,7 @@ pub fn update_release(path: PathBuf, body: &str) -> Result<()> {
 
 /// List all release files in `.ship/releases/`.
 pub fn list_releases(project_dir: PathBuf) -> Result<Vec<ReleaseEntry>> {
-    let releases_dir = project_dir.join("releases");
+    let releases_dir = crate::project::releases_dir(&project_dir);
     if !releases_dir.exists() {
         return Ok(vec![]);
     }

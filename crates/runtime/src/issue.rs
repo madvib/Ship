@@ -205,7 +205,7 @@ pub fn create_issue(
     };
 
     let base = sanitize_file_name(title);
-    let status_dir = project_dir.join("issues").join(status);
+    let status_dir = crate::project::issues_dir(&project_dir).join(status);
     fs::create_dir_all(&status_dir)?;
 
     let file_path = unique_path(&status_dir, &base);
@@ -255,7 +255,7 @@ pub fn update_issue(path: PathBuf, mut issue: Issue) -> Result<()> {
 
 pub fn list_issues(project_dir: PathBuf) -> Result<Vec<(String, String)>> {
     let mut issues = Vec::new();
-    let issues_dir = project_dir.join("issues");
+    let issues_dir = crate::project::issues_dir(&project_dir);
     if !issues_dir.exists() {
         return Ok(issues);
     }
@@ -285,7 +285,7 @@ pub fn list_issues(project_dir: PathBuf) -> Result<Vec<(String, String)>> {
 
 pub fn list_issues_full(project_dir: PathBuf) -> Result<Vec<IssueEntry>> {
     let mut entries = Vec::new();
-    let issues_dir = project_dir.join("issues");
+    let issues_dir = crate::project::issues_dir(&project_dir);
     if !issues_dir.exists() {
         return Ok(entries);
     }
@@ -449,7 +449,7 @@ pub fn add_link(file_path: PathBuf, link_type: &str, target: &str) -> Result<()>
 
 /// Assign UUIDs to any TOML issues that have an empty `id` field.
 pub fn backfill_issue_ids(project_dir: &PathBuf) -> Result<usize> {
-    let issues_dir = project_dir.join("issues");
+    let issues_dir = crate::project::issues_dir(&project_dir);
     if !issues_dir.exists() {
         return Ok(0);
     }
@@ -478,7 +478,7 @@ pub fn backfill_issue_ids(project_dir: &PathBuf) -> Result<usize> {
 
 /// Convert all legacy YAML-frontmatter issues in a project to TOML in-place.
 pub fn migrate_yaml_issues(project_dir: &PathBuf) -> Result<usize> {
-    let issues_dir = project_dir.join("issues");
+    let issues_dir = crate::project::issues_dir(&project_dir);
     if !issues_dir.exists() {
         return Ok(0);
     }

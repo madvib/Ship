@@ -10,6 +10,61 @@ pub const DEFAULT_STATUSES: &[&str] = &["backlog", "in-progress", "blocked", "do
 /// Kept for backwards compatibility — prefer DEFAULT_STATUSES or get_project_statuses().
 pub const ISSUE_STATUSES: &[&str] = DEFAULT_STATUSES;
 
+// ── Namespace path helpers ────────────────────────────────────────────────────
+// All document paths are derived from these. Never construct paths with raw
+// string joins outside of these helpers.
+
+/// `.ship/project/` — vision, notes, ADRs, releases
+pub fn project_ns(ship_dir: &Path) -> PathBuf {
+    ship_dir.join("project")
+}
+
+/// `.ship/workflow/` — features, specs, issues
+pub fn workflow_ns(ship_dir: &Path) -> PathBuf {
+    ship_dir.join("workflow")
+}
+
+/// `.ship/agents/` — modes, skills, prompts
+pub fn agents_ns(ship_dir: &Path) -> PathBuf {
+    ship_dir.join("agents")
+}
+
+pub fn adrs_dir(ship_dir: &Path) -> PathBuf {
+    project_ns(ship_dir).join("adrs")
+}
+
+pub fn releases_dir(ship_dir: &Path) -> PathBuf {
+    project_ns(ship_dir).join("releases")
+}
+
+pub fn notes_dir(ship_dir: &Path) -> PathBuf {
+    project_ns(ship_dir).join("notes")
+}
+
+pub fn specs_dir(ship_dir: &Path) -> PathBuf {
+    workflow_ns(ship_dir).join("specs")
+}
+
+pub fn features_dir(ship_dir: &Path) -> PathBuf {
+    workflow_ns(ship_dir).join("features")
+}
+
+pub fn issues_dir(ship_dir: &Path) -> PathBuf {
+    workflow_ns(ship_dir).join("issues")
+}
+
+pub fn modes_dir(ship_dir: &Path) -> PathBuf {
+    agents_ns(ship_dir).join("modes")
+}
+
+pub fn skills_dir(ship_dir: &Path) -> PathBuf {
+    agents_ns(ship_dir).join("skills")
+}
+
+pub fn prompts_dir(ship_dir: &Path) -> PathBuf {
+    agents_ns(ship_dir).join("prompts")
+}
+
 /// Resolves the .ship directory by searching upwards from the given directory.
 /// Also checks for legacy `.project` and migrates it to `.ship` if found.
 /// Supports `SHIP_DIR` environment variable override.
@@ -146,15 +201,26 @@ pub fn get_global_dir() -> Result<PathBuf> {
 pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     let ship_path = base_dir.join(SHIP_DIR_NAME);
 
-    fs::create_dir_all(ship_path.join("issues/backlog"))?;
-    fs::create_dir_all(ship_path.join("issues/in-progress"))?;
-    fs::create_dir_all(ship_path.join("issues/review"))?;
-    fs::create_dir_all(ship_path.join("issues/blocked"))?;
-    fs::create_dir_all(ship_path.join("issues/done"))?;
-    fs::create_dir_all(ship_path.join("releases"))?;
-    fs::create_dir_all(ship_path.join("features"))?;
-    fs::create_dir_all(ship_path.join("adrs"))?;
-    fs::create_dir_all(ship_path.join("specs"))?;
+    // project/ namespace
+    fs::create_dir_all(adrs_dir(&ship_path))?;
+    fs::create_dir_all(releases_dir(&ship_path))?;
+    fs::create_dir_all(notes_dir(&ship_path))?;
+
+    // workflow/ namespace
+    let issues = issues_dir(&ship_path);
+    for status in DEFAULT_STATUSES {
+        fs::create_dir_all(issues.join(status))?;
+    }
+    fs::create_dir_all(issues.join("done"))?;
+    fs::create_dir_all(specs_dir(&ship_path))?;
+    fs::create_dir_all(features_dir(&ship_path))?;
+
+    // agents/ namespace
+    fs::create_dir_all(modes_dir(&ship_path))?;
+    fs::create_dir_all(skills_dir(&ship_path))?;
+    fs::create_dir_all(prompts_dir(&ship_path))?;
+
+    // templates colocated per namespace (legacy top-level kept for compat)
     fs::create_dir_all(ship_path.join("templates"))?;
 
     let log_path = ship_path.join("log.md");
@@ -219,8 +285,8 @@ fn write_default_templates(ship_path: &std::path::Path) -> Result<()> {
         fs::write(adr_tmpl, include_str!("templates/ADR.md"))?;
     }
 
-    // Seed a project-level vision doc if missing.
-    let vision_doc = ship_path.join("specs/vision.md");
+    // Seed vision.md under project/ namespace.
+    let vision_doc = project_ns(ship_path).join("vision.md");
     if !vision_doc.exists() {
         fs::write(vision_doc, include_str!("templates/VISION.md"))?;
     }

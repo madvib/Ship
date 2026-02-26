@@ -222,10 +222,10 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let legacy = "---\ntitle: Legacy Issue\nstatus: backlog\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\nlinks: []\n---\n\nOld body.\n";
-        fs::write(project_dir.join("issues/backlog/legacy-issue.md"), legacy)?;
+        fs::write(project_dir.join("workflow/issues/backlog/legacy-issue.md"), legacy)?;
         let migrated = migrate_yaml_issues(&project_dir)?;
         assert_eq!(migrated, 1);
-        let content = fs::read_to_string(project_dir.join("issues/backlog/legacy-issue.md"))?;
+        let content = fs::read_to_string(project_dir.join("workflow/issues/backlog/legacy-issue.md"))?;
         assert!(content.starts_with("+++\n"));
         assert!(content.contains("title = \"Legacy Issue\""));
         Ok(())
@@ -411,11 +411,10 @@ mod tests {
         create_spec(project_dir.clone(), "Spec Alpha", "")?;
         create_spec(project_dir.clone(), "Spec Beta", "")?;
         let specs = list_specs(project_dir)?;
-        assert!(specs.len() >= 3); // includes seeded vision.md
+        assert!(specs.len() >= 2); // vision.md moved to project/ namespace, no longer a spec
         let titles: Vec<&str> = specs.iter().map(|s| s.title.as_str()).collect();
         assert!(titles.contains(&"Spec Alpha"));
         assert!(titles.contains(&"Spec Beta"));
-        assert!(titles.iter().any(|t| t.to_lowercase().contains("vision")));
         Ok(())
     }
 
@@ -698,17 +697,25 @@ mod tests {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
         assert!(ship_path.exists());
-        assert!(ship_path.join("issues/backlog").is_dir());
-        assert!(ship_path.join("issues/review").is_dir());
-        assert!(ship_path.join("releases").is_dir());
-        assert!(ship_path.join("features").is_dir());
-        assert!(ship_path.join("adrs").is_dir());
-        assert!(ship_path.join("specs").is_dir());
+        // workflow/ namespace
+        assert!(ship_path.join("workflow/issues/backlog").is_dir());
+        assert!(ship_path.join("workflow/issues/in-progress").is_dir());
+        assert!(ship_path.join("workflow/specs").is_dir());
+        assert!(ship_path.join("workflow/features").is_dir());
+        // project/ namespace
+        assert!(ship_path.join("project/adrs").is_dir());
+        assert!(ship_path.join("project/releases").is_dir());
+        assert!(ship_path.join("project/notes").is_dir());
+        assert!(ship_path.join("project/vision.md").is_file());
+        // agents/ namespace
+        assert!(ship_path.join("agents/modes").is_dir());
+        assert!(ship_path.join("agents/skills").is_dir());
+        assert!(ship_path.join("agents/prompts").is_dir());
+        // shared
         assert!(ship_path.join("templates").is_dir());
         assert!(ship_path.join("templates/RELEASE.md").is_file());
         assert!(ship_path.join("templates/FEATURE.md").is_file());
         assert!(ship_path.join("templates/VISION.md").is_file());
-        assert!(ship_path.join("specs/vision.md").is_file());
         assert!(ship_path.join("log.md").is_file());
         assert!(ship_path.join("events.ndjson").is_file());
         assert!(ship_path.join("config.toml").is_file());
@@ -738,7 +745,7 @@ mod tests {
         let baseline = ingest_external_events(&ship_path)?;
         assert!(baseline.is_empty());
 
-        let manual = ship_path.join("features").join("manual-sync.md");
+        let manual = crate::project::features_dir(&ship_path).join("manual-sync.md");
         fs::write(&manual, "+++\ntitle = \"Manual\"\n+++\n\nbody\n")?;
         let created = ingest_external_events(&ship_path)?;
         assert_eq!(created.len(), 1);
@@ -771,7 +778,7 @@ mod tests {
         let specs = list_specs(ship_path)?;
         assert!(!releases.is_empty());
         assert!(!features.is_empty());
-        assert!(specs.len() >= 2); // includes seeded vision + agent config spec
+        assert!(!specs.is_empty()); // vision.md moved to project/ namespace
         Ok(())
     }
 

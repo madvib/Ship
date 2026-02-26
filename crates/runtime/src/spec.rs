@@ -147,7 +147,7 @@ fn unique_path(dir: &Path, base: &str) -> PathBuf {
 pub fn create_spec(project_dir: PathBuf, title: &str, body: &str) -> Result<PathBuf> {
     validate_title(title)?;
 
-    let specs_dir = project_dir.join("specs");
+    let specs_dir = crate::project::specs_dir(&project_dir);
     fs::create_dir_all(&specs_dir)?;
 
     let now = Utc::now();
@@ -249,7 +249,7 @@ pub fn delete_spec(path: PathBuf) -> Result<()> {
 
 /// List all spec files in `.ship/specs/`.
 pub fn list_specs(project_dir: PathBuf) -> Result<Vec<SpecEntry>> {
-    let specs_dir = project_dir.join("specs");
+    let specs_dir = crate::project::specs_dir(&project_dir);
     if !specs_dir.exists() {
         return Ok(vec![]);
     }

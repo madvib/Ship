@@ -522,7 +522,7 @@ pub fn add_status(project_dir: Option<PathBuf>, status: &str) -> Result<()> {
 pub fn remove_status(project_dir: Option<PathBuf>, status: &str) -> Result<()> {
     // Guard: refuse if any issues exist in this status folder
     if let Some(ref dir) = project_dir {
-        let status_dir = dir.join("issues").join(status);
+        let status_dir = crate::project::issues_dir(dir).join(status);
         if status_dir.exists() {
             let count = fs::read_dir(&status_dir)
                 .map(|d| d.filter_map(|e| e.ok()).count())

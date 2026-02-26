@@ -105,7 +105,7 @@ pub fn create_adr(
 ) -> Result<PathBuf> {
     validate_title(title)?;
 
-    let adrs_dir = project_dir.join("adrs");
+    let adrs_dir = crate::project::adrs_dir(&project_dir);
     fs::create_dir_all(&adrs_dir)?;
 
     let metadata = AdrMetadata {
@@ -191,7 +191,7 @@ pub fn delete_adr(path: PathBuf) -> Result<()> {
 
 pub fn list_adrs(project_dir: PathBuf) -> Result<Vec<AdrEntry>> {
     let mut entries = Vec::new();
-    let adrs_dir = project_dir.join("adrs");
+    let adrs_dir = crate::project::adrs_dir(&project_dir);
     if !adrs_dir.exists() {
         return Ok(entries);
     }

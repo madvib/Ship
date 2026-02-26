@@ -107,7 +107,7 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
     // Sample specs
     let spec_title = "Agent Configuration and Modes";
     let spec_slug = crate::sanitize_file_name(spec_title);
-    let spec_file = project_dir.join("specs").join(format!("{}.md", spec_slug));
+    let spec_file = crate::project::specs_dir(&project_dir).join(format!("{}.md", spec_slug));
     if !spec_file.exists() {
         create_spec(
             project_dir.clone(),
