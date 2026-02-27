@@ -65,7 +65,7 @@ function normalizeProjectConfig(config: ProjectConfig | null): ProjectConfig {
     git: {
       ignore: config?.git?.ignore ?? [],
       commit:
-        config?.git?.commit ?? ['releases', 'features', 'adrs', 'specs', 'config.toml', 'templates'],
+        config?.git?.commit ?? ['releases', 'features', 'adrs', 'specs', 'ship.toml', 'templates'],
     },
     ai: normalizeAiConfig(config?.ai ?? null),
     modes: config?.modes ?? [],
@@ -270,9 +270,9 @@ export default function AgentsPanel({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="global">Global (~/.ship/config.toml)</SelectItem>
+                <SelectItem value="global">Global (~/.ship/ship.toml)</SelectItem>
                 <SelectItem value="project" disabled={!projectConfig}>
-                  Project (.ship/config.toml)
+                  Project (.ship/ship.toml)
                 </SelectItem>
               </SelectContent>
             </Select>

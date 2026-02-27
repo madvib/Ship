@@ -52,11 +52,7 @@ pub struct IssueEntry {
 }
 
 fn ship_dir_from_issue_path(path: &Path) -> Option<PathBuf> {
-    // .ship/issues/<status>/<file>.md -> go up three levels
-    path.parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf)
+    crate::project::ship_dir_from_path(path)
 }
 
 fn persist_issue(path: &Path, issue: &Issue) -> Result<()> {

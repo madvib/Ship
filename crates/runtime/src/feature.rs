@@ -79,10 +79,7 @@ pub struct FeatureEntry {
 }
 
 fn ship_dir_from_feature_path(path: &Path) -> Option<PathBuf> {
-    // .ship/features/<file>.md -> go up two levels
-    path.parent()
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf)
+    crate::project::ship_dir_from_path(path)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -277,6 +274,9 @@ pub fn list_features(project_dir: PathBuf) -> Result<Vec<FeatureEntry>> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+            if file_name == "TEMPLATE.md" || file_name == "README.md" {
+                continue;
+            }
             if let Ok(feature) = get_feature(path.clone()) {
                 entries.push(FeatureEntry {
                     file_name,

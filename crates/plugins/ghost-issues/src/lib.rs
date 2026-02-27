@@ -1,8 +1,8 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use ignore::WalkBuilder;
-use runtime::Plugin;
 use regex::Regex;
+use runtime::Plugin;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,7 +93,7 @@ impl Plugin for GhostIssues {
 // ─── Storage ─────────────────────────────────────────────────────────────────
 
 fn plugin_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join("plugins").join("ghost-issues")
+    project_dir.join("ghost-issues")
 }
 
 fn scan_result_path(project_dir: &Path) -> PathBuf {

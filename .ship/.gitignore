@@ -1,12 +1,10 @@
 # Managed by Ship — edit via `ship git include/exclude`
 
-issues
-log.md
+workflow/issues
+project/notes
+agents
 events.ndjson
-plugins
-
-# Internal
-workflow/
+generated/
 
 # Runtime — never commit
 ship.db

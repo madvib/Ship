@@ -131,8 +131,8 @@ export function useProjectActions({
         description: input.description ?? null,
         statuses,
         git: {
-          ignore: ['issues', 'log.md', 'events.ndjson'],
-          commit: ['releases', 'features', 'specs', 'adrs', 'config.toml', 'templates'],
+          ignore: ['issues', 'events.ndjson'],
+          commit: ['releases', 'features', 'specs', 'adrs', 'ship.toml', 'templates'],
         },
       } as ProjectConfig;
     }

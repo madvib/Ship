@@ -61,10 +61,7 @@ pub struct SpecEntry {
 }
 
 fn ship_dir_from_spec_path(path: &Path) -> Option<PathBuf> {
-    // .ship/specs/<file>.md -> go up two levels
-    path.parent()
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf)
+    crate::project::ship_dir_from_path(path)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -264,6 +261,9 @@ pub fn list_specs(project_dir: PathBuf) -> Result<Vec<SpecEntry>> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+            if file_name == "TEMPLATE.md" || file_name == "README.md" {
+                continue;
+            }
             if let Ok(spec) = get_spec(path.clone()) {
                 entries.push(SpecEntry {
                     file_name,

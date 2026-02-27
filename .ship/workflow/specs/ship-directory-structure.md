@@ -1,6 +1,6 @@
 # .ship — Directory Structure
 
-**Last Updated:** 2026-02-22
+**Last Updated:** 2026-02-26
 
 ---
 
@@ -8,7 +8,7 @@
 
 **Modules own namespaces.** The runtime owns all filesystem I/O. Modules declare a root namespace and the runtime enforces that each module only writes within it. The structure is always predictable without knowing which modules are loaded.
 
-**Config is JSONC with published schema.** Every `.jsonc` file carries a `$schema` field pointing to the published Shipwright schema. This gives autocomplete and inline validation in any editor without a plugin. Visual preferences (colors, theme) live in the GUI and SQLite — not in config files.
+**Config is TOML.** Shipwright config files use TOML for readability and parity with frontmatter. Visual preferences (colors, theme) live in the GUI and SQLite — not in config files.
 
 **Feature docs are the source of truth for branch agent config.** MCP servers, skills, model, and cost limit live as structured frontmatter in the feature doc. Shipwright reads this on checkout to generate tool configs. No separate branch config directory.
 
@@ -16,7 +16,7 @@
 
 This approach keeps the project root clean regardless of how many AI tools a team supports. Adding a new tool means adding an adapter — nothing changes about the project structure. One update to the feature doc propagates to every allowed tool on next checkout.
 
-**Team policy controls which tools are active.** The `agentPolicy.allowedProviders` list in `project.jsonc` determines which tool configs Shipwright generates. Developers only get configs for tools they have installed. The feature doc is tool-agnostic — it never knows or cares how many tools consume its config.
+**Team policy controls which tools are active.** The `agent_policy.allowed_providers` list in `project.toml` determines which tool configs Shipwright generates. Developers only get configs for tools they have installed. The feature doc is tool-agnostic — it never knows or cares how many tools consume its config.
 
 **Templates are colocated.** Each document directory may contain a `TEMPLATE.md`. No top-level templates directory. Context stays with the documents it applies to.
 
@@ -56,7 +56,7 @@ This approach keeps the project root clean regardless of how many AI tools a tea
     │   └── <tool>/              ← one directory per allowed provider
     │
     ├── project/                 ← core namespace
-    │   ├── project.jsonc        ← project identity, git config, team policy
+    │   ├── project.toml         ← project identity, git config, team policy
     │   ├── overview.md          ← freeform project overview
     │   ├── vision.md            ← vision document
     │   ├── notes/
@@ -95,8 +95,8 @@ This approach keeps the project root clean regardless of how many AI tools a tea
     │
     └── agents/                  ← agents module namespace
         ├── modes/
-        │   ├── planning.jsonc
-        │   └── execution.jsonc
+        │   ├── planning.toml
+        │   └── execution.toml
         ├── skills/
         │   ├── shipwright-workflow.md   ← always injected, locked
         │   └── nextjs-conventions.md
@@ -124,59 +124,66 @@ when it creates them.
 
 ---
 
-## Project Config — `.ship/project/project.jsonc`
+## Project Config — `.ship/project/project.toml`
 
 Visual preferences — status colors, tag colors, theme — are set in the GUI and
 stored in SQLite. This file contains the things that need to be committed and
 shared with the team.
 
-```jsonc
-{
-  "$schema": "https://schema.shipwright.dev/project/v1.json",
-  "version": "1",
-  "name": "my-project",
-  "description": "",
+```toml
+version = "1"
+name = "my-project"
+description = ""
 
-  "workflow": {
-    "preset": "solo"
-    // "solo" | "team"
-    // Transition configuration is managed through the GUI.
-  },
+[workflow]
+preset = "solo" # "solo" | "team"
 
-  // IDs are what get committed. Display names and colors are set in the GUI.
-  "statuses": [
-    { "id": "backlog"                          },
-    { "id": "in-progress"                      },
-    { "id": "review"                           },
-    { "id": "blocked"                          },
-    { "id": "done"                             },
-    { "id": "archived",    "hidden": true      }
-  ],
+# IDs are what get committed. Display names and colors are set in the GUI.
+[[statuses]]
+id = "backlog"
 
-  "tags": [
-    { "id": "priority:high" },
-    { "id": "priority:low"  },
-    { "id": "type:bug"      },
-    { "id": "type:feature"  }
-  ],
+[[statuses]]
+id = "in-progress"
 
-  "git": {
-    "branchPrefix": "feature/",
-    "hooks": {
-      "postCheckout":     true,
-      "preCommit":        true,
-      "prepareCommitMsg": true,
-      "postMerge":        true
-    }
-  },
+[[statuses]]
+id = "review"
 
-  // Controls which AI tool configs Shipwright generates on checkout.
-  // Configs are only generated for tools the developer has installed.
-  // Adding a new provider here takes effect on next branch checkout.
-  "agentPolicy": {
-    "allowedProviders": ["claude", "gemini", "codex"]
-  }
-}
+[[statuses]]
+id = "blocked"
+
+[[statuses]]
+id = "done"
+
+[[statuses]]
+id = "archived"
+hidden = true
+
+[[tags]]
+id = "priority:high"
+
+[[tags]]
+id = "priority:low"
+
+[[tags]]
+id = "type:bug"
+
+[[tags]]
+id = "type:feature"
+
+[git]
+branch_prefix = "feature/"
+
+[git.hooks]
+post_checkout = true
+pre_commit = true
+prepare_commit_msg = true
+post_merge = true
+
+# Controls which AI tool configs Shipwright generates on checkout.
+# Configs are only generated for tools the developer has installed.
+# Adding a new provider here takes effect on next branch checkout.
+[agent_policy]
+allowed_providers = ["claude", "gemini", "codex"]
 ```
 
 ---
@@ -229,31 +236,28 @@ session management. See ADR-003 for the architectural decision.
 
 ---
 
-## Mode Config — `.ship/agents/modes/planning.jsonc`
+## Mode Config — `.ship/agents/modes/planning.toml`
 
 Modes shape the Shipwright UI and control which Shipwright MCP tools are
 surfaced. They do not control external MCP servers — that is the feature doc's
 responsibility.
 
-```jsonc
-{
-  "$schema": "https://schema.shipwright.dev/mode/v1.json",
-  "id": "planning",
-  "name": "Planning",
-  "color": "#6366f1",
-  "shipwrightTools": [
-    "ship_list_notes",
-    "ship_create_note",
-    "ship_list_specs",
-    "ship_get_spec",
-    "ship_create_spec",
-    "ship_update_spec",
-    "ship_list_issues",
-    "ship_create_issue",
-    "ship_draft_adr",
-    "ship_get_project_info"
-  ]
-}
+```toml
+id = "planning"
+name = "Planning"
+color = "#6366f1"
+shipwright_tools = [
+  "ship_list_notes",
+  "ship_create_note",
+  "ship_list_specs",
+  "ship_get_spec",
+  "ship_create_spec",
+  "ship_update_spec",
+  "ship_list_issues",
+  "ship_create_issue",
+  "ship_draft_adr",
+  "ship_get_project_info",
+]
 ```
 
 ---
@@ -262,7 +266,7 @@ responsibility.
 
 ```
 ~/.ship/
-├── config.jsonc         ← user preferences — hand-editable
+├── config.toml          ← user preferences — hand-editable
 ├── shipwright.db        ← global SQLite:
 │                            project registry
 │                            global mode state
@@ -276,46 +280,36 @@ responsibility.
 
 ---
 
-## Global Config — `~/.ship/config.jsonc`
+## Global Config — `~/.ship/config.toml`
 
 User preferences only. Project registry, server library, entitlements, and
 model cache all live in SQLite — they are managed through the GUI, not this file.
 
-```jsonc
-{
-  "$schema": "https://schema.shipwright.dev/global-config/v1.json",
-  "version": "1",
+```toml
+version = "1"
 
-  "user": {
-    "name": "",
-    "email": ""
-  },
+[user]
+name = ""
+email = ""
 
-  "defaults": {
-    "editor": "code",
-    "workflowPreset": "solo",
-    "theme": "dark",
-    "accentColor": "blue"
-  },
+[defaults]
+editor = "code"
+workflow_preset = "solo"
+theme = "dark"
+accent_color = "blue"
 
-  "mcp": {
-    "port": 7700,
-    "autoStart": true
-  },
+[mcp]
+port = 7700
+auto_start = true
 
-  "ai": {
-    "defaultModel": ""
-  },
+[ai]
+default_model = ""
 
-  "git": {
-    "hooks": {
-      "postCheckout":     true,
-      "preCommit":        true,
-      "prepareCommitMsg": true,
-      "postMerge":        true
-    }
-  }
-}
+[git.hooks]
+post_checkout = true
+pre_commit = true
+prepare_commit_msg = true
+post_merge = true
 ```
 
 ---
@@ -328,16 +322,16 @@ with a "create new" affordance when the referenced entity does not yet exist.
 
 | Field | Source | Mechanism |
 |-------|--------|-----------|
-| `tags` in any frontmatter | `project.jsonc` | Schema enum + GUI controlled input |
-| `status` in issue frontmatter | `project.jsonc` | Schema enum |
+| `tags` in any frontmatter | `project.toml` | Config enum + GUI controlled input |
+| `status` in issue frontmatter | `project.toml` | Config enum |
 | `model` in feature frontmatter | SQLite models cache | GUI popover |
 | `agent.mcp_servers[].id` | SQLite server library | GUI popover |
 | `agent.skills[].id` | `agents/skills/` | GUI popover |
 | `agent.prompts[].id` | `agents/prompts/` | GUI popover |
 | `release` in feature frontmatter | `workflow/releases/` | GUI popover + create new |
 | `spec` in feature frontmatter | `workflow/specs/` | GUI popover + create new |
-| `allowedProviders` entries | Published schema | Schema enum |
-| Mode `shipwrightTools` | Published schema | Schema enum |
+| `allowed_providers` entries | `project.toml` | Config enum |
+| Mode `shipwright_tools` | `agents/modes/*.toml` | Config enum |
 
 Soft references (`release`, `spec`) show a prompt to create the referenced
 document when it does not exist — not an error.

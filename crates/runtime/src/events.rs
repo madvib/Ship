@@ -9,21 +9,26 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 pub const EVENTS_FILE_NAME: &str = "events.ndjson";
-const EVENT_INDEX_FILE: &str = "workflow/event_index.json";
+const EVENT_INDEX_FILE: &str = "generated/event_index.json";
 const TRACKED_DIRS: &[&str] = &[
     "workflow/issues",
     "workflow/specs",
     "workflow/features",
-    "project/adrs",
     "project/releases",
+    "project/notes",
+    "project/adrs",
 ];
-const TRACKED_FILES: &[&str] = &["config.toml"];
+const TRACKED_FILES: &[&str] = &[
+    crate::config::PRIMARY_CONFIG_FILE,
+    crate::config::LEGACY_CONFIG_FILE,
+];
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum EventEntity {
     Project,
     Issue,
+    Note,
     Spec,
     Adr,
     Feature,
@@ -251,6 +256,13 @@ fn collect_tracked_files(project_dir: &Path) -> Result<HashMap<String, FileFinge
             if !path.is_file() || !path.extension().is_some_and(|ext| ext == "md") {
                 continue;
             }
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if file_name == "TEMPLATE.md" || file_name == "README.md" {
+                continue;
+            }
             let rel = path
                 .strip_prefix(project_dir)
                 .unwrap_or(path)
@@ -330,6 +342,13 @@ fn classify_path(rel_path: &str) -> Option<(EventEntity, String, Option<String>)
             Some(format!("path={}", rel_path)),
         ));
     }
+    if let Some(file) = rel_path.strip_prefix("project/notes/") {
+        return Some((
+            EventEntity::Note,
+            file.to_string(),
+            Some(format!("path={}", rel_path)),
+        ));
+    }
     if let Some(file) = rel_path.strip_prefix("workflow/features/") {
         return Some((
             EventEntity::Feature,
@@ -344,11 +363,13 @@ fn classify_path(rel_path: &str) -> Option<(EventEntity, String, Option<String>)
             Some(format!("path={}", rel_path)),
         ));
     }
-    if rel_path == "config.toml" {
+    if rel_path == crate::config::PRIMARY_CONFIG_FILE
+        || rel_path == crate::config::LEGACY_CONFIG_FILE
+    {
         return Some((
             EventEntity::Config,
-            "config.toml".to_string(),
-            Some("path=config.toml".to_string()),
+            rel_path.to_string(),
+            Some(format!("path={}", rel_path)),
         ));
     }
     None

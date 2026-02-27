@@ -44,8 +44,7 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
     ];
 
     for (title, desc, status) in issues {
-        let path = project_dir
-            .join("issues")
+        let path = crate::project::issues_dir(&project_dir)
             .join(status)
             .join(format!("{}.md", crate::sanitize_file_name(title)));
         if !path.exists() {
@@ -73,7 +72,7 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
     ];
 
     for (title, decision, status) in adrs {
-        let adr_path = project_dir.join("adrs");
+        let adr_path = crate::project::adrs_dir(&project_dir);
         // Check if an ADR with this title already exists (approximate)
         let slug = crate::sanitize_file_name(title);
         let exists = std::fs::read_dir(&adr_path)
@@ -93,9 +92,8 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
     // Sample release
     let release_version = "v0.1.0-alpha";
     let release_slug = crate::sanitize_file_name(release_version);
-    let release_file = project_dir
-        .join("releases")
-        .join(format!("{}.md", release_slug));
+    let release_file =
+        crate::project::releases_dir(&project_dir).join(format!("{}.md", release_slug));
     if !release_file.exists() {
         create_release(
             project_dir.clone(),
@@ -131,7 +129,7 @@ pub fn init_demo_project(base_dir: PathBuf) -> Result<PathBuf> {
     ];
     for (title, release, spec) in features {
         let slug = crate::sanitize_file_name(title);
-        let path = project_dir.join("features").join(format!("{}.md", slug));
+        let path = crate::project::features_dir(&project_dir).join(format!("{}.md", slug));
         if !path.exists() {
             create_feature(
                 project_dir.clone(),

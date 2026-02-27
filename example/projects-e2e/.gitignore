@@ -1,3 +1,4 @@
 # Keep e2e state local to this workspace.
 .ship/
 .tmp/
+.tmp-home/

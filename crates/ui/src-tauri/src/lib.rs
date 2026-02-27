@@ -3,7 +3,10 @@ use runtime::config::{
     get_effective_config, list_mcp_servers, remove_mcp_server, remove_mode, save_config,
     set_active_mode, AiConfig, McpServerConfig, ModeConfig, ProjectConfig, ProjectDiscovery,
 };
-use runtime::project::{get_active_project_global, set_active_project_global};
+use runtime::project::{
+    adrs_dir, features_dir, get_active_project_global, issues_dir, releases_dir,
+    set_active_project_global, specs_dir,
+};
 use runtime::{
     create_adr, create_feature, create_issue, create_release, create_spec, delete_adr,
     delete_issue, delete_spec, get_feature, get_feature_raw as get_feature_content, get_issue,
@@ -603,21 +606,19 @@ fn start_project_watcher(
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
 
     let poller = thread::spawn(move || {
-        let issues_dir = ship_root.join("issues");
-        let specs_dir = ship_root.join("specs");
-        let adrs_dir = ship_root.join("adrs");
-        let features_dir = ship_root.join("features");
-        let releases_dir = ship_root.join("releases");
-        let log_file = ship_root.join("log.md");
+        let issues_dir = issues_dir(&ship_root);
+        let specs_dir = specs_dir(&ship_root);
+        let adrs_dir = adrs_dir(&ship_root);
+        let features_dir = features_dir(&ship_root);
+        let releases_dir = releases_dir(&ship_root);
         let events_file = ship_root.join("events.ndjson");
-        let config_file = ship_root.join("config.toml");
+        let config_file = ship_root.join(runtime::config::PRIMARY_CONFIG_FILE);
 
         let mut last_issues = issues_signature(&issues_dir);
         let mut last_specs = issues_signature(&specs_dir);
         let mut last_adrs = issues_signature(&adrs_dir);
         let mut last_features = issues_signature(&features_dir);
         let mut last_releases = issues_signature(&releases_dir);
-        let mut last_log = file_signature(&log_file);
         let mut last_events = file_signature(&events_file);
         let mut last_config = file_signature(&config_file);
 
@@ -664,12 +665,6 @@ fn start_project_watcher(
                 tracked_files_changed = true;
             }
 
-            let next_log = file_signature(&log_file);
-            if next_log != last_log {
-                let _ = app_handle.emit("ship://log-changed", ());
-                last_log = next_log;
-            }
-
             let next_config = file_signature(&config_file);
             if next_config != last_config {
                 let _ = app_handle.emit("ship://config-changed", ());
@@ -688,6 +683,7 @@ fn start_project_watcher(
             let next_events = file_signature(&events_file);
             if next_events != last_events {
                 let _ = app_handle.emit("ship://events-changed", ());
+                let _ = app_handle.emit("ship://log-changed", ());
                 last_events = next_events;
             }
         }
@@ -774,10 +770,7 @@ fn move_issue_status(
 ) -> Result<IssueEntry, String> {
     let project_dir = get_active_dir(&state)?;
 
-    let issue_path = project_dir
-        .join("issues")
-        .join(&from_status)
-        .join(&file_name);
+    let issue_path = issues_dir(&project_dir).join(&from_status).join(&file_name);
     let new_path = move_issue(project_dir.clone(), issue_path, &from_status, &to_status)
         .map_err(|e| e.to_string())?;
     log_action(
@@ -860,7 +853,7 @@ fn create_new_adr(
 #[specta::specta]
 fn get_adr_cmd(file_name: String, state: State<AppState>) -> Result<AdrEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("adrs").join(&file_name);
+    let path = adrs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("ADR not found: {}", file_name));
     }
@@ -876,7 +869,7 @@ fn get_adr_cmd(file_name: String, state: State<AppState>) -> Result<AdrEntry, St
 #[specta::specta]
 fn update_adr_cmd(file_name: String, adr: ADR, state: State<AppState>) -> Result<AdrEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("adrs").join(&file_name);
+    let path = adrs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("ADR not found: {}", file_name));
     }
@@ -899,7 +892,7 @@ fn update_adr_cmd(file_name: String, adr: ADR, state: State<AppState>) -> Result
 #[specta::specta]
 fn delete_adr_cmd(file_name: String, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("adrs").join(&file_name);
+    let path = adrs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("ADR not found: {}", file_name));
     }
@@ -934,7 +927,7 @@ fn list_specs_cmd(state: State<AppState>) -> Result<Vec<SpecInfo>, String> {
 #[specta::specta]
 fn get_spec_cmd(file_name: String, state: State<AppState>) -> Result<SpecDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("specs").join(&file_name);
+    let path = specs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Spec not found: {}", file_name));
     }
@@ -967,7 +960,7 @@ fn update_spec_cmd(
     state: State<AppState>,
 ) -> Result<SpecDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("specs").join(&file_name);
+    let path = specs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Spec not found: {}", file_name));
     }
@@ -985,7 +978,7 @@ fn update_spec_cmd(
 #[specta::specta]
 fn delete_spec_cmd(file_name: String, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("specs").join(&file_name);
+    let path = specs_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Spec not found: {}", file_name));
     }
@@ -1022,7 +1015,7 @@ fn list_releases_cmd(state: State<AppState>) -> Result<Vec<ReleaseInfo>, String>
 #[specta::specta]
 fn get_release_cmd(file_name: String, state: State<AppState>) -> Result<ReleaseDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("releases").join(&file_name);
+    let path = releases_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Release not found: {}", file_name));
     }
@@ -1056,7 +1049,7 @@ fn update_release_cmd(
     state: State<AppState>,
 ) -> Result<ReleaseDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("releases").join(&file_name);
+    let path = releases_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Release not found: {}", file_name));
     }
@@ -1094,7 +1087,7 @@ fn list_features_cmd(state: State<AppState>) -> Result<Vec<FeatureInfo>, String>
 #[specta::specta]
 fn get_feature_cmd(file_name: String, state: State<AppState>) -> Result<FeatureDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("features").join(&file_name);
+    let path = features_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Feature not found: {}", file_name));
     }
@@ -1137,7 +1130,7 @@ fn update_feature_cmd(
     state: State<AppState>,
 ) -> Result<FeatureDocument, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = project_dir.join("features").join(&file_name);
+    let path = features_dir(&project_dir).join(&file_name);
     if !path.exists() {
         return Err(format!("Feature not found: {}", file_name));
     }

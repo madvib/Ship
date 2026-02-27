@@ -8,6 +8,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+pub const PRIMARY_CONFIG_FILE: &str = "ship.toml";
+pub const SECONDARY_CONFIG_FILE: &str = "shipwright.toml";
+pub const LEGACY_CONFIG_FILE: &str = "config.toml";
+
 // ─── Data types ───────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -45,7 +49,9 @@ impl Default for GitConfig {
                 "features".to_string(),
                 "specs".to_string(),
                 "adrs".to_string(),
-                "config.toml".to_string(),
+                "notes".to_string(),
+                "agents".to_string(),
+                "ship.toml".to_string(),
                 "templates".to_string(),
             ],
         }
@@ -126,6 +132,41 @@ pub struct AgentLayerConfig {
     /// High-level project rules for humans and agents.
     #[serde(default)]
     pub rules: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct NamespaceConfig {
+    /// Stable namespace id (e.g. "project", "workflow", "agents", "plugin:ghost-issues")
+    pub id: String,
+    /// Directory path relative to `.ship/`
+    pub path: String,
+    /// Owning module or family (e.g. "project", "workflow", "agents", "plugins")
+    pub owner: String,
+}
+
+fn default_namespaces() -> Vec<NamespaceConfig> {
+    vec![
+        NamespaceConfig {
+            id: "project".to_string(),
+            path: "project".to_string(),
+            owner: "project".to_string(),
+        },
+        NamespaceConfig {
+            id: "workflow".to_string(),
+            path: "workflow".to_string(),
+            owner: "workflow".to_string(),
+        },
+        NamespaceConfig {
+            id: "agents".to_string(),
+            path: "agents".to_string(),
+            owner: "agents".to_string(),
+        },
+        NamespaceConfig {
+            id: "generated".to_string(),
+            path: "generated".to_string(),
+            owner: "runtime".to_string(),
+        },
+    ]
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
@@ -219,6 +260,9 @@ pub struct ProjectConfig {
     pub hooks: Vec<HookConfig>,
     #[serde(default)]
     pub agent: AgentLayerConfig,
+    /// Claimed `.ship` namespaces. First-party modules are always present.
+    #[serde(default = "default_namespaces")]
+    pub namespaces: Vec<NamespaceConfig>,
 }
 
 fn default_version() -> String {
@@ -269,6 +313,7 @@ impl Default for ProjectConfig {
             active_mode: None,
             hooks: Vec::new(),
             agent: AgentLayerConfig::default(),
+            namespaces: default_namespaces(),
         }
     }
 }
@@ -291,12 +336,17 @@ pub fn get_config(project_dir: Option<PathBuf>) -> Result<ProjectConfig> {
         None => get_global_dir()?,
     };
 
-    // Try .toml first, then fall back to legacy .json.
-    let toml_path = config_dir.join("config.toml");
+    // Prefer ship.toml, then shipwright.toml, then legacy config.toml.
+    let primary_path = config_dir.join(PRIMARY_CONFIG_FILE);
+    let secondary_path = config_dir.join(SECONDARY_CONFIG_FILE);
+    let legacy_path = config_dir.join(LEGACY_CONFIG_FILE);
     let json_path = config_dir.join("config.json");
 
-    if toml_path.exists() {
-        let content = fs::read_to_string(&toml_path)?;
+    for path in [&primary_path, &secondary_path, &legacy_path] {
+        if !path.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(path)?;
         return Ok(toml::from_str(&content)?);
     }
 
@@ -392,9 +442,9 @@ fn merge_hooks(base: &[HookConfig], overlay: &[HookConfig]) -> Vec<HookConfig> {
 
 pub fn save_config(config: &ProjectConfig, project_dir: Option<PathBuf>) -> Result<()> {
     let path = if let Some(p_dir) = project_dir {
-        p_dir.join("config.toml")
+        p_dir.join(PRIMARY_CONFIG_FILE)
     } else {
-        get_global_dir()?.join("config.toml")
+        get_global_dir()?.join(PRIMARY_CONFIG_FILE)
     };
 
     if let Some(parent) = path.parent() {
@@ -596,20 +646,20 @@ pub fn is_category_committed(git: &GitConfig, category: &str) -> bool {
 }
 
 /// Write `.ship/.gitignore`. Everything not in `git.commit` is ignored by default.
-/// Keys use the new namespace paths (e.g. "workflow/issues", "project/adrs").
+/// Keys use namespace paths (e.g. "workflow/issues", "project/adrs").
 pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
     // (key, namespace path) — key is what appears in git.commit config
     let known: &[(&str, &str)] = &[
-        ("issues",       "workflow/issues"),
-        ("specs",        "workflow/specs"),
-        ("features",     "workflow/features"),
-        ("releases",     "project/releases"),
-        ("adrs",         "project/adrs"),
-        ("log.md",       "log.md"),
-        ("events.ndjson","events.ndjson"),
-        ("config.toml",  "config.toml"),
-        ("templates",    "templates"),
-        ("plugins",      "plugins"),
+        ("issues", "workflow/issues"),
+        ("specs", "workflow/specs"),
+        ("features", "workflow/features"),
+        ("releases", "project/releases"),
+        ("adrs", "project/adrs"),
+        ("notes", "project/notes"),
+        ("agents", "agents"),
+        ("events.ndjson", "events.ndjson"),
+        ("ship.toml", "ship.toml"),
+        ("templates", "**/TEMPLATE.md"),
     ];
     let mut lines = vec![
         "# Managed by Ship — edit via `ship git include/exclude`".to_string(),
@@ -619,6 +669,10 @@ pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
         if !git.commit.contains(&key.to_string()) {
             lines.push(path.to_string());
         }
+    }
+    // Generated tool outputs are always runtime-managed and local-only.
+    if !lines.iter().any(|line| line == "generated/") {
+        lines.push("generated/".to_string());
     }
     // Always ignore SQLite runtime files
     lines.push(String::new());
@@ -850,9 +904,16 @@ mod tests {
         let tmp = tempdir()?;
         let dir = init_project(tmp.path().to_path_buf())?;
         let server = McpServerConfig {
-            id: "dup".to_string(), name: "Dup".to_string(), command: "x".to_string(),
-            args: vec![], env: HashMap::new(), scope: "project".to_string(),
-            server_type: McpServerType::Stdio, url: None, disabled: false, timeout_secs: None,
+            id: "dup".to_string(),
+            name: "Dup".to_string(),
+            command: "x".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            scope: "project".to_string(),
+            server_type: McpServerType::Stdio,
+            url: None,
+            disabled: false,
+            timeout_secs: None,
         };
         add_mcp_server(Some(dir.clone()), server.clone())?;
         let result = add_mcp_server(Some(dir), server);
@@ -886,8 +947,10 @@ mod tests {
         let tmp = tempdir()?;
         let dir = init_project(tmp.path().to_path_buf())?;
         let hook = HookConfig {
-            id: "bye".to_string(), trigger: HookTrigger::Stop,
-            matcher: None, command: "echo bye".to_string(),
+            id: "bye".to_string(),
+            trigger: HookTrigger::Stop,
+            matcher: None,
+            command: "echo bye".to_string(),
         };
         add_hook(Some(dir.clone()), hook)?;
         remove_hook(Some(dir.clone()), "bye")?;
@@ -900,8 +963,10 @@ mod tests {
         let tmp = tempdir()?;
         let dir = init_project(tmp.path().to_path_buf())?;
         let hook = HookConfig {
-            id: "dup".to_string(), trigger: HookTrigger::PreToolUse,
-            matcher: None, command: "x".to_string(),
+            id: "dup".to_string(),
+            trigger: HookTrigger::PreToolUse,
+            matcher: None,
+            command: "x".to_string(),
         };
         add_hook(Some(dir.clone()), hook.clone())?;
         let result = add_hook(Some(dir), hook);
@@ -932,11 +997,21 @@ mod tests {
     fn remove_active_mode_clears_active() -> Result<()> {
         let tmp = tempdir()?;
         let dir = init_project(tmp.path().to_path_buf())?;
-        add_mode(Some(dir.clone()), ModeConfig { id: "x".to_string(), name: "X".to_string(), ..Default::default() })?;
+        add_mode(
+            Some(dir.clone()),
+            ModeConfig {
+                id: "x".to_string(),
+                name: "X".to_string(),
+                ..Default::default()
+            },
+        )?;
         set_active_mode(Some(dir.clone()), Some("x"))?;
         remove_mode(Some(dir.clone()), "x")?;
         let cfg = get_config(Some(dir))?;
-        assert!(cfg.active_mode.is_none(), "active_mode should be cleared when mode removed");
+        assert!(
+            cfg.active_mode.is_none(),
+            "active_mode should be cleared when mode removed"
+        );
         Ok(())
     }
 
@@ -975,10 +1050,16 @@ mod tests {
         let tmp = tempdir()?;
         let dir = init_project(tmp.path().to_path_buf())?;
         let http_server = McpServerConfig {
-            id: "http-svc".to_string(), name: "HTTP".to_string(),
-            command: String::new(), args: vec![], env: HashMap::new(),
-            scope: "project".to_string(), server_type: McpServerType::Http,
-            url: Some("http://localhost:8080".to_string()), disabled: false, timeout_secs: Some(30),
+            id: "http-svc".to_string(),
+            name: "HTTP".to_string(),
+            command: String::new(),
+            args: vec![],
+            env: HashMap::new(),
+            scope: "project".to_string(),
+            server_type: McpServerType::Http,
+            url: Some("http://localhost:8080".to_string()),
+            disabled: false,
+            timeout_secs: Some(30),
         };
         add_mcp_server(Some(dir.clone()), http_server)?;
         let servers = list_mcp_servers(Some(dir))?;
@@ -989,11 +1070,17 @@ mod tests {
     }
 }
 
-/// Migrate `config.json` → `config.toml` in-place (no-op if already migrated).
+/// Migrate `config.json` → `ship.toml` in-place (no-op if already migrated).
 pub fn migrate_json_config_file(project_dir: &Path) -> Result<bool> {
     let json_path = project_dir.join("config.json");
-    let toml_path = project_dir.join("config.toml");
-    if !json_path.exists() || toml_path.exists() {
+    let primary_path = project_dir.join(PRIMARY_CONFIG_FILE);
+    let secondary_path = project_dir.join(SECONDARY_CONFIG_FILE);
+    let legacy_path = project_dir.join(LEGACY_CONFIG_FILE);
+    if !json_path.exists()
+        || primary_path.exists()
+        || secondary_path.exists()
+        || legacy_path.exists()
+    {
         return Ok(false);
     }
     let config = migrate_json_config(&json_path)?;

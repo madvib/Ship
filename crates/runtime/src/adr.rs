@@ -38,10 +38,7 @@ pub struct AdrEntry {
 }
 
 fn ship_dir_from_adr_path(path: &Path) -> Option<PathBuf> {
-    // .ship/adrs/<file>.md -> go up two levels
-    path.parent()
-        .and_then(|p| p.parent())
-        .map(Path::to_path_buf)
+    crate::project::ship_dir_from_path(path)
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -205,6 +202,9 @@ pub fn list_adrs(project_dir: PathBuf) -> Result<Vec<AdrEntry>> {
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
+            if file_name == "TEMPLATE.md" || file_name == "README.md" {
+                continue;
+            }
             if let Ok(adr) = get_adr(path.clone()) {
                 entries.push(AdrEntry {
                     file_name,

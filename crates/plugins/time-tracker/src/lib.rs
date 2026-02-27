@@ -71,7 +71,7 @@ impl Plugin for TimeTracker {
 // ─── Storage Helpers ──────────────────────────────────────────────────────────
 
 fn plugin_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join("plugins").join("time-tracker")
+    project_dir.join("time-tracker")
 }
 
 fn active_timer_path(project_dir: &Path) -> PathBuf {

@@ -34,7 +34,10 @@ fn claude_export_writes_mcp_json_at_project_root() {
     let content = std::fs::read_to_string(&mcp_json).unwrap();
     let val: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert!(val["mcpServers"]["github"].is_object());
-    assert!(val["mcpServers"]["ship"].is_object(), "ship server always injected");
+    assert!(
+        val["mcpServers"]["ship"].is_object(),
+        "ship server always injected"
+    );
 }
 
 /// Disabled servers are not exported.
@@ -71,8 +74,7 @@ fn export_preserves_user_servers() {
     let mcp_json = p.root().join(".mcp.json");
     let mut val: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&mcp_json).unwrap()).unwrap();
-    val["mcpServers"]["user-server"] =
-        serde_json::json!({ "command": "user-tool", "args": [] });
+    val["mcpServers"]["user-server"] = serde_json::json!({ "command": "user-tool", "args": [] });
     std::fs::write(&mcp_json, serde_json::to_string_pretty(&val).unwrap()).unwrap();
 
     // Re-export — user server must survive

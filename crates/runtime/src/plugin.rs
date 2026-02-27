@@ -32,7 +32,16 @@ pub trait Plugin: Send + Sync {
 
     /// Returns the directory where this plugin stores its data.
     fn plugin_dir(&self, project_dir: &Path) -> PathBuf {
-        project_dir.join("plugins").join(self.name())
+        project_dir.join(self.name())
+    }
+
+    /// Namespace claim used when registering plugin directories in `.ship/ship.toml`.
+    fn namespace_claim(&self) -> crate::config::NamespaceConfig {
+        crate::config::NamespaceConfig {
+            id: format!("plugin:{}", self.name()),
+            path: self.name().to_string(),
+            owner: "plugins".to_string(),
+        }
     }
 }
 
@@ -49,6 +58,17 @@ impl PluginRegistry {
 
     pub fn register(&mut self, plugin: Box<dyn Plugin>) {
         self.plugins.push(plugin);
+    }
+
+    /// Register a plugin and persist its namespace claim in `.ship/ship.toml`.
+    pub fn register_with_project(
+        &mut self,
+        project_dir: &Path,
+        plugin: Box<dyn Plugin>,
+    ) -> Result<()> {
+        crate::project::register_ship_namespace(project_dir, plugin.namespace_claim())?;
+        self.plugins.push(plugin);
+        Ok(())
     }
 
     pub fn plugins(&self) -> &[Box<dyn Plugin>] {

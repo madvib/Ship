@@ -24,14 +24,17 @@ name = "Done"
 color = "green"
 
 [git]
-ignore = ["events.ndjson"]
+ignore = [
+    "events.ndjson",
+    "issues",
+]
 commit = [
     "releases",
     "features",
     "specs",
     "adrs",
-    "config.toml",
     "templates",
+    "ship.toml",
 ]
 
 [agent]
@@ -39,3 +42,23 @@ skills = []
 prompts = []
 context = []
 rules = []
+
+[[namespaces]]
+id = "project"
+path = "project"
+owner = "project"
+
+[[namespaces]]
+id = "workflow"
+path = "workflow"
+owner = "workflow"
+
+[[namespaces]]
+id = "agents"
+path = "agents"
+owner = "agents"
+
+[[namespaces]]
+id = "generated"
+path = "generated"
+owner = "runtime"

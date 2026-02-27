@@ -44,8 +44,7 @@ impl TestProject {
     /// Run the `ship` CLI binary against this project's directory.
     /// Returns the Command pre-configured; call `.output()` or `.status()`.
     pub fn cli(&self, args: &[&str]) -> Command {
-        let bin = std::env::var("SHIP_BIN")
-            .unwrap_or_else(|_| ship_bin_path());
+        let bin = std::env::var("SHIP_BIN").unwrap_or_else(|_| ship_bin_path());
         let mut cmd = Command::new(bin);
         cmd.current_dir(self.dir.path())
             .env("SHIP_DIR", &self.ship_dir);
@@ -77,12 +76,14 @@ impl TestProject {
     /// Assert a file under .ship/ contains a substring.
     pub fn assert_ship_file_contains(&self, rel: &str, needle: &str) {
         let path = self.ship_dir.join(rel);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!(".ship/{} not readable", rel));
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|_| panic!(".ship/{} not readable", rel));
         assert!(
             content.contains(needle),
             ".ship/{} should contain {:?}\n--- content ---\n{}",
-            rel, needle, content
+            rel,
+            needle,
+            content
         );
     }
 

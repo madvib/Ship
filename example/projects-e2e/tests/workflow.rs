@@ -20,16 +20,27 @@ fn init_creates_namespace_structure() {
     p.assert_ship_file("project/adrs");
     p.assert_ship_file("project/notes");
     p.assert_ship_file("project/vision.md");
+    p.assert_ship_file("project/TEMPLATE.md");
+    p.assert_ship_file("project/releases/TEMPLATE.md");
+    p.assert_ship_file("project/adrs/TEMPLATE.md");
+    p.assert_ship_file("project/notes/TEMPLATE.md");
 
     // agents/
     p.assert_ship_file("agents/modes");
+    p.assert_ship_file("agents/modes/planning.toml");
+    p.assert_ship_file("agents/modes/execution.toml");
     p.assert_ship_file("agents/skills");
     p.assert_ship_file("agents/prompts");
 
     // shared
-    p.assert_ship_file("log.md");
+    p.assert_ship_file("generated");
     p.assert_ship_file("events.ndjson");
-    p.assert_ship_file("config.toml");
+    p.assert_ship_file("ship.toml");
+    p.assert_ship_file("README.md");
+    p.assert_ship_file("workflow/README.md");
+    p.assert_ship_file("workflow/issues/TEMPLATE.md");
+    p.assert_ship_file("workflow/specs/TEMPLATE.md");
+    p.assert_ship_file("workflow/features/TEMPLATE.md");
 }
 
 /// Vision document is seeded in project/ not workflow/specs/.
@@ -110,11 +121,14 @@ fn gitignore_uses_namespace_paths() {
         gitignore.contains("workflow/issues"),
         "issues should be gitignored"
     );
+    assert!(gitignore.contains("generated/"));
     assert!(gitignore.contains("events.ndjson"));
     assert!(gitignore.contains("ship.db"));
 
     // These are committed by default — must NOT appear in gitignore
     assert!(!gitignore.contains("project/adrs"));
+    assert!(!gitignore.contains("project/notes"));
+    assert!(!gitignore.contains("agents"));
     assert!(!gitignore.contains("workflow/features"));
     assert!(!gitignore.contains("project/releases"));
     assert!(!gitignore.contains("workflow/specs"));
