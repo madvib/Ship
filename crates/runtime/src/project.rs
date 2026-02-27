@@ -277,6 +277,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     write_default_templates(&ship_path)?;
     write_directory_readmes(&ship_path)?;
     write_default_agent_mode_files(&ship_path)?;
+    write_default_skills(&ship_path)?;
 
     // Write default .gitignore (opinionated alpha defaults)
     let gitignore_path = ship_path.join(".gitignore");
@@ -454,6 +455,12 @@ fn write_default_agent_mode_files(ship_path: &Path) -> Result<()> {
             "id = \"execution\"\nname = \"Execution\"\nactive_tools = [\"ship_list_issues\", \"ship_get_issue\", \"ship_update_issue\", \"ship_move_issue\", \"ship_list_notes\", \"ship_create_note\"]\n",
         )?;
     }
+    Ok(())
+}
+
+fn write_default_skills(ship_path: &Path) -> Result<()> {
+    let skill_path = crate::project::skills_dir(ship_path).join("task-policy.md");
+    write_if_missing(&skill_path, include_str!("skills/task-policy.md"))?;
     Ok(())
 }
 

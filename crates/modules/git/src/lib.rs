@@ -11,6 +11,40 @@ use std::path::{Path, PathBuf};
 
 const POST_CHECKOUT_HOOK_CONTENT: &str = "#!/usr/bin/env sh\nship git post-checkout \"$@\"\n";
 
+const PRE_COMMIT_HOOK_CONTENT: &str = "\
+#!/usr/bin/env sh
+# ship pre-commit: block staging of generated agent config files.
+# These are written by `ship git sync` / post-checkout and must never be committed.
+BLOCKED=\"CLAUDE.md GEMINI.md SHIPWRIGHT.md .mcp.json\"
+for f in $BLOCKED; do
+    if git diff --cached --name-only | grep -qx \"$f\"; then
+        echo \"[ship] ERROR: '$f' is a generated file managed by Ship and must not be committed.\"
+        echo \"[ship]        Add it to .gitignore and unstage it: git restore --staged $f\"
+        exit 1
+    fi
+done
+# Also block .claude/, .gemini/, .codex/ directories
+for dir in .claude .gemini .codex; do
+    if git diff --cached --name-only | grep -q \"^${dir}/\"; then
+        echo \"[ship] ERROR: '$dir/' contains generated agent config managed by Ship.\"
+        echo \"[ship]        Add '$dir/' to .gitignore and unstage: git restore --staged $dir/\"
+        exit 1
+    fi
+done
+exit 0
+";
+
+/// Generated file paths that must be in the root `.gitignore`.
+pub const GENERATED_GITIGNORE_ENTRIES: &[&str] = &[
+    "CLAUDE.md",
+    "GEMINI.md",
+    "SHIPWRIGHT.md",
+    ".mcp.json",
+    ".claude/",
+    ".gemini/",
+    ".codex/",
+];
+
 struct ResolvedFeatureAgent {
     mcp_server_ids: Vec<String>,
     skills: Vec<Skill>,
@@ -25,34 +59,71 @@ pub fn install_hooks(git_dir: &Path) -> Result<()> {
     fs::create_dir_all(&hooks_dir)
         .with_context(|| format!("Failed to create hooks directory: {}", hooks_dir.display()))?;
 
-    let post_checkout = hooks_dir.join("post-checkout");
-    let should_write = fs::read_to_string(&post_checkout)
-        .map(|existing| existing != POST_CHECKOUT_HOOK_CONTENT)
+    install_hook(&hooks_dir, "post-checkout", POST_CHECKOUT_HOOK_CONTENT)?;
+    install_hook(&hooks_dir, "pre-commit", PRE_COMMIT_HOOK_CONTENT)?;
+
+    Ok(())
+}
+
+fn install_hook(hooks_dir: &Path, name: &str, content: &str) -> Result<()> {
+    let path = hooks_dir.join(name);
+    let should_write = fs::read_to_string(&path)
+        .map(|existing| existing != content)
         .unwrap_or(true);
 
     if should_write {
-        fs::write(&post_checkout, POST_CHECKOUT_HOOK_CONTENT).with_context(|| {
-            format!(
-                "Failed to write git post-checkout hook: {}",
-                post_checkout.display()
-            )
-        })?;
+        fs::write(&path, content)
+            .with_context(|| format!("Failed to write git {} hook: {}", name, path.display()))?;
     }
 
     #[cfg(unix)]
     {
-        let mut perms = fs::metadata(&post_checkout)
-            .with_context(|| format!("Failed to stat hook: {}", post_checkout.display()))?
+        let mut perms = fs::metadata(&path)
+            .with_context(|| format!("Failed to stat hook: {}", path.display()))?
             .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&post_checkout, perms).with_context(|| {
+        fs::set_permissions(&path, perms).with_context(|| {
             format!(
                 "Failed to set executable permissions on hook: {}",
-                post_checkout.display()
+                path.display()
             )
         })?;
     }
 
+    Ok(())
+}
+
+/// Append Ship's generated-file entries to the project root `.gitignore`.
+/// Idempotent — skips entries already present.
+pub fn write_root_gitignore(project_root: &Path) -> Result<()> {
+    let gitignore_path = project_root.join(".gitignore");
+    let existing = fs::read_to_string(&gitignore_path).unwrap_or_default();
+
+    let mut additions = Vec::new();
+    for entry in GENERATED_GITIGNORE_ENTRIES {
+        // Match whole lines to avoid partial matches
+        let already_present = existing.lines().any(|l| l.trim() == *entry);
+        if !already_present {
+            additions.push(*entry);
+        }
+    }
+
+    if additions.is_empty() {
+        return Ok(());
+    }
+
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str("\n# Ship — generated agent config (never commit these)\n");
+    for entry in &additions {
+        content.push_str(entry);
+        content.push('\n');
+    }
+
+    fs::write(&gitignore_path, content)
+        .with_context(|| format!("Failed to write {}", gitignore_path.display()))?;
     Ok(())
 }
 
@@ -317,17 +388,87 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn install_hooks_writes_post_checkout() -> Result<()> {
+    fn install_hooks_writes_post_checkout_and_pre_commit() -> Result<()> {
         let tmp = tempdir()?;
         let git_dir = tmp.path().join(".git");
         fs::create_dir_all(git_dir.join("hooks"))?;
 
         install_hooks(&git_dir)?;
+        // idempotent
         install_hooks(&git_dir)?;
 
-        let hook_path = git_dir.join("hooks").join("post-checkout");
-        let hook = fs::read_to_string(&hook_path)?;
-        assert_eq!(hook, POST_CHECKOUT_HOOK_CONTENT);
+        let post_checkout = fs::read_to_string(git_dir.join("hooks/post-checkout"))?;
+        assert_eq!(post_checkout, POST_CHECKOUT_HOOK_CONTENT);
+
+        let pre_commit = fs::read_to_string(git_dir.join("hooks/pre-commit"))?;
+        assert!(pre_commit.contains("CLAUDE.md"));
+        assert!(pre_commit.contains(".mcp.json"));
+        assert!(pre_commit.contains(".claude"));
+        assert!(pre_commit.starts_with("#!/usr/bin/env sh"));
+        Ok(())
+    }
+
+    #[test]
+    fn install_hooks_skips_missing_git_dir() -> Result<()> {
+        let tmp = tempdir()?;
+        // .git doesn't exist — should be a no-op, not an error
+        install_hooks(&tmp.path().join(".git"))?;
+        Ok(())
+    }
+
+    #[test]
+    fn write_root_gitignore_appends_generated_entries() -> Result<()> {
+        let tmp = tempdir()?;
+        write_root_gitignore(tmp.path())?;
+
+        let content = fs::read_to_string(tmp.path().join(".gitignore"))?;
+        for entry in GENERATED_GITIGNORE_ENTRIES {
+            assert!(content.contains(entry), "missing entry: {}", entry);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn write_root_gitignore_is_idempotent() -> Result<()> {
+        let tmp = tempdir()?;
+        write_root_gitignore(tmp.path())?;
+        write_root_gitignore(tmp.path())?;
+
+        let content = fs::read_to_string(tmp.path().join(".gitignore"))?;
+        // Each entry should appear exactly once
+        assert_eq!(content.matches("CLAUDE.md").count(), 1);
+        assert_eq!(content.matches(".mcp.json").count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn write_root_gitignore_preserves_existing_entries() -> Result<()> {
+        let tmp = tempdir()?;
+        fs::write(tmp.path().join(".gitignore"), "node_modules/\n.env\n")?;
+
+        write_root_gitignore(tmp.path())?;
+
+        let content = fs::read_to_string(tmp.path().join(".gitignore"))?;
+        assert!(content.contains("node_modules/"));
+        assert!(content.contains(".env"));
+        assert!(content.contains("CLAUDE.md"));
+        Ok(())
+    }
+
+    #[test]
+    fn write_root_gitignore_skips_already_present_entries() -> Result<()> {
+        let tmp = tempdir()?;
+        // Pre-populate with some of the entries
+        fs::write(tmp.path().join(".gitignore"), "CLAUDE.md\n.mcp.json\n")?;
+
+        write_root_gitignore(tmp.path())?;
+
+        let content = fs::read_to_string(tmp.path().join(".gitignore"))?;
+        // These should still appear exactly once (not duplicated)
+        assert_eq!(content.matches("CLAUDE.md").count(), 1);
+        assert_eq!(content.matches(".mcp.json").count(), 1);
+        // But the others should now be present
+        assert!(content.contains(".claude/"));
         Ok(())
     }
 

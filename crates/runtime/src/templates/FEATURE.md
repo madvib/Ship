@@ -1,18 +1,21 @@
 +++
 id = ""
 title = ""
-status = "active"
+status = "planned"
 created = ""
 updated = ""
-owner = ""
+version = ""
+branch = ""
 release = ""
 spec = ""
-adrs = []
+supersedes = ""
 tags = []
 +++
 
-## Why
+## Description
 
+One paragraph. What this feature does, for whom, and why it matters.
+Keep this current — it feeds the feature catalog and documentation pipeline.
 
 ## Acceptance Criteria
 
@@ -22,4 +25,10 @@ tags = []
 
 - [ ]
 
-## Notes
+## Implementation Notes
+
+Key technical decisions or constraints relevant to ongoing work.
+
+## History
+
+- Initial

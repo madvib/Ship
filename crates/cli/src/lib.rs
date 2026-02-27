@@ -15,7 +15,7 @@ use runtime::{
     set_active_mode, set_category_committed, update_feature, update_note, update_release,
     update_skill, update_user_skill,
 };
-use ship_module_git::{install_hooks, on_post_checkout};
+use ship_module_git::{install_hooks, on_post_checkout, write_root_gitignore};
 use std::env;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
@@ -507,6 +507,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 eprintln!(
                     "[ship] warning: failed to install git hooks in {}: {}",
                     target.join(".git").display(),
+                    err
+                );
+            }
+            if let Err(err) = write_root_gitignore(&target) {
+                eprintln!(
+                    "[ship] warning: failed to update root .gitignore: {}",
                     err
                 );
             }

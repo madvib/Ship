@@ -791,6 +791,46 @@ mod tests {
         assert!(ship_path.join("agents/modes/execution.toml").is_file());
         assert!(ship_path.join("events.ndjson").is_file());
         assert!(ship_path.join("ship.toml").is_file());
+        // default skill seeded
+        assert!(ship_path.join("agents/skills/task-policy.md").is_file());
+        let skill_content = fs::read_to_string(ship_path.join("agents/skills/task-policy.md"))?;
+        assert!(skill_content.contains("task-policy"));
+        assert!(skill_content.contains("Shipwright Workflow Policy"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_init_project_idempotent() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        // First init
+        let ship_path = init_project(tmp.path().to_path_buf())?;
+        // Write a custom skill so we can verify it isn't clobbered
+        let custom_skill = ship_path.join("agents/skills/custom.md");
+        fs::write(&custom_skill, "+++\nid = \"custom\"\nname = \"Custom\"\n+++\nmy content")?;
+        // Second init on the same directory
+        let ship_path2 = init_project(tmp.path().to_path_buf())?;
+        assert_eq!(ship_path, ship_path2);
+        // Custom skill must still be present and unchanged
+        assert!(custom_skill.exists());
+        assert_eq!(
+            fs::read_to_string(&custom_skill)?,
+            "+++\nid = \"custom\"\nname = \"Custom\"\n+++\nmy content"
+        );
+        // Default skill still present
+        assert!(ship_path.join("agents/skills/task-policy.md").is_file());
+        Ok(())
+    }
+
+    #[test]
+    fn test_init_project_feature_template_has_rich_fields() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = init_project(tmp.path().to_path_buf())?;
+        let template = fs::read_to_string(ship_path.join("workflow/features/TEMPLATE.md"))?;
+        // New lifecycle fields
+        assert!(template.contains("status = \"planned\""));
+        assert!(template.contains("version"));
+        assert!(template.contains("## Description"));
+        assert!(template.contains("## Implementation Notes"));
         Ok(())
     }
 
