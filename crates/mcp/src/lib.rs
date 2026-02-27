@@ -13,15 +13,16 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use runtime::{
-    NoteScope, add_status, create_adr, create_feature, create_issue, create_release, create_skill,
-    create_spec, create_user_skill, delete_issue, delete_skill, delete_user_skill,
-    find_release_path, get_adr, get_config, get_effective_skill, get_feature_raw, get_git_config,
-    get_issue, get_project_dir, get_project_name, get_project_statuses, get_release_raw, get_skill,
-    get_spec_raw, get_user_skill, ingest_external_events, is_category_committed, list_adrs,
-    list_effective_skills, list_events_since, list_features, list_issues, list_issues_full,
+    NoteScope, Prompt, add_status, create_adr, create_feature, create_issue, create_prompt,
+    create_release, create_skill, create_spec, create_user_skill, delete_issue, delete_prompt,
+    delete_skill, delete_user_skill, find_release_path, get_adr, get_config, get_effective_skill,
+    get_feature_raw, get_git_config, get_issue, get_project_dir, get_project_name,
+    get_project_statuses, get_prompt, get_release_raw, get_skill, get_spec_raw, get_user_skill,
+    ingest_external_events, is_category_committed, list_adrs, list_effective_skills,
+    list_events_since, list_features, list_issues, list_issues_full, list_prompts,
     list_registered_projects, list_releases, list_skills, list_specs, list_user_skills, log_action,
     log_action_by, move_issue, read_log, register_project, remove_status, set_category_committed,
-    update_feature, update_release, update_skill, update_spec, update_user_skill,
+    update_feature, update_prompt, update_release, update_skill, update_spec, update_user_skill,
 };
 use serde::Deserialize;
 use ship_module_git::{install_hooks, on_post_checkout};
@@ -236,6 +237,38 @@ pub struct DeleteSkillRequest {
     pub id: String,
     /// Scope: project (default) or user
     pub scope: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CreatePromptRequest {
+    /// Stable prompt id (e.g. "review-mode")
+    pub id: String,
+    /// Human-readable name
+    pub name: String,
+    /// Markdown body — the actual system prompt content
+    pub content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct GetPromptRequest {
+    /// Prompt id (without .md)
+    pub id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct UpdatePromptRequest {
+    /// Prompt id (without .md)
+    pub id: String,
+    /// New name (optional)
+    pub name: Option<String>,
+    /// New content (optional)
+    pub content: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct DeletePromptRequest {
+    /// Prompt id (without .md)
+    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -859,6 +892,71 @@ impl ShipServer {
                 format!("Updated note: {}", req.file_name)
             }
             Err(err) => format!("Error: {}", err),
+        }
+    }
+
+    /// List prompts
+    #[tool(description = "List all agent prompts in the active project.")]
+    async fn list_prompts(&self) -> String {
+        let Ok(project_dir) = self.get_effective_project_dir().await else {
+            return "Error: no active project.".to_string();
+        };
+        match list_prompts(&project_dir) {
+            Ok(prompts) if prompts.is_empty() => "No prompts configured.".to_string(),
+            Ok(prompts) => prompts
+                .iter()
+                .map(|p| format!("- {} ({})", p.id, p.name))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Get a prompt
+    #[tool(description = "Get the full content of a prompt by id.")]
+    async fn get_prompt(&self, Parameters(req): Parameters<GetPromptRequest>) -> String {
+        let Ok(project_dir) = self.get_effective_project_dir().await else {
+            return "Error: no active project.".to_string();
+        };
+        match get_prompt(&project_dir, &req.id) {
+            Ok(p) => format!("# {} ({})\n\n{}", p.name, p.id, p.content),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Create a prompt
+    #[tool(description = "Create a new agent prompt in the active project.")]
+    async fn create_prompt(&self, Parameters(req): Parameters<CreatePromptRequest>) -> String {
+        let Ok(project_dir) = self.get_effective_project_dir().await else {
+            return "Error: no active project.".to_string();
+        };
+        match create_prompt(&project_dir, &req.id, &req.name, &req.content) {
+            Ok(p) => format!("Created prompt: {} ({})", p.name, p.id),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Update a prompt
+    #[tool(description = "Update the name or content of an existing prompt.")]
+    async fn update_prompt(&self, Parameters(req): Parameters<UpdatePromptRequest>) -> String {
+        let Ok(project_dir) = self.get_effective_project_dir().await else {
+            return "Error: no active project.".to_string();
+        };
+        match update_prompt(&project_dir, &req.id, req.name.as_deref(), req.content.as_deref()) {
+            Ok(_) => format!("Updated prompt '{}'.", req.id),
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Delete a prompt
+    #[tool(description = "Delete a prompt by id.")]
+    async fn delete_prompt(&self, Parameters(req): Parameters<DeletePromptRequest>) -> String {
+        let Ok(project_dir) = self.get_effective_project_dir().await else {
+            return "Error: no active project.".to_string();
+        };
+        match delete_prompt(&project_dir, &req.id) {
+            Ok(()) => format!("Deleted prompt '{}'.", req.id),
+            Err(e) => format!("Error: {}", e),
         }
     }
 

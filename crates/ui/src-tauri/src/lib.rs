@@ -8,17 +8,18 @@ use runtime::project::{
     set_active_project_global, specs_dir,
 };
 use runtime::{
-    ProviderInfo, create_adr, create_feature, create_issue, create_release, create_spec,
-    create_skill, create_user_skill, delete_adr, delete_issue, delete_skill, delete_user_skill,
-    delete_spec, get_feature, get_feature_raw as get_feature_content, get_issue, get_project_dir,
-    get_project_name, get_release, get_release_raw as get_release_content,
+    Prompt, ProviderInfo, create_adr, create_feature, create_issue, create_prompt, create_release,
+    create_spec, create_skill, create_user_skill, delete_adr, delete_issue, delete_prompt,
+    delete_skill, delete_user_skill, delete_spec, get_feature,
+    get_feature_raw as get_feature_content, get_issue, get_project_dir, get_project_name,
+    get_prompt, get_release, get_release_raw as get_release_content,
     get_spec_raw as get_spec_content, get_skill, get_effective_skill, get_user_skill,
     ingest_external_events, init_project, list_adrs, list_events_since, list_features,
-    list_issues_full, list_providers, list_registered_projects, list_releases, list_skills,
-    list_effective_skills, list_specs, list_user_skills, log_action, move_issue, read_log_entries,
-    read_template, register_project, update_adr, update_feature, update_issue, update_release,
-    update_skill, update_user_skill, update_spec, AdrEntry, EventRecord, Issue, IssueEntry,
-    LogEntry, Skill, ADR, SHIP_DIR_NAME,
+    list_issues_full, list_prompts, list_providers, list_registered_projects, list_releases,
+    list_skills, list_effective_skills, list_specs, list_user_skills, log_action, move_issue,
+    read_log_entries, read_template, register_project, update_adr, update_feature, update_issue,
+    update_prompt, update_release, update_skill, update_user_skill, update_spec, AdrEntry,
+    EventRecord, Issue, IssueEntry, LogEntry, Skill, ADR, SHIP_DIR_NAME,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -1341,6 +1342,53 @@ fn delete_skill_cmd(id: String, scope: Option<String>, state: State<AppState>) -
     }
 }
 
+// ─── Commands: Prompts ────────────────────────────────────────────────────────
+
+#[tauri::command]
+#[specta::specta]
+fn list_prompts_cmd(state: State<AppState>) -> Result<Vec<Prompt>, String> {
+    let dir = get_active_dir(&state)?;
+    list_prompts(&dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_prompt_cmd(id: String, state: State<AppState>) -> Result<Prompt, String> {
+    let dir = get_active_dir(&state)?;
+    get_prompt(&dir, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn create_prompt_cmd(
+    id: String,
+    name: String,
+    content: String,
+    state: State<AppState>,
+) -> Result<Prompt, String> {
+    let dir = get_active_dir(&state)?;
+    create_prompt(&dir, &id, &name, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn update_prompt_cmd(
+    id: String,
+    name: Option<String>,
+    content: Option<String>,
+    state: State<AppState>,
+) -> Result<Prompt, String> {
+    let dir = get_active_dir(&state)?;
+    update_prompt(&dir, &id, name.as_deref(), content.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn delete_prompt_cmd(id: String, state: State<AppState>) -> Result<(), String> {
+    let dir = get_active_dir(&state)?;
+    delete_prompt(&dir, &id).map_err(|e| e.to_string())
+}
+
 // ─── Commands: Providers ──────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1504,6 +1552,12 @@ pub fn run() {
             create_skill_cmd,
             update_skill_cmd,
             delete_skill_cmd,
+            // Prompts
+            list_prompts_cmd,
+            get_prompt_cmd,
+            create_prompt_cmd,
+            update_prompt_cmd,
+            delete_prompt_cmd,
             // Providers
             list_providers_cmd,
             // Agent export
