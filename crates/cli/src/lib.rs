@@ -79,6 +79,7 @@ pub enum Commands {
         action: ProjectCommands,
     },
     /// Initialize a demo project with sample data (safe for testing)
+    #[command(hide = true)]
     Demo {
         /// Directory to initialize (defaults to ./ship-demo)
         #[arg(default_value = "./ship-demo")]
@@ -90,6 +91,7 @@ pub enum Commands {
         action: GitCommands,
     },
     /// Scan codebase for TODO/FIXME/HACK/BUG comments
+    #[command(hide = true)]
     Ghost {
         #[command(subcommand)]
         action: GhostCommands,
@@ -100,6 +102,7 @@ pub enum Commands {
         action: ConfigCommands,
     },
     /// Track time spent on issues
+    #[command(hide = true)]
     Time {
         #[command(subcommand)]
         action: TimeCommands,
@@ -112,6 +115,7 @@ pub enum Commands {
     /// Start the MCP server on stdio
     Mcp,
     /// Migrate legacy YAML issues and JSON config to TOML
+    #[command(hide = true)]
     Migrate,
 }
 

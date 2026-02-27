@@ -1,8 +1,6 @@
 # Managed by Ship — edit via `ship git include/exclude`
 
 workflow/issues
-project/notes
-agents
 events.ndjson
 generated/
 
