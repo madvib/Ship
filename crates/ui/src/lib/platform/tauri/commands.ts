@@ -60,8 +60,10 @@ export const setActiveProjectCmd = (path: string): Promise<ProjectInfo> =>
 export const createNewIssueCmd = (
   title: string,
   description: string,
-  status: string
-): Promise<IssueEntry> => invoke('create_new_issue', { title, description, status });
+  status: string,
+  assignee?: string | null,
+  tags?: string[] | null
+): Promise<IssueEntry> => invoke('create_new_issue', { title, description, status, assignee, tags });
 
 export const moveIssueStatusCmd = (
   fileName: string,
@@ -120,6 +122,8 @@ export const updateFeatureCmd = (fileName: string, content: string): Promise<Fea
 
 export const getTemplateCmd = (kind: TemplateKind): Promise<string> =>
   invoke('get_template_cmd', { kind });
+export const saveTemplateCmd = (kind: TemplateKind, content: string): Promise<void> =>
+  invoke('save_template_cmd', { kind, content });
 
 // Modes
 export const listModesCmd = (): Promise<ModeConfig[]> =>

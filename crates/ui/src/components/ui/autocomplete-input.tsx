@@ -19,6 +19,7 @@ interface AutocompleteInputProps {
   value: string;
   options: AutocompleteOption[];
   placeholder?: string;
+  autoFocus?: boolean;
   disabled?: boolean;
   className?: string;
   noResultsText?: string;
@@ -37,6 +38,7 @@ export default function AutocompleteInput({
   value,
   options,
   placeholder,
+  autoFocus = false,
   disabled = false,
   className,
   noResultsText = 'No matches found.',
@@ -102,7 +104,6 @@ export default function AutocompleteInput({
       onOpenChange={setOpen}
       onInputValueChange={(nextValue) => {
         onValueChange(nextValue);
-        setOpen(true);
       }}
       itemToStringLabel={(option) => option.value}
       itemToStringValue={(option) => option.value}
@@ -110,6 +111,7 @@ export default function AutocompleteInput({
       <UiComboboxInput
         id={id}
         placeholder={placeholder}
+        autoFocus={autoFocus}
         disabled={disabled}
         className={className}
         showTrigger={false}

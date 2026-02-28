@@ -6,7 +6,7 @@ date = "2026-02-26"
 tags = []
 +++
 
-## Decision
+## Native AI tool config locations for alpha — no generated/ dir or symlinks
 
 For alpha, generate AI tool configs at their native expected locations rather than consolidating under .ship/generated/ with symlinks.
 

@@ -1,47 +1,22 @@
-const FRONTMATTER_PATTERN = /^\uFEFF?(?:[ \t]*\r?\n)*---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+import { ADR } from '@/bindings';
 
-function extractFrontmatterTitle(markdown: string): string | null {
-  const match = markdown.match(FRONTMATTER_PATTERN);
-  if (!match) return null;
-  const lines = match[1].split(/\r?\n/);
-  for (const line of lines) {
-    const titleMatch = line.match(/^\s*title\s*:\s*(.+)\s*$/i);
-    if (!titleMatch) continue;
-    const cleaned = titleMatch[1].trim().replace(/^['"]|['"]$/g, '');
-    if (cleaned) return cleaned;
-  }
-  return null;
-}
-
-function stripFrontmatter(markdown: string): string {
-  const match = markdown.match(FRONTMATTER_PATTERN);
-  if (!match) return markdown;
-  return markdown.slice(match[0].length);
-}
-
-function normalizeTitleText(raw: string): string {
-  return raw
-    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
-    .replace(/[`*_~]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
-
-export function deriveAdrTitleFromMarkdown(markdown: string): string {
-  const frontmatterTitle = extractFrontmatterTitle(markdown);
-  if (frontmatterTitle) return normalizeTitleText(frontmatterTitle);
-
-  const body = stripFrontmatter(markdown);
+export function deriveAdrDocTitle(body: string): string {
   const lines = body.split(/\r?\n/);
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const headingMatch = trimmed.match(/^#{1,6}\s+(.+)$/);
-    const candidate = headingMatch ? headingMatch[1] : trimmed;
-    const normalized = normalizeTitleText(candidate);
-    if (normalized) return normalized;
+    const heading = trimmed.match(/^#{1,6}\s+(.+)$/)?.[1]?.trim() ?? '';
+    const candidate = (heading || trimmed).replace(/\s+/g, ' ').trim();
+    if (!candidate) continue;
+    if (/^decision$/i.test(candidate)) continue;
+    return candidate.slice(0, 120);
   }
-
   return '';
+}
+
+export function deriveAdrHeaderTitle(adr: ADR, fallbackFileName: string): string {
+  const docTitle = deriveAdrDocTitle(adr.body);
+  if (docTitle) return docTitle;
+  if (adr.metadata.title?.trim()) return adr.metadata.title.trim();
+  return fallbackFileName.replace(/\.md$/i, '');
 }

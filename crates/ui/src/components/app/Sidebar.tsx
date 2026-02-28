@@ -36,8 +36,9 @@ import {
   ACTIVITY_ROUTE as ACTIVITY_PATH,
   ADRS_ROUTE as ADRS_PATH,
   AGENTS_MCP_ROUTE as AGENTS_MCP_PATH,
-  AGENTS_PROMPTS_ROUTE as AGENTS_PROMPTS_PATH,
+  AGENTS_PERMISSIONS_ROUTE as AGENTS_PERMISSIONS_PATH,
   AGENTS_PROVIDERS_ROUTE as AGENTS_PROVIDERS_PATH,
+  AGENTS_RULES_ROUTE as AGENTS_RULES_PATH,
   AGENTS_SKILLS_ROUTE as AGENTS_SKILLS_PATH,
   FEATURES_ROUTE as FEATURES_PATH,
   ISSUES_ROUTE as ISSUES_PATH,
@@ -80,9 +81,10 @@ const WORKFLOW_ITEMS: NavItem[] = [
 
 const AGENT_ITEMS: NavItem[] = [
   { path: AGENTS_PROVIDERS_PATH, label: 'Providers', icon: Bot },
-  { path: AGENTS_MCP_PATH, label: 'MCP', icon: Package },
+  { path: AGENTS_MCP_PATH, label: 'MCP Servers', icon: Package },
   { path: AGENTS_SKILLS_PATH, label: 'Skills', icon: FileStack },
-  { path: AGENTS_PROMPTS_PATH, label: 'Prompts', icon: FileCode2 },
+  { path: AGENTS_RULES_PATH, label: 'Rules', icon: FileCode2 },
+  { path: AGENTS_PERMISSIONS_PATH, label: 'Permissions', icon: FileCog },
 ];
 
 function initialsFromProjectName(projectName: string | null | undefined): string {

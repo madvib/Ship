@@ -14,10 +14,12 @@ import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
 import {
   AppRoutePath,
   AGENTS_MCP_ROUTE,
-  AGENTS_PROMPTS_ROUTE,
+  AGENTS_PERMISSIONS_ROUTE,
   AGENTS_PROVIDERS_ROUTE,
+  AGENTS_RULES_ROUTE,
   AGENTS_ROUTE,
   AGENTS_SKILLS_ROUTE,
+  ADRS_ROUTE,
   ROUTE_LABELS,
   SETTINGS_ROUTE,
   OVERVIEW_ROUTE,
@@ -52,7 +54,8 @@ export default function App() {
     routePath !== AGENTS_PROVIDERS_ROUTE &&
     routePath !== AGENTS_MCP_ROUTE &&
     routePath !== AGENTS_SKILLS_ROUTE &&
-    routePath !== AGENTS_PROMPTS_ROUTE;
+    routePath !== AGENTS_RULES_ROUTE &&
+    routePath !== AGENTS_PERMISSIONS_ROUTE;
 
   if (workspace.loading) {
     return (
@@ -191,6 +194,8 @@ export default function App() {
         <NewIssueModal
           onClose={() => workspace.setShowNewIssue(false)}
           statuses={workspace.statuses}
+          tagSuggestions={workspace.tagSuggestions}
+          specSuggestions={workspace.specSuggestions}
           onSubmit={workspace.handleCreateIssue}
           defaultStatus={workspace.config.default_status ?? workspace.statuses[0]?.id}
         />
@@ -206,7 +211,10 @@ export default function App() {
       {workspace.selectedAdr && (
         <AdrDetail
           entry={workspace.selectedAdr}
-          onClose={() => workspace.setSelectedAdr(null)}
+          onClose={() => {
+            workspace.setSelectedAdr(null);
+            navigateTo(ADRS_ROUTE);
+          }}
           onSave={workspace.handleSaveAdr}
           onDelete={workspace.handleDeleteAdr}
           specSuggestions={workspace.specSuggestions}
@@ -217,6 +225,7 @@ export default function App() {
       {workspace.selectedSpec && (
         <SpecDetail
           spec={workspace.selectedSpec}
+        tagSuggestions={workspace.tagSuggestions}
         onClose={() => workspace.setSelectedSpec(null)}
         onSave={workspace.handleSaveSpec}
         onDelete={workspace.handleDeleteSpec}
@@ -234,6 +243,10 @@ export default function App() {
       {workspace.selectedFeature && (
         <FeatureDetail
           feature={workspace.selectedFeature}
+          releaseSuggestions={workspace.releases.map((entry) => entry.file_name)}
+          specSuggestions={workspace.specs.map((entry) => entry.file_name)}
+          adrSuggestions={workspace.adrs.map((entry) => entry.file_name)}
+          tagSuggestions={workspace.tagSuggestions}
           onClose={() => workspace.setSelectedFeature(null)}
           onSave={workspace.handleSaveFeature}
           mcpEnabled={workspace.mcpEnabled}

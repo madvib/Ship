@@ -4,6 +4,7 @@ import { generateIssueDescriptionCmd } from '@/lib/platform/tauri/commands';
 import DetailSheet from './DetailSheet';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import AutocompleteInput from '@/components/ui/autocomplete-input';
 import {
   Select,
   SelectContent,
@@ -16,15 +17,37 @@ import MarkdownEditor from '@/components/editor';
 interface NewIssueModalProps {
   onClose: () => void;
   statuses: StatusConfig[];
-  onSubmit: (title: string, description: string, status: string) => void | Promise<void>;
+  tagSuggestions: string[];
+  specSuggestions: string[];
+  onSubmit: (
+    title: string,
+    description: string,
+    status: string,
+    options?: {
+      assignee?: string | null;
+      tags?: string[];
+      spec?: string | null;
+    }
+  ) => void | Promise<void>;
   defaultStatus?: string;
 }
 
-export default function NewIssueModal({ onClose, statuses, onSubmit, defaultStatus }: NewIssueModalProps) {
+export default function NewIssueModal({
+  onClose,
+  statuses,
+  tagSuggestions,
+  specSuggestions,
+  onSubmit,
+  defaultStatus,
+}: NewIssueModalProps) {
   const initialStatus = defaultStatus ?? statuses[0]?.id ?? 'backlog';
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<string>(initialStatus);
+  const [assignee, setAssignee] = useState('');
+  const [spec, setSpec] = useState('');
+  const [tagInput, setTagInput] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const submit = useCallback(async () => {
@@ -32,8 +55,23 @@ export default function NewIssueModal({ onClose, statuses, onSubmit, defaultStat
       setError('Title is required.');
       return;
     }
-    await onSubmit(title.trim(), description.trim(), status);
-  }, [description, onSubmit, status, title]);
+    await onSubmit(title.trim(), description.trim(), status, {
+      assignee: assignee.trim() ? assignee.trim() : null,
+      spec: spec.trim() ? spec.trim() : null,
+      tags,
+    });
+  }, [assignee, description, onSubmit, spec, status, tags, title]);
+
+  const addTag = (value: string) => {
+    const clean = value.trim();
+    if (!clean || tags.includes(clean)) return;
+    setTags((current) => [...current, clean]);
+    setTagInput('');
+  };
+
+  const removeTag = (value: string) => {
+    setTags((current) => current.filter((tag) => tag !== value));
+  };
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -113,6 +151,48 @@ export default function NewIssueModal({ onClose, statuses, onSubmit, defaultStat
               ))}
             </SelectContent>
           </Select>
+        </div>
+        <div className="grid gap-2 md:grid-cols-[220px_1fr]">
+          <Input
+            id="issue-assignee"
+            value={assignee}
+            className="h-8"
+            placeholder="Assignee"
+            onChange={(event) => {
+              setAssignee(event.target.value);
+              setError(null);
+            }}
+          />
+          <AutocompleteInput
+            id="issue-spec"
+            value={spec}
+            options={specSuggestions.map((value) => ({ value }))}
+            className="h-8"
+            placeholder="Spec"
+            noResultsText="No specs found."
+            onValueChange={(value) => {
+              setSpec(value);
+              setError(null);
+            }}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {tags.map((tag) => (
+            <Button key={tag} type="button" variant="outline" size="xs" className="h-7 px-2 text-xs" onClick={() => removeTag(tag)}>
+              {tag} ×
+            </Button>
+          ))}
+          <AutocompleteInput
+            value={tagInput}
+            options={tagSuggestions
+              .filter((tag) => !tags.includes(tag))
+              .map((value) => ({ value }))}
+            className="h-8 w-[220px] text-xs"
+            placeholder="Add tag"
+            noResultsText="No tag suggestions."
+            onCommit={(value) => addTag(value)}
+            onValueChange={(value) => setTagInput(value)}
+          />
         </div>
 
         <div className="min-h-0 flex-1">

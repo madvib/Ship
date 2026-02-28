@@ -2,19 +2,27 @@ import { useCallback, useEffect, useState } from 'react';
 import { SpecDocument } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import MarkdownEditor from '@/components/editor';
-import { loadProjectTemplate } from '@/components/editor/templateLoader';
+import SpecMetadataPanel from '@/components/editor/SpecMetadataPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 
 interface SpecDetailProps {
   spec: SpecDocument;
+  tagSuggestions?: string[];
   mcpEnabled?: boolean;
   onClose: () => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
   onDelete: (fileName: string) => Promise<void> | void;
 }
 
-export default function SpecDetail({ spec, mcpEnabled = false, onClose, onSave, onDelete }: SpecDetailProps) {
+export default function SpecDetail({
+  spec,
+  tagSuggestions = [],
+  mcpEnabled = false,
+  onClose,
+  onSave,
+  onDelete,
+}: SpecDetailProps) {
   const [content, setContent] = useState(spec.content);
   const [dirty, setDirty] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -69,9 +77,6 @@ export default function SpecDetail({ spec, mcpEnabled = false, onClose, onSave, 
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>
-          <Button onClick={() => void saveSpec()} disabled={!dirty || saving}>
-            {saving ? 'Saving…' : 'Save Spec'}
-          </Button>
           {!confirmDelete ? (
             <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
               Delete
@@ -95,24 +100,28 @@ export default function SpecDetail({ spec, mcpEnabled = false, onClose, onSave, 
       <div className="h-full min-h-0 p-2">
         <MarkdownEditor
           label={undefined}
+          toolbarStart={
+            <Button size="xs" className="h-7 px-2 text-xs" onClick={() => void saveSpec()} disabled={!dirty || saving}>
+              {saving ? 'Saving…' : 'Save Spec'}
+            </Button>
+          }
           value={content}
           onChange={(next) => {
             setContent(next);
             setDirty(true);
           }}
+          frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+            <SpecMetadataPanel
+              frontmatter={frontmatter}
+              delimiter={delimiter}
+              defaultTitle={spec.title}
+              tagSuggestions={tagSuggestions}
+              onChange={onChange}
+            />
+          )}
           mcpEnabled={mcpEnabled}
-          sampleLabel="Insert Template"
-          sampleRequiresMcp={false}
-          sampleInline
           showStats={false}
           fillHeight
-          onMcpSample={() =>
-            loadProjectTemplate('spec', {
-              tomlValues: {
-                title: spec.title,
-              },
-            })
-          }
           rows={18}
           defaultMode="doc"
         />

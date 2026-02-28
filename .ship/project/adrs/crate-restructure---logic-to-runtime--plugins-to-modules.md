@@ -6,7 +6,7 @@ date = "2026-02-26"
 tags = []
 +++
 
-## Decision
+## Crate restructure — logic to runtime, plugins to modules
 
 Rename and restructure the workspace crates to reflect the intended architecture.
 

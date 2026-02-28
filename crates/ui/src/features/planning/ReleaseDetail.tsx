@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ReleaseDocument } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import MarkdownEditor from '@/components/editor';
-import { loadProjectTemplate } from '@/components/editor/templateLoader';
+import ReleaseMetadataPanel from '@/components/editor/ReleaseMetadataPanel';
 import { Button } from '@/components/ui/button';
 
 interface ReleaseDetailProps {
@@ -74,31 +74,32 @@ export default function ReleaseDetail({
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>
-          <Button onClick={() => void saveRelease()} disabled={!dirty || saving}>
-            {saving ? 'Saving…' : 'Save Release'}
-          </Button>
         </div>
       }
     >
       <div className="h-full min-h-0 p-2">
         <MarkdownEditor
           label={undefined}
+          toolbarStart={
+            <Button size="xs" className="h-7 px-2 text-xs" onClick={() => void saveRelease()} disabled={!dirty || saving}>
+              {saving ? 'Saving…' : 'Save Release'}
+            </Button>
+          }
           value={content}
           onChange={(next) => {
             setContent(next);
             setDirty(true);
           }}
+          frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+            <ReleaseMetadataPanel
+              frontmatter={frontmatter}
+              delimiter={delimiter}
+              defaultVersion={release.version}
+              defaultStatus={release.status}
+              onChange={onChange}
+            />
+          )}
           mcpEnabled={mcpEnabled}
-          onMcpSample={() =>
-            loadProjectTemplate('release', {
-              tomlValues: {
-                version: release.version,
-              },
-            })
-          }
-          sampleLabel="Insert Template"
-          sampleRequiresMcp={false}
-          sampleInline
           showStats={false}
           fillHeight
           rows={18}

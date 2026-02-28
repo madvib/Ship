@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Upload } from 'lucide-react';
-import { McpServerConfig, ModeConfig, ProjectConfig } from '@/bindings';
+import { ModeConfig, ProjectConfig } from '@/bindings';
 import { exportAgentConfigCmd, generateIssueDescriptionCmd } from '@/lib/platform/tauri/commands';
 import { DEFAULT_STATUSES } from '@/lib/workspace-ui';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,7 @@ import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import AgentScopeCard from '@/features/agents/AgentScopeCard';
+import MarkdownEditor from '@/components/editor';
 
 interface AgentsPanelProps {
   projectConfig: ProjectConfig | null;
@@ -22,50 +22,75 @@ interface AgentsPanelProps {
   initialSection?: AgentSection;
 }
 
-export type AgentSection = 'providers' | 'mcp' | 'skills' | 'prompts';
+type ScopeKey = 'global' | 'project';
+type MarkdownDocKind = 'skills' | 'rules';
+
+type AgentDoc = {
+  id: string;
+  title: string;
+  content: string;
+  updated: string;
+};
+
+export type AgentSection = 'providers' | 'mcp' | 'skills' | 'rules' | 'permissions';
 
 const AI_PROVIDERS = [
   { id: 'claude', label: 'Claude' },
   { id: 'gemini', label: 'Gemini' },
   { id: 'codex', label: 'Codex' },
 ];
-const SCOPE_OPTIONS = ['global', 'project', 'mode'] as const;
+
 const EMPTY_AGENT_LAYER = {
   skills: [],
   prompts: [],
   context: [],
   rules: [],
 };
+
 const DEFAULT_MODE_VALUE = 'default';
+
+const DEFAULT_PERMISSIONS_TOML = `# Draft permissions (UI-only until API lands)
+allow = [
+  "ship_list_issues",
+  "ship_get_issue",
+  "ship_update_issue"
+]
+
+deny = [
+  "ship_delete_issue"
+]
+`;
+
 const SECTION_META: Record<AgentSection, { title: string; description: string }> = {
   providers: {
-    title: 'Agent Providers',
-    description: 'Provider/model configuration and mode controls.',
+    title: 'Providers',
+    description: 'Choose provider/model defaults and mode controls.',
   },
   mcp: {
-    title: 'Agent MCP',
-    description: 'MCP server registry and client sync for the active scope.',
+    title: 'MCP Servers',
+    description: 'Edit MCP server snippets and sync client configs.',
   },
   skills: {
-    title: 'Agent Skills',
-    description: 'Skill lists, context paths, and operating rules.',
+    title: 'Skills',
+    description: 'Markdown skill docs with list + editor workflow.',
   },
-  prompts: {
-    title: 'Agent Prompts',
-    description: 'Prompt snippets and reusable instructions.',
+  rules: {
+    title: 'Rules',
+    description: 'Markdown rules docs with list + editor workflow.',
+  },
+  permissions: {
+    title: 'Permissions',
+    description: 'Draft per-scope allow/deny snippets (API integration pending).',
   },
 };
 
-function parseLines(value: string): string[] {
-  return value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function joinLines(values: string[] | undefined): string {
-  return (values ?? []).join('\n');
-}
+const EMPTY_MODE: ModeConfig = {
+  id: '',
+  name: '',
+  description: null,
+  active_tools: [],
+  mcp_servers: [],
+};
 
 function normalizeAiConfig(ai: ProjectConfig['ai']) {
   return {
@@ -101,27 +126,28 @@ function normalizeProjectConfig(config: ProjectConfig | null): ProjectConfig {
   };
 }
 
-const EMPTY_SERVER: {
-  id: string;
-  name: string;
-  command: string;
-  args_raw: string;
-  scope: 'global' | 'project' | 'mode';
-} = {
-  id: '',
-  name: '',
-  command: '',
-  args_raw: '',
-  scope: 'global',
-};
+function createStubDoc(kind: MarkdownDocKind, title: string): AgentDoc {
+  const isSkill = kind === 'skills';
+  return {
+    id: `${kind}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    title,
+    updated: new Date().toISOString(),
+    content: isSkill
+      ? `# ${title}\n\n## Intent\n\n## Inputs\n\n## Output\n\n## Guardrails\n`
+      : `# ${title}\n\n## Rule\n\n## Rationale\n\n## Examples\n`,
+  };
+}
 
-const EMPTY_MODE: ModeConfig = {
-  id: '',
-  name: '',
-  description: null,
-  active_tools: [],
-  mcp_servers: [],
-};
+function formatUpdated(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 export default function AgentsPanel({
   projectConfig,
@@ -134,14 +160,39 @@ export default function AgentsPanel({
   const [localGlobalAgent, setLocalGlobalAgent] = useState<ProjectConfig>(
     normalizeProjectConfig(globalAgentConfig)
   );
-  const [agentScope, setAgentScope] = useState<'project' | 'global'>(
-    projectConfig ? 'project' : 'global'
-  );
-  const [newServer, setNewServer] = useState(EMPTY_SERVER);
+  const [agentScope, setAgentScope] = useState<ScopeKey>(projectConfig ? 'project' : 'global');
   const [newMode, setNewMode] = useState<ModeConfig>(EMPTY_MODE);
   const [exportStatus, setExportStatus] = useState<Record<string, 'idle' | 'loading' | 'ok' | 'error'>>({});
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle');
   const [agentError, setAgentError] = useState<string | null>(null);
+  const [mcpSnippet, setMcpSnippet] = useState('[]');
+  const [mcpSnippetError, setMcpSnippetError] = useState<string | null>(null);
+  const [permissionDrafts, setPermissionDrafts] = useState<{ global: string; project: string }>({
+    global: DEFAULT_PERMISSIONS_TOML,
+    project: DEFAULT_PERMISSIONS_TOML,
+  });
+  const [docStore, setDocStore] = useState<Record<ScopeKey, Record<MarkdownDocKind, AgentDoc[]>>>(() => ({
+    global: {
+      skills: [createStubDoc('skills', 'Global Coding Skill')],
+      rules: [createStubDoc('rules', 'Global Execution Rules')],
+    },
+    project: {
+      skills: [createStubDoc('skills', 'Project Delivery Skill')],
+      rules: [createStubDoc('rules', 'Project Rules')],
+    },
+  }));
+  const [selectedDocIds, setSelectedDocIds] = useState<Record<ScopeKey, Record<MarkdownDocKind, string | null>>>(
+    () => ({
+      global: {
+        skills: null,
+        rules: null,
+      },
+      project: {
+        skills: null,
+        rules: null,
+      },
+    })
+  );
 
   useEffect(() => {
     setLocalProject(normalizeProjectConfig(projectConfig));
@@ -162,6 +213,33 @@ export default function AgentsPanel({
     () => (agentScope === 'project' ? localProject : localGlobalAgent),
     [agentScope, localGlobalAgent, localProject]
   );
+  const activePermissionDraft = permissionDrafts[agentScope];
+
+  useEffect(() => {
+    setMcpSnippet(JSON.stringify(activeAgentConfig.mcp_servers ?? [], null, 2));
+    setMcpSnippetError(null);
+  }, [activeAgentConfig.mcp_servers, agentScope]);
+
+  const activeDocKind: MarkdownDocKind | null =
+    initialSection === 'skills' || initialSection === 'rules' ? initialSection : null;
+
+  const activeDocs = activeDocKind ? docStore[agentScope][activeDocKind] : [];
+  const activeSelectedDocId = activeDocKind ? selectedDocIds[agentScope][activeDocKind] : null;
+  const activeDoc = activeDocs.find((doc) => doc.id === activeSelectedDocId) ?? activeDocs[0] ?? null;
+
+  useEffect(() => {
+    if (!activeDocKind) return;
+    const docs = docStore[agentScope][activeDocKind];
+    const selectedId = selectedDocIds[agentScope][activeDocKind];
+    if (docs.length === 0 || docs.some((doc) => doc.id === selectedId)) return;
+    setSelectedDocIds((current) => ({
+      ...current,
+      [agentScope]: {
+        ...current[agentScope],
+        [activeDocKind]: docs[0]?.id ?? null,
+      },
+    }));
+  }, [activeDocKind, agentScope, docStore, selectedDocIds]);
 
   const updateActiveAgentConfig = (next: ProjectConfig) => {
     if (agentScope === 'project') {
@@ -171,36 +249,56 @@ export default function AgentsPanel({
     setLocalGlobalAgent(next);
   };
 
-  const handleAddServer = () => {
-    const id = newServer.id.trim();
-    const command = newServer.command.trim();
-    if (!id || !command) return;
-    const server: McpServerConfig = {
-      id,
-      name: newServer.name.trim() || id,
-      command,
-      args: newServer.args_raw.trim()
-        ? newServer.args_raw.trim().split(/\s+/).filter(Boolean)
-        : [],
-      env: {},
-      scope: newServer.scope,
-      server_type: 'stdio',
-      url: null,
-      timeout_secs: null,
-      disabled: false,
-    };
-    updateActiveAgentConfig({
-      ...activeAgentConfig,
-      mcp_servers: [...(activeAgentConfig.mcp_servers ?? []), server],
-    });
-    setNewServer(EMPTY_SERVER);
+  const updatePermissionDraft = (value: string) => {
+    setPermissionDrafts((current) => ({ ...current, [agentScope]: value }));
   };
 
-  const handleRemoveServer = (id: string) => {
-    updateActiveAgentConfig({
-      ...activeAgentConfig,
-      mcp_servers: (activeAgentConfig.mcp_servers ?? []).filter((s) => s.id !== id),
-    });
+  const handleMcpSnippetChange = (value: string) => {
+    setMcpSnippet(value);
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (!Array.isArray(parsed)) {
+        throw new Error('MCP config must be a JSON array.');
+      }
+      updateActiveAgentConfig({
+        ...activeAgentConfig,
+        mcp_servers: parsed as ProjectConfig['mcp_servers'],
+      });
+      setMcpSnippetError(null);
+    } catch (error) {
+      setMcpSnippetError(error instanceof Error ? error.message : 'Invalid JSON.');
+    }
+  };
+
+  const upsertDoc = (kind: MarkdownDocKind, docId: string, patch: Partial<AgentDoc>) => {
+    setDocStore((current) => ({
+      ...current,
+      [agentScope]: {
+        ...current[agentScope],
+        [kind]: current[agentScope][kind].map((doc) =>
+          doc.id === docId ? { ...doc, ...patch, updated: new Date().toISOString() } : doc
+        ),
+      },
+    }));
+  };
+
+  const createDoc = (kind: MarkdownDocKind) => {
+    const isSkill = kind === 'skills';
+    const doc = createStubDoc(kind, isSkill ? 'Untitled Skill' : 'Untitled Rule');
+    setDocStore((current) => ({
+      ...current,
+      [agentScope]: {
+        ...current[agentScope],
+        [kind]: [doc, ...current[agentScope][kind]],
+      },
+    }));
+    setSelectedDocIds((current) => ({
+      ...current,
+      [agentScope]: {
+        ...current[agentScope],
+        [kind]: doc.id,
+      },
+    }));
   };
 
   const handleAddMode = () => {
@@ -257,6 +355,7 @@ export default function AgentsPanel({
     }
     return onSaveProject(localProject);
   };
+
   const sectionMeta = SECTION_META[initialSection];
 
   return (
@@ -264,20 +363,29 @@ export default function AgentsPanel({
       <PageHeader
         title={sectionMeta.title}
         description={sectionMeta.description}
-        badge={
-          <Badge variant="outline" className="text-[10px]">
-            {initialSection}
-          </Badge>
+        badge={<Badge variant="outline">Agents</Badge>}
+        actions={
+          <div className="flex items-center gap-2 rounded-md border bg-card/70 px-2 py-1.5 shadow-sm">
+            <span className="text-muted-foreground text-[11px] font-medium uppercase tracking-wide">Scope</span>
+            <Select
+              value={agentScope}
+              onValueChange={(value) => setAgentScope((value as ScopeKey) ?? 'global')}
+            >
+              <SelectTrigger size="sm" className="h-7 w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="global">Global</SelectItem>
+                <SelectItem value="project" disabled={!hasActiveProject}>
+                  Project
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         }
       />
 
       <div className="grid gap-4">
-        <AgentScopeCard
-          scope={agentScope}
-          hasProject={hasActiveProject}
-          onScopeChange={(next) => setAgentScope(next)}
-        />
-
         {initialSection === 'providers' && (
           <div className="grid gap-4">
             <Card size="sm">
@@ -442,89 +550,32 @@ export default function AgentsPanel({
           <div className="grid gap-4">
             <Card size="sm">
               <CardHeader>
-                <CardTitle>MCP Server Registry</CardTitle>
-                <CardDescription>Registry for MCP tools used by this scope.</CardDescription>
+                <CardTitle>MCP Servers</CardTitle>
+                <CardDescription>JSON snippet editor for MCP server configuration.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {(activeAgentConfig.mcp_servers ?? []).length > 0 && (
-                  <>
-                    {(activeAgentConfig.mcp_servers ?? []).map((server) => (
-                      <div
-                        key={server.id}
-                        className="flex items-start justify-between gap-2 rounded-md border px-3 py-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium">{server.name}</p>
-                            <Badge variant="outline" className="text-[10px]">
-                              {server.scope}
-                            </Badge>
-                          </div>
-                          <p className="text-muted-foreground truncate font-mono text-xs">
-                            {server.command} {(server.args ?? []).join(' ')}
-                          </p>
-                        </div>
-                        <Button variant="ghost" size="xs" onClick={() => handleRemoveServer(server.id)}>
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Separator />
-                  </>
-                )}
-                <div className="grid gap-2">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Input
-                      value={newServer.id}
-                      onChange={(e) => setNewServer({ ...newServer, id: e.target.value })}
-                      placeholder="server-id"
-                    />
-                    <Input
-                      value={newServer.name}
-                      onChange={(e) => setNewServer({ ...newServer, name: e.target.value })}
-                      placeholder="Display Name"
-                    />
+                <div className="rounded-md border bg-card/50">
+                  <div className="text-muted-foreground border-b px-3 py-2 text-[11px] font-medium uppercase tracking-wide">
+                    JSON
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
-                    <Input
-                      value={newServer.command}
-                      onChange={(e) => setNewServer({ ...newServer, command: e.target.value })}
-                      placeholder="command (e.g. ship-mcp)"
-                    />
-                    <Input
-                      value={newServer.args_raw}
-                      onChange={(e) => setNewServer({ ...newServer, args_raw: e.target.value })}
-                      placeholder="args (space-separated)"
-                    />
-                    <Select
-                      value={newServer.scope}
-                      onValueChange={(value) =>
-                        setNewServer({
-                          ...newServer,
-                          scope: value as typeof newServer.scope,
-                        })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SCOPE_OPTIONS.map((scope) => (
-                          <SelectItem key={scope} value={scope}>
-                            {scope}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      onClick={handleAddServer}
-                      disabled={!newServer.id.trim() || !newServer.command.trim()}
-                    >
-                      <Plus className="size-3.5" />
-                      Add
-                    </Button>
-                  </div>
+                  <Textarea
+                    value={mcpSnippet}
+                    onChange={(event) => handleMcpSnippetChange(event.target.value)}
+                    rows={16}
+                    className="min-h-[340px] resize-y border-0 font-mono text-xs leading-6 shadow-none focus-visible:ring-0"
+                    placeholder={'[\n  {\n    "id": "ship",\n    "name": "Shipwright",\n    "command": "ship-mcp",\n    "args": []\n  }\n]'}
+                  />
                 </div>
+                {mcpSnippetError ? (
+                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {mcpSnippetError}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground text-xs">
+                    Parsed {(activeAgentConfig.mcp_servers ?? []).length} server
+                    {(activeAgentConfig.mcp_servers ?? []).length === 1 ? '' : 's'}.
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -566,97 +617,104 @@ export default function AgentsPanel({
           </div>
         )}
 
-        {initialSection === 'skills' && (
-          <div className="grid gap-4">
-            <Card size="sm">
+        {(initialSection === 'skills' || initialSection === 'rules') && activeDocKind && (
+          <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+            <Card size="sm" className="xl:h-[640px]">
               <CardHeader>
-                <CardTitle>Skills + Context</CardTitle>
-                <CardDescription>Define reusable skills, context paths, and operating rules.</CardDescription>
+                <CardTitle>{initialSection === 'skills' ? 'Skill Docs' : 'Rule Docs'}</CardTitle>
+                <CardDescription>Markdown file list (local stub until API integration).</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 lg:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="agents-skills">Skills (one per line)</Label>
-                  <Textarea
-                    id="agents-skills"
-                    rows={8}
-                    value={joinLines(activeAgentConfig.agent?.skills)}
-                    onChange={(event) =>
-                      updateActiveAgentConfig({
-                        ...activeAgentConfig,
-                        agent: {
-                          ...(activeAgentConfig.agent ?? EMPTY_AGENT_LAYER),
-                          skills: parseLines(event.target.value),
-                        },
-                      })
-                    }
-                    placeholder="backend-rust&#10;frontend-react&#10;qa-regression"
-                  />
+              <CardContent className="space-y-2">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => createDoc(activeDocKind)}>
+                  <Plus className="size-3.5" />
+                  New {initialSection === 'skills' ? 'Skill' : 'Rule'}
+                </Button>
+                <div className="max-h-[500px] space-y-1 overflow-auto pr-1">
+                  {activeDocs.map((doc) => {
+                    const selected = activeDoc?.id === doc.id;
+                    return (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        className={`w-full rounded-md border px-2.5 py-2 text-left transition-colors ${
+                          selected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/50'
+                        }`}
+                        onClick={() =>
+                          setSelectedDocIds((current) => ({
+                            ...current,
+                            [agentScope]: {
+                              ...current[agentScope],
+                              [activeDocKind]: doc.id,
+                            },
+                          }))
+                        }
+                      >
+                        <p className="truncate text-sm font-medium">{doc.title || 'Untitled'}</p>
+                        <p className="text-muted-foreground text-xs">{formatUpdated(doc.updated)}</p>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="agents-context">Context Paths (one per line)</Label>
-                  <Textarea
-                    id="agents-context"
-                    rows={8}
-                    value={joinLines(activeAgentConfig.agent?.context)}
-                    onChange={(event) =>
-                      updateActiveAgentConfig({
-                        ...activeAgentConfig,
-                        agent: {
-                          ...(activeAgentConfig.agent ?? EMPTY_AGENT_LAYER),
-                          context: parseLines(event.target.value),
-                        },
-                      })
-                    }
-                    placeholder="AGENTS.md&#10;specs/&#10;adrs/"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="agents-rules">Rules (one per line)</Label>
-                  <Textarea
-                    id="agents-rules"
-                    rows={8}
-                    value={joinLines(activeAgentConfig.agent?.rules)}
-                    onChange={(event) =>
-                      updateActiveAgentConfig({
-                        ...activeAgentConfig,
-                        agent: {
-                          ...(activeAgentConfig.agent ?? EMPTY_AGENT_LAYER),
-                          rules: parseLines(event.target.value),
-                        },
-                      })
-                    }
-                    placeholder="Never rewrite git history&#10;Prefer rg for code search"
-                  />
-                </div>
+              </CardContent>
+            </Card>
+
+            <Card size="sm" className="xl:h-[640px]">
+              <CardHeader>
+                <CardTitle>{initialSection === 'skills' ? 'Skill Editor' : 'Rules Editor'}</CardTitle>
+                <CardDescription>Markdown editor for selected doc (stubbed local state).</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!activeDoc ? (
+                  <p className="text-muted-foreground text-sm">Create a document to start editing.</p>
+                ) : (
+                  <>
+                    <Input
+                      value={activeDoc.title}
+                      onChange={(event) => upsertDoc(activeDocKind, activeDoc.id, { title: event.target.value })}
+                      placeholder="Document title"
+                    />
+                    <MarkdownEditor
+                      label={undefined}
+                      value={activeDoc.content}
+                      onChange={(value) => upsertDoc(activeDocKind, activeDoc.id, { content: value })}
+                      placeholder={initialSection === 'skills' ? '# Skill' : '# Rule'}
+                      rows={18}
+                      defaultMode="doc"
+                      showFrontmatter={false}
+                      showStats={false}
+                    />
+                  </>
+                )}
               </CardContent>
             </Card>
           </div>
         )}
 
-        {initialSection === 'prompts' && (
+        {initialSection === 'permissions' && (
           <div className="grid gap-4">
             <Card size="sm">
               <CardHeader>
-                <CardTitle>Prompt Snippets</CardTitle>
-                <CardDescription>Reusable instruction fragments for agents in this scope.</CardDescription>
+                <CardTitle>Permissions</CardTitle>
+                <CardDescription>
+                  TOML/JSON snippet editor for permissions drafts (UI-only until API lands).
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                <Label htmlFor="agents-prompts">Prompts (one per line)</Label>
-                <Textarea
-                  id="agents-prompts"
-                  rows={12}
-                  value={joinLines(activeAgentConfig.agent?.prompts)}
-                  onChange={(event) =>
-                    updateActiveAgentConfig({
-                      ...activeAgentConfig,
-                      agent: {
-                        ...(activeAgentConfig.agent ?? EMPTY_AGENT_LAYER),
-                        prompts: parseLines(event.target.value),
-                      },
-                    })
-                  }
-                  placeholder="Always produce patch-ready diffs&#10;Summarize risks before coding"
-                />
+                <div className="rounded-md border bg-card/50">
+                  <div className="text-muted-foreground border-b px-3 py-2 text-[11px] font-medium uppercase tracking-wide">
+                    TOML
+                  </div>
+                  <Textarea
+                    value={activePermissionDraft}
+                    onChange={(event) => updatePermissionDraft(event.target.value)}
+                    rows={16}
+                    className="min-h-[340px] resize-y border-0 font-mono text-xs leading-6 shadow-none focus-visible:ring-0"
+                    placeholder={DEFAULT_PERMISSIONS_TOML}
+                  />
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  Draft content only. Save behavior will connect once permissions API is implemented.
+                </p>
               </CardContent>
             </Card>
           </div>

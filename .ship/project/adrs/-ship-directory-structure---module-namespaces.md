@@ -6,7 +6,7 @@ date = "2026-02-26"
 tags = []
 +++
 
-## Decision
+## .ship directory structure — module namespaces
 
 The .ship directory is organised into module namespaces. Each module owns its namespace exclusively.
 

@@ -6,7 +6,7 @@ date = "2026-02-26"
 tags = []
 +++
 
-## Decision
+## File vs SQLite boundary
 
 Clear rule for what lives in git-tracked files vs local SQLite.
 

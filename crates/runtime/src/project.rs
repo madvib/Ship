@@ -598,6 +598,19 @@ pub fn read_template(ship_path: &Path, kind: &str) -> Result<String> {
     Ok(template_fallback(&normalized)?.to_string())
 }
 
+/// Writes a project template to its canonical namespace location.
+pub fn write_template(ship_path: &Path, kind: &str, content: &str) -> Result<()> {
+    let normalized = kind.trim().to_ascii_lowercase();
+    let template_path = ship_path.join(template_rel_path(&normalized)?);
+    if let Some(parent) = template_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create template dir: {}", parent.display()))?;
+    }
+    fs::write(&template_path, content)
+        .with_context(|| format!("Failed to write template: {}", template_path.display()))?;
+    Ok(())
+}
+
 /// List registered `.ship` namespaces from project config.
 pub fn list_registered_namespaces(ship_path: &Path) -> Result<Vec<crate::config::NamespaceConfig>> {
     let config = crate::config::get_config(Some(ship_path.to_path_buf()))?;

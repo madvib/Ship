@@ -27,14 +27,38 @@ export function useIssueActions({
   refreshActivity,
   refreshProjectInfo,
 }: UseIssueActionsParams) {
-  const handleCreateIssue = async (title: string, description: string, status: string) => {
+  const handleCreateIssue = async (
+    title: string,
+    description: string,
+    status: string,
+    options?: {
+      assignee?: string | null;
+      tags?: string[];
+      spec?: string | null;
+    }
+  ) => {
     if (!isTauriRuntime()) {
       setError('Issue creation is only available in Tauri runtime.');
       return;
     }
 
     try {
-      const entry = await createNewIssueCmd(title, description, status);
+      const created = await createNewIssueCmd(
+        title,
+        description,
+        status,
+        options?.assignee ?? null,
+        options?.tags ?? []
+      );
+      let entry = created;
+      if (options?.spec?.trim()) {
+        const nextIssue: Issue = {
+          ...created.issue,
+          spec: options.spec.trim(),
+        };
+        await updateIssueByPathCmd(created.path, nextIssue);
+        entry = { ...created, issue: nextIssue };
+      }
       setIssues((prev) => [...prev, entry]);
       setShowNewIssue(false);
       await refreshActivity();

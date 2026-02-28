@@ -1,19 +1,23 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Flag, Plus } from 'lucide-react';
-import { FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry, SpecInfo as SpecEntry } from '@/bindings';
+import { AdrEntry, FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry, SpecInfo as SpecEntry } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/editor';
-import AutocompleteInput from '@/components/ui/autocomplete-input';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
+import FeatureMetadataPanel from '@/components/editor/FeatureMetadataPanel';
+import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import TemplateEditorButton from './TemplateEditorButton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 interface FeaturesPageProps {
   features: FeatureEntry[];
   releases: ReleaseEntry[];
   specs: SpecEntry[];
+  adrs: AdrEntry[];
   onSelectFeature: (entry: FeatureEntry) => void;
   onCreateFeature: (
     title: string,
@@ -23,28 +27,88 @@ interface FeaturesPageProps {
   ) => Promise<void>;
 }
 
+type FeatureSort = 'newest' | 'oldest' | 'status';
+const FEATURE_SORT_OPTIONS: Array<{ value: FeatureSort; label: string }> = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'status', label: 'Status' },
+];
+
 export default function FeaturesPage({
   features,
   releases,
   specs,
+  adrs,
   onSelectFeature,
   onCreateFeature,
 }: FeaturesPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [release, setRelease] = useState('');
-  const [spec, setSpec] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<FeatureSort>('newest');
+  const [search, setSearch] = useState('');
+
+  const sortedFeatures = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const next = features.filter((feature) => {
+      if (!needle) return true;
+      return (
+        feature.title.toLowerCase().includes(needle) ||
+        feature.status.toLowerCase().includes(needle) ||
+        (feature.release ?? '').toLowerCase().includes(needle) ||
+        feature.file_name.toLowerCase().includes(needle)
+      );
+    });
+    next.sort((a, b) => {
+      switch (sortBy) {
+        case 'oldest':
+          return new Date(a.updated).getTime() - new Date(b.updated).getTime();
+        case 'status':
+          return a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+        case 'newest':
+        default:
+          return new Date(b.updated).getTime() - new Date(a.updated).getTime();
+      }
+    });
+    return next;
+  }, [features, search, sortBy]);
+
+  const createInitialFeatureDocument = () => {
+    return `+++
+title = ""
+status = "active"
+release = ""
+spec = ""
+adrs = []
+tags = []
++++
+
+## Why
+
+
+## Acceptance Criteria
+
+- [ ]
+
+## Delivery Todos
+
+- [ ]
+
+## Notes
+`;
+  };
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanTitle = title.trim();
+    const parsed = splitFrontmatterDocument(content);
+    const cleanTitle = readFrontmatterStringField(parsed.frontmatter, 'title').trim();
     if (!cleanTitle) {
       setError('Title is required.');
       return;
     }
+    const release = readFrontmatterStringField(parsed.frontmatter, 'release').trim();
+    const spec = readFrontmatterStringField(parsed.frontmatter, 'spec').trim();
     try {
       setCreating(true);
       await onCreateFeature(
@@ -54,10 +118,7 @@ export default function FeaturesPage({
         spec.trim() ? spec.trim() : null
       );
       setCreateOpen(false);
-      setTitle('');
-      setContent('');
-      setRelease('');
-      setSpec('');
+      setContent(createInitialFeatureDocument());
       setError(null);
     } catch (createError) {
       setError(String(createError));
@@ -85,16 +146,24 @@ export default function FeaturesPage({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [createOpen, creating]);
 
+  useEffect(() => {
+    if (createOpen) return;
+    setContent(createInitialFeatureDocument());
+  }, [createOpen]);
+
   return (
     <PageFrame>
       <PageHeader
         title="Features"
         description="Plan customer-visible slices and bind them to releases/specs."
         actions={
-          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            New Feature
-          </Button>
+          <div className="flex items-center gap-2">
+            <TemplateEditorButton kind="feature" />
+            <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              New Feature
+            </Button>
+          </div>
         }
       />
 
@@ -117,13 +186,39 @@ export default function FeaturesPage({
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Feature Inventory</CardTitle>
-            <CardDescription>
-              {features.length} feature{features.length !== 1 ? 's' : ''} in this project
-            </CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">Feature Inventory</CardTitle>
+                <CardDescription>
+                  {features.length} feature{features.length !== 1 ? 's' : ''} in this project
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search features"
+                  className="h-8 w-[220px]"
+                />
+                <Select value={sortBy} onValueChange={(value) => setSortBy(value as FeatureSort)}>
+                  <SelectTrigger size="sm" className="w-[180px]">
+                    <SelectValue>
+                      {FEATURE_SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FEATURE_SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {features.map((feature) => (
+            {sortedFeatures.map((feature) => (
               <div
                 key={feature.path}
                 className="hover:bg-muted/40 grid gap-2 rounded-md border p-3 transition-colors md:grid-cols-[1fr_auto] md:items-center"
@@ -177,53 +272,26 @@ export default function FeaturesPage({
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Title</label>
-              <Input
-                autoFocus
-                value={title}
-                placeholder="Agent Mode Orchestrator"
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setError(null);
-                }}
-                disabled={creating}
-              />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Release</label>
-                <AutocompleteInput
-                  value={release}
-                  options={releases.map((entry) => ({
-                    value: entry.file_name,
-                    label: entry.version,
-                  }))}
-                  placeholder="Unassigned"
-                  noResultsText="No releases found."
-                  onValueChange={(value) => setRelease(value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Spec</label>
-                <AutocompleteInput
-                  value={spec}
-                  options={specs.map((entry) => ({
-                    value: entry.file_name,
-                    label: entry.title,
-                  }))}
-                  placeholder="None"
-                  noResultsText="No specs found."
-                  onValueChange={(value) => setSpec(value)}
-                />
-              </div>
-            </div>
-
             <MarkdownEditor
               label="Feature Plan"
               value={content}
-              onChange={setContent}
+              onChange={(next) => {
+                setContent(next);
+                setError(null);
+              }}
+              frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+                <FeatureMetadataPanel
+                  frontmatter={frontmatter}
+                  delimiter={delimiter}
+                  defaultTitle=""
+                  defaultStatus="active"
+                  releaseSuggestions={releases.map((entry) => entry.file_name)}
+                  specSuggestions={specs.map((entry) => entry.file_name)}
+                  adrSuggestions={adrs.map((entry) => entry.file_name)}
+                  tagSuggestions={[]}
+                  onChange={onChange}
+                />
+              )}
               placeholder="# Why this feature"
               rows={22}
               defaultMode="doc"

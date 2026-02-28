@@ -57,7 +57,7 @@ pub use project::{
     SHIP_DIR_NAME, get_active_project_global, get_global_dir, get_project_dir, get_project_name,
     get_recent_projects_global, get_registry_path, init_project, list_registered_namespaces,
     list_registered_projects, load_app_state, load_registry, read_template, register_project,
-    register_ship_namespace, sanitize_file_name, save_app_state, save_registry,
+    register_ship_namespace, sanitize_file_name, save_app_state, save_registry, write_template,
     set_active_project_global, unregister_project,
 };
 pub use prompt::{Prompt, create_prompt, delete_prompt, get_prompt, list_prompts, update_prompt};

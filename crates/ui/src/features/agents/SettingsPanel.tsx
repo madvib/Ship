@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, Upload } from 'lucide-react';
+import { Plus, Trash2, Upload } from 'lucide-react';
 import { GitConfig, McpServerConfig, ModeConfig, ProjectConfig, StatusConfig } from '@/bindings';
 import {
   exportAgentConfigCmd,
@@ -24,6 +24,7 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import MarkdownEditor from '@/components/editor';
 import AgentScopeCard from '@/features/agents/AgentScopeCard';
 
 type SettingsTab = 'global' | 'project' | 'agents' | 'modules';
@@ -37,7 +38,6 @@ interface SettingsPanelProps {
   onSave: (config: Config) => void;
   onSaveProject: (config: ProjectConfig) => void;
   onSaveGlobalAgentConfig: (config: ProjectConfig) => void;
-  onBack: () => void;
   onOpenAgentsModule?: () => void;
   initialTab?: SettingsTab;
   panelMode?: SettingsPanelMode;
@@ -150,7 +150,6 @@ export default function SettingsPanel({
   onSave,
   onSaveProject,
   onSaveGlobalAgentConfig,
-  onBack,
   onOpenAgentsModule,
   initialTab = 'global',
   panelMode = 'full',
@@ -349,42 +348,33 @@ export default function SettingsPanel({
     }
   };
 
-  const handleBack = () => {
-    onThemePreview(initialThemeRef.current);
-    onBack();
-  };
-
   const agentsOnly = panelMode === 'agents-only';
   const settingsOnly = panelMode === 'settings-only';
 
   return (
-    <PageFrame width="narrow" className="md:p-8">
+    <PageFrame width="narrow" className="md:p-4">
       <PageHeader
         title={agentsOnly ? 'Agents' : 'Settings'}
-        description={agentsOnly ? 'Agent config, modes, MCP, and client sync' : 'Global and project configuration'}
+        description={agentsOnly ? 'Modes, MCP servers, and client sync' : 'Global and project configuration'}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={handleBack}>
-              <ArrowLeft className="size-4" />
-              Back
-            </Button>
             <Badge variant="outline">Alpha</Badge>
           </>
         }
       />
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="gap-2">
         {!agentsOnly && (
-          <TabsList className="w-full justify-start">
-            <TabsTrigger value="global">Global</TabsTrigger>
-            <TabsTrigger value="project" disabled={!projectConfig}>
+          <TabsList className="h-7 w-full justify-start p-0.5">
+            <TabsTrigger className="h-6 px-2 text-xs" value="global">Global</TabsTrigger>
+            <TabsTrigger className="h-6 px-2 text-xs" value="project" disabled={!projectConfig}>
               Project
             </TabsTrigger>
             {settingsOnly && (
-              <TabsTrigger value="modules">Modules</TabsTrigger>
+              <TabsTrigger className="h-6 px-2 text-xs" value="modules">Modules</TabsTrigger>
             )}
             {!settingsOnly && (
-              <TabsTrigger value="agents">
+              <TabsTrigger className="h-6 px-2 text-xs" value="agents">
                 Agents
               </TabsTrigger>
             )}
@@ -393,13 +383,13 @@ export default function SettingsPanel({
 
         {/* ── Global tab ──────────────────────────────────────────────────── */}
         <TabsContent value="global">
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-2 lg:grid-cols-2">
             <Card size="sm">
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <CardTitle>User</CardTitle>
                 <CardDescription>Name and email used for authorship metadata.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-2">
                 <div className="space-y-2">
                   <Label htmlFor="settings-author">Name</Label>
                   <Input
@@ -422,11 +412,11 @@ export default function SettingsPanel({
             </Card>
 
             <Card size="sm">
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <CardTitle>MCP</CardTitle>
                 <CardDescription>Local bridge for AI clients and tooling.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3">
+              <CardContent className="space-y-2">
                 <div className="space-y-2">
                   <Label htmlFor="settings-mcp-port">Port</Label>
                   <Input
@@ -456,29 +446,28 @@ export default function SettingsPanel({
             </Card>
 
             <Card size="sm" className="lg:col-span-2">
-              <CardHeader>
+              <CardHeader className="pb-2">
                 <CardTitle>Appearance & Defaults</CardTitle>
                 <CardDescription>Theme and creation defaults for new issues.</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Theme</Label>
-                  <Select
-                    value={local.theme ?? 'dark'}
-                    onValueChange={(value) => {
-                      const theme = value ?? undefined;
-                      setLocal({ ...local, theme });
-                      onThemePreview(theme);
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="light">Light</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <CardContent className="grid gap-2 md:grid-cols-[1.2fr_1fr_1fr]">
+                <div className="rounded-md border px-3 py-2">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <Label className="text-sm">Theme</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground text-xs">Light</span>
+                      <Switch
+                        checked={(local.theme ?? 'dark') === 'dark'}
+                        onCheckedChange={(checked) => {
+                          const theme = checked ? 'dark' : 'light';
+                          setLocal({ ...local, theme });
+                          onThemePreview(theme);
+                        }}
+                      />
+                      <span className="text-muted-foreground text-xs">Dark</span>
+                    </div>
+                  </div>
+                  <p className="text-muted-foreground text-xs">Use dark theme for lower-light editing.</p>
                 </div>
                 <div className="space-y-2">
                   <Label>Default Issue Status</Label>
@@ -540,13 +529,13 @@ export default function SettingsPanel({
               </CardHeader>
             </Card>
           ) : (
-            <div className="grid gap-4">
+            <div className="grid gap-2">
               <Card size="sm">
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <CardTitle>Project</CardTitle>
                   <CardDescription>Metadata stored in `.ship/ship.toml`.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2">
                   <div className="space-y-2">
                     <Label htmlFor="settings-project-name">Project Name</Label>
                     <Input
@@ -572,11 +561,11 @@ export default function SettingsPanel({
               </Card>
 
               <Card size="sm">
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <CardTitle>Statuses</CardTitle>
                   <CardDescription>Customize issue workflow columns for this project.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-2">
                   <div className="hidden grid-cols-[1fr_1.2fr_1fr_auto] gap-2 px-1 text-xs text-muted-foreground md:grid">
                     <span>ID</span>
                     <span>Name</span>
@@ -632,7 +621,7 @@ export default function SettingsPanel({
               </Card>
 
               <Card size="sm">
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <CardTitle>Git Commit Categories</CardTitle>
                   <CardDescription>Choose which docs are staged by default for project commits.</CardDescription>
                 </CardHeader>
@@ -742,7 +731,7 @@ export default function SettingsPanel({
 
             <Card size="sm">
               <CardHeader>
-                <CardTitle>Agent Context Layer</CardTitle>
+                <CardTitle>Context Layer</CardTitle>
                 <CardDescription>
                   One place for skills, prompts, context, and rules.
                 </CardDescription>
@@ -767,21 +756,23 @@ export default function SettingsPanel({
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="settings-agent-prompts">Prompt Snippets (one per line)</Label>
-                  <Textarea
-                    id="settings-agent-prompts"
-                    rows={6}
+                  <Label>Prompt Snippets</Label>
+                  <MarkdownEditor
                     value={joinLines(activeAgentConfig.agent?.prompts)}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       updateActiveAgentConfig({
                         ...activeAgentConfig,
                         agent: {
                           ...(activeAgentConfig.agent ?? EMPTY_AGENT_LAYER),
-                          prompts: parseLines(event.target.value),
+                          prompts: parseLines(value),
                         },
                       })
                     }
-                    placeholder="Always produce patch-ready diffs&#10;Summarize risks before coding"
+                    placeholder="Always produce patch-ready diffs"
+                    rows={10}
+                    defaultMode="doc"
+                    showFrontmatter={false}
+                    showStats={false}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1034,9 +1025,6 @@ export default function SettingsPanel({
       </Tabs>
 
       <footer className="flex items-center justify-end gap-2 border-t pt-4">
-        <Button variant="ghost" onClick={handleBack}>
-          {agentsOnly ? 'Close' : 'Cancel'}
-        </Button>
         {settingsOnly && activeTab === 'modules' ? (
           <Button type="button" variant="outline" onClick={onOpenAgentsModule}>
             Open Agents Module

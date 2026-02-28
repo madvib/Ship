@@ -1,29 +1,93 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, FileCode2, Plus } from 'lucide-react';
 import { SpecInfo as SpecEntry } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
+import SpecMetadataPanel from '@/components/editor/SpecMetadataPanel';
+import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import TemplateEditorButton from './TemplateEditorButton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 interface SpecsPageProps {
   specs: SpecEntry[];
+  tagSuggestions?: string[];
   onSelectSpec: (entry: SpecEntry) => void;
   onCreateSpec: (title: string, content: string) => Promise<void>;
 }
 
-export default function SpecsPage({ specs, onSelectSpec, onCreateSpec }: SpecsPageProps) {
+type SpecSort = 'filename-asc' | 'filename-desc';
+const SPEC_SORT_OPTIONS: Array<{ value: SpecSort; label: string }> = [
+  { value: 'filename-asc', label: 'Filename A-Z' },
+  { value: 'filename-desc', label: 'Filename Z-A' },
+];
+
+export default function SpecsPage({
+  specs,
+  tagSuggestions = [],
+  onSelectSpec,
+  onCreateSpec,
+}: SpecsPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<SpecSort>('filename-asc');
+  const [search, setSearch] = useState('');
+
+  const sortedSpecs = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const next = specs.filter((spec) => {
+      if (!needle) return true;
+      return (
+        spec.title.toLowerCase().includes(needle) ||
+        spec.file_name.toLowerCase().includes(needle)
+      );
+    });
+    next.sort((a, b) => {
+      switch (sortBy) {
+        case 'filename-asc':
+          return a.file_name.localeCompare(b.file_name, undefined, { sensitivity: 'base' });
+        case 'filename-desc':
+          return b.file_name.localeCompare(a.file_name, undefined, { sensitivity: 'base' });
+        default:
+          return 0;
+      }
+    });
+    return next;
+  }, [search, sortBy, specs]);
+
+  const createInitialSpecDocument = () => {
+    return `+++
+title = ""
+status = "draft"
+author = ""
+tags = []
++++
+
+## Overview
+
+
+## Goals
+
+
+## Non-Goals
+
+
+## Approach
+
+
+## Open Questions
+`;
+  };
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanTitle = title.trim();
+    const parsed = splitFrontmatterDocument(content);
+    const cleanTitle = readFrontmatterStringField(parsed.frontmatter, 'title').trim();
     if (!cleanTitle) {
       setError('Title is required.');
       return;
@@ -32,8 +96,7 @@ export default function SpecsPage({ specs, onSelectSpec, onCreateSpec }: SpecsPa
       setCreating(true);
       await onCreateSpec(cleanTitle, content);
       setCreateOpen(false);
-      setTitle('');
-      setContent('');
+      setContent(createInitialSpecDocument());
       setError(null);
     } catch (createError) {
       setError(String(createError));
@@ -61,16 +124,24 @@ export default function SpecsPage({ specs, onSelectSpec, onCreateSpec }: SpecsPa
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [createOpen, creating]);
 
+  useEffect(() => {
+    if (createOpen) return;
+    setContent(createInitialSpecDocument());
+  }, [createOpen]);
+
   return (
     <PageFrame>
       <PageHeader
         title="Specs"
         description="Refine intent, then turn specs into actionable issues."
         actions={
-          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            New Spec
-          </Button>
+          <div className="flex items-center gap-2">
+            <TemplateEditorButton kind="spec" />
+            <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              New Spec
+            </Button>
+          </div>
         }
       />
 
@@ -93,13 +164,39 @@ export default function SpecsPage({ specs, onSelectSpec, onCreateSpec }: SpecsPa
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Specification Library</CardTitle>
-            <CardDescription>
-              {specs.length} spec{specs.length !== 1 ? 's' : ''} in this project
-            </CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">Specification Library</CardTitle>
+                <CardDescription>
+                  {specs.length} spec{specs.length !== 1 ? 's' : ''} in this project
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search specs"
+                  className="h-8 w-[220px]"
+                />
+                <Select value={sortBy} onValueChange={(value) => setSortBy(value as SpecSort)}>
+                  <SelectTrigger size="sm" className="w-[180px]">
+                    <SelectValue>
+                      {SPEC_SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SPEC_SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {specs.map((spec) => (
+            {sortedSpecs.map((spec) => (
               <div
                 key={spec.path}
                 className="hover:bg-muted/40 grid gap-2 rounded-md border p-3 transition-colors md:grid-cols-[1fr_auto] md:items-center"
@@ -155,23 +252,23 @@ export default function SpecsPage({ specs, onSelectSpec, onCreateSpec }: SpecsPa
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Title</label>
-              <Input
-                autoFocus
-                value={title}
-                placeholder="Alpha Spec"
-                onChange={(event) => {
-                  setTitle(event.target.value);
-                  setError(null);
-                }}
-                disabled={creating}
-              />
-            </div>
             <MarkdownEditor
               label="Content"
               value={content}
-              onChange={setContent}
+              onChange={(next) => {
+                setContent(next);
+                setError(null);
+              }}
+              frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+                <SpecMetadataPanel
+                  frontmatter={frontmatter}
+                  delimiter={delimiter}
+                  defaultTitle=""
+                  defaultStatus="draft"
+                  tagSuggestions={tagSuggestions}
+                  onChange={onChange}
+                />
+              )}
               placeholder="# Alpha Spec"
               rows={22}
               defaultMode="doc"

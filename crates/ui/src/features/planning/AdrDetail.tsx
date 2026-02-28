@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { ADR, AdrEntry } from '@/bindings';
 import AdrEditor from './AdrEditor';
 import DetailSheet from './DetailSheet';
-import { loadProjectTemplate } from '@/components/editor/templateLoader';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { deriveAdrHeaderTitle } from './adrTitle';
 
 interface AdrDetailProps {
   entry: AdrEntry;
@@ -16,8 +28,10 @@ interface AdrDetailProps {
 }
 
 function normalizeAdr(adr: ADR): ADR {
+  const cleanedBody = adr.body.replace(/^\s*#\s+Decision\s*\n+/i, '');
   return {
     ...adr,
+    body: cleanedBody,
     metadata: {
       ...adr.metadata,
       tags: adr.metadata.tags ?? [],
@@ -36,12 +50,10 @@ export default function AdrDetail({
 }: AdrDetailProps) {
   const [draft, setDraft] = useState<ADR>(normalizeAdr(entry.adr));
   const [dirty, setDirty] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     setDraft(normalizeAdr(entry.adr));
     setDirty(false);
-    setConfirmDelete(false);
   }, [entry]);
 
   const saveAdr = useCallback(() => {
@@ -65,50 +77,37 @@ export default function AdrDetail({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, saveAdr]);
 
-  const insertTemplate = useCallback(async () => {
-    const template = await loadProjectTemplate('adr', { bodyOnly: true });
-    const snippet = template?.trim();
-    if (!snippet) return;
-    setDraft((current) => {
-      const nextBody = current.body.trimEnd() ? `${current.body.trimEnd()}\n\n${snippet}` : snippet;
-      return {
-        ...current,
-        body: nextBody,
-      };
-    });
-    setDirty(true);
-  }, []);
-
   const actionButtons = (
     <>
-      {!confirmDelete ? (
-        <Button size="xs" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setConfirmDelete(true)}>
-          Delete
-        </Button>
-      ) : (
-        <>
-          <Button
-            size="xs"
-            variant="destructive"
-            className="h-7 px-2 text-xs"
-            onClick={() => onDelete(entry.file_name)}
-          >
-            Confirm
-          </Button>
-          <Button
-            size="xs"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            onClick={() => setConfirmDelete(false)}
-          >
-            Cancel
-          </Button>
-        </>
-      )}
+      <AlertDialog>
+        <AlertDialogTrigger
+          render={
+            <Button
+              size="xs"
+              variant="outline"
+              className="h-7 border-destructive/40 px-2 text-destructive hover:bg-destructive/10"
+              title="Delete ADR"
+            />
+          }
+        >
+          <Trash2 className="size-3.5" />
+        </AlertDialogTrigger>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this ADR?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the decision document.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+            <AlertDialogAction size="sm" variant="destructive" onClick={() => onDelete(entry.file_name)}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      <Button size="xs" variant="outline" className="h-7 px-2 text-xs" onClick={onClose}>
-        Close
-      </Button>
       <Button size="xs" className="h-7 px-2 text-xs" onClick={saveAdr} disabled={!dirty}>
         Save
       </Button>
@@ -117,12 +116,13 @@ export default function AdrDetail({
 
   return (
     <DetailSheet
-      title={null}
+      title={<h2 className="truncate text-lg font-semibold tracking-tight">{deriveAdrHeaderTitle(draft, entry.file_name)}</h2>}
+      meta={null}
       onClose={onClose}
       className="max-w-[1800px]"
       bodyScrollable={false}
       bodyClassName="overflow-hidden p-0"
-      showHeader={false}
+      inlineHeader
     >
       <div className="h-full min-h-0 p-1.5">
         <AdrEditor
@@ -133,8 +133,6 @@ export default function AdrDetail({
           }}
           specSuggestions={specSuggestions}
           tagSuggestions={tagSuggestions}
-          placeholder="Describe this decision, context, and consequences..."
-          onInsertTemplate={insertTemplate}
           extraActions={actionButtons}
           mcpEnabled={mcpEnabled}
         />

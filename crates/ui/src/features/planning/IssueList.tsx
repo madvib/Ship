@@ -46,6 +46,7 @@ function deriveTitle(entry: IssueEntry): string {
 function summarizeMarkdown(markdown: string, maxLength = 120): string {
   const compact = markdown
     .replace(/^---[\s\S]*?---\s*/m, ' ')
+    .replace(/^\+\+\+[\s\S]*?\+\+\+\s*/m, ' ')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`([^`]+)`/g, '$1')
     .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
@@ -125,7 +126,7 @@ function IssueCard({ entry, isMoving, onSelect }: IssueCardProps) {
 
   const title = deriveTitle(entry);
   const description = typeof entry.issue?.description === 'string' ? entry.issue.description : '';
-  const summary = summarizeMarkdown(description, 100);
+  const summary = summarizeMarkdown(description, 76);
   const created = typeof entry.issue?.created === 'string' ? entry.issue.created : '';
   const tags = Array.isArray(entry.issue?.tags)
     ? entry.issue.tags.filter((tag): tag is string => Boolean(tag)).slice(0, 2)
@@ -142,44 +143,44 @@ function IssueCard({ entry, isMoving, onSelect }: IssueCardProps) {
         zIndex: isDragging ? 20 : undefined,
       }}
       className={cn(
-        'group relative min-w-0 select-none rounded-lg border bg-card/90 p-3 shadow-sm transition-colors',
+        'group relative min-w-0 select-none rounded-md border bg-card/90 p-2 shadow-sm transition-colors',
         'hover:border-accent/40 hover:bg-card',
         isDragging && 'opacity-0',
         isMoving && 'animate-pulse'
       )}
     >
-      <div className="mb-1.5 flex items-start justify-between gap-2">
-        <span className="line-clamp-2 break-words text-sm font-semibold">{title}</span>
+      <div className="mb-1 flex items-start justify-between gap-1.5">
+        <span className="line-clamp-2 break-words text-[13px] font-semibold leading-4.5">{title}</span>
         <button
           type="button"
-          className="text-muted-foreground inline-flex cursor-grab touch-none items-center rounded p-0.5 transition-opacity hover:opacity-100 active:cursor-grabbing"
+          className="text-muted-foreground inline-flex cursor-grab touch-none items-center rounded p-0 transition-opacity hover:opacity-100 active:cursor-grabbing"
           aria-label={`Drag ${title}`}
           onClick={(event) => event.preventDefault()}
           {...listeners}
           {...attributes}
         >
-          <GripVertical className="size-3.5 shrink-0 opacity-70" />
+          <GripVertical className="size-3 shrink-0 opacity-70" />
         </button>
       </div>
 
       <button type="button" className="w-full min-w-0 text-left" onClick={() => onSelect(entry)}>
         {summary ? (
-          <p className="text-muted-foreground line-clamp-4 break-words text-xs leading-relaxed">
+          <p className="text-muted-foreground line-clamp-2 break-words text-[10px] leading-3.5">
             {summary}
           </p>
         ) : (
-          <p className="text-muted-foreground text-xs italic">No description yet.</p>
+          <p className="text-muted-foreground text-[10px] italic">No description yet.</p>
         )}
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {tags.map((tag) => (
-            <Badge key={tag} variant="outline" className="h-5 text-[10px]">
+            <Badge key={tag} variant="outline" className="h-4.5 px-1.5 text-[10px]">
               {tag}
             </Badge>
           ))}
         </div>
 
-        {created && <span className="text-muted-foreground mt-2 block text-[11px]">{formatDate(created)}</span>}
+        {created && <span className="text-muted-foreground mt-1.5 block text-[10px]">{formatDate(created)}</span>}
       </button>
     </article>
   );
@@ -214,13 +215,13 @@ function IssueColumn({
       <Card
         size="sm"
         className={cn(
-          'flex h-full min-h-[22rem] max-h-[calc(100vh-15.25rem)] flex-col overflow-visible border transition-colors',
+          'flex h-full min-h-[20rem] max-h-[calc(100vh-14.5rem)] flex-col overflow-visible border transition-colors',
           style.border,
           style.bg,
           isDropTarget && 'ring-2 ring-accent/60'
         )}
       >
-        <CardHeader className="pb-2">
+        <CardHeader className="pb-1.5">
           <CardTitle className="flex items-center justify-between gap-2 text-sm">
             <span className="inline-flex items-center gap-2">
               <span className={cn('text-xs', style.color)}>●</span>
@@ -229,7 +230,7 @@ function IssueColumn({
             <Badge variant="outline">{issues.length}</Badge>
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-visible pr-1">
+        <CardContent className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto overflow-x-visible pr-1">
           {issues.map((entry) => (
             <IssueCard
               key={entry.path}
@@ -240,7 +241,7 @@ function IssueColumn({
           ))}
 
           {issues.length === 0 && (
-            <div className="text-muted-foreground rounded-md border border-dashed px-3 py-4 text-center text-xs">
+            <div className="text-muted-foreground rounded-md border border-dashed px-2.5 py-3 text-center text-xs">
               Drop an issue here
             </div>
           )}
@@ -248,7 +249,7 @@ function IssueColumn({
           {showNewIssueButton && (
             <Button
               variant="secondary"
-              className="h-auto w-full justify-start border border-dashed border-accent/40 bg-accent/10 px-3 py-2 text-accent-foreground"
+              className="h-auto w-full justify-start border border-dashed border-accent/40 bg-accent/10 px-2.5 py-1.5 text-accent-foreground"
               onClick={onNewIssue}
             >
               <Plus className="size-4" />
@@ -267,12 +268,12 @@ function IssueDragPreview({ entry }: { entry: IssueEntry }) {
   const summary = summarizeMarkdown(description, 100);
 
   return (
-    <div className="w-[260px] rounded-lg border bg-card p-3 shadow-xl">
-      <p className="line-clamp-2 break-words text-sm font-semibold">{title}</p>
+    <div className="w-[240px] rounded-md border bg-card p-2.5 shadow-xl">
+      <p className="line-clamp-2 break-words text-[13px] font-semibold leading-4.5">{title}</p>
       {summary ? (
-        <p className="text-muted-foreground mt-1 line-clamp-3 break-words text-xs leading-relaxed">{summary}</p>
+        <p className="text-muted-foreground mt-1 line-clamp-3 break-words text-[11px] leading-4">{summary}</p>
       ) : (
-        <p className="text-muted-foreground mt-1 text-xs italic">No description yet.</p>
+        <p className="text-muted-foreground mt-1 text-[11px] italic">No description yet.</p>
       )}
     </div>
   );
@@ -374,7 +375,7 @@ export default function IssueList({ issues, statuses, onSelect, onMove, onNewIss
       }}
     >
       <div className="w-full overflow-x-hidden">
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
           {statuses.map((status) => (
             <IssueColumn
               key={status.id}

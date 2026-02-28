@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
+import TemplateEditorButton from '@/features/planning/TemplateEditorButton';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
 import { getStatusStyles } from '@/lib/workspace-ui';
 
@@ -22,7 +23,12 @@ function IssuesRouteComponent() {
       <PageHeader
         title="Issues"
         description={`${totalIssues} issue${totalIssues !== 1 ? 's' : ''} across ${workspace.statuses.length} categories`}
-        actions={<Button onClick={() => workspace.setShowNewIssue(true)}>+ New Issue</Button>}
+        actions={
+          <div className="flex items-center gap-2">
+            <TemplateEditorButton kind="issue" />
+            <Button onClick={() => workspace.setShowNewIssue(true)}>+ New Issue</Button>
+          </div>
+        }
         footer={
           statusTotals.length > 0 ? (
             <div className="flex flex-wrap gap-2">

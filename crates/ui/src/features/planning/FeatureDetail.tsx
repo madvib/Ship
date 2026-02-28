@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import { X } from 'lucide-react';
 import { FeatureDocument } from '@/bindings';
 import MarkdownEditor from '@/components/editor';
-import { loadProjectTemplate } from '@/components/editor/templateLoader';
-import { Badge } from '@/components/ui/badge';
+import FeatureMetadataPanel from '@/components/editor/FeatureMetadataPanel';
+import DetailSheet from './DetailSheet';
 import { Button } from '@/components/ui/button';
 
 interface FeatureDetailProps {
   feature: FeatureDocument;
+  releaseSuggestions?: string[];
+  specSuggestions?: string[];
+  adrSuggestions?: string[];
+  tagSuggestions?: string[];
   mcpEnabled?: boolean;
   onClose: () => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
@@ -15,6 +18,10 @@ interface FeatureDetailProps {
 
 export default function FeatureDetail({
   feature,
+  releaseSuggestions = [],
+  specSuggestions = [],
+  adrSuggestions = [],
+  tagSuggestions = [],
   mcpEnabled = true,
   onClose,
   onSave,
@@ -57,58 +64,53 @@ export default function FeatureDetail({
   }, [onClose, saveFeature]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/45 p-2 supports-backdrop-filter:backdrop-blur-xs md:p-4"
-      onClick={onClose}
-    >
-      <section
-        className="bg-background mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="border-b px-3 py-2 md:px-4 md:py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold tracking-tight">{feature.title}</h2>
-              <p className="text-muted-foreground truncate text-xs">{feature.file_name}</p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <Badge variant="outline">{feature.status}</Badge>
-                {feature.release && <Badge variant="secondary">{feature.release}</Badge>}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
-                <X className="size-4" />
-              </Button>
-              <Button onClick={() => void saveFeature()} disabled={!dirty || saving}>
-                {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
-              </Button>
-            </div>
-          </div>
-        </header>
-
-        <div className="min-h-0 flex-1 p-2 md:p-3">
-          <MarkdownEditor
-            value={content}
-            onChange={(next) => {
-              setContent(next);
-              setDirty(true);
-            }}
-            mcpEnabled={mcpEnabled}
-            onMcpSample={() =>
-              loadProjectTemplate('feature', {
-                tomlValues: {
-                  title: feature.title,
-                  release: feature.release ?? '',
-                },
-              })
-            }
-            sampleLabel="Insert Template"
-            sampleRequiresMcp={false}
-            fillHeight
-            defaultMode="doc"
-          />
+    <DetailSheet
+      label="Feature"
+      title={<h2 className="truncate text-xl font-semibold tracking-tight">{feature.title}</h2>}
+      meta={<p className="text-muted-foreground text-xs">{feature.file_name}</p>}
+      onClose={onClose}
+      className="max-w-[1800px]"
+      bodyScrollable={false}
+      bodyClassName="overflow-hidden p-0"
+      footerClassName="px-3 py-2 md:px-4 md:py-2.5"
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
         </div>
-      </section>
-    </div>
+      }
+    >
+      <div className="min-h-0 h-full p-2 md:p-3">
+        <MarkdownEditor
+          toolbarStart={
+            <Button size="xs" className="h-7 px-2 text-xs" onClick={() => void saveFeature()} disabled={!dirty || saving}>
+              {saving ? 'Saving…' : 'Save Feature'}
+            </Button>
+          }
+          value={content}
+          onChange={(next) => {
+            setContent(next);
+            setDirty(true);
+          }}
+          frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+            <FeatureMetadataPanel
+              frontmatter={frontmatter}
+              delimiter={delimiter}
+              defaultTitle={feature.title}
+              defaultStatus={feature.status}
+              releaseSuggestions={releaseSuggestions}
+              specSuggestions={specSuggestions}
+              adrSuggestions={adrSuggestions}
+              tagSuggestions={tagSuggestions}
+              onChange={onChange}
+            />
+          )}
+          mcpEnabled={mcpEnabled}
+          fillHeight
+          defaultMode="doc"
+        />
+      </div>
+    </DetailSheet>
   );
 }

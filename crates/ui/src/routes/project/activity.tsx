@@ -18,6 +18,86 @@ const ENTITY_STYLES: Record<string, string> = {
   release: 'border-orange-500/30 text-orange-300',
 };
 
+const ACTOR_STYLES: Record<'user' | 'agent' | 'system', string> = {
+  user: 'border-blue-500/30 text-blue-600 dark:text-blue-300',
+  agent: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-300',
+  system: 'border-zinc-500/30 text-zinc-600 dark:text-zinc-300',
+};
+
+function classifyActor(raw: string): { kind: 'user' | 'agent' | 'system'; label: string } {
+  const value = raw.trim().toLowerCase();
+  if (!value || value === 'system' || value === 'hook') {
+    return { kind: 'system', label: 'System' };
+  }
+  if (value.includes('agent') || value.includes('mcp') || value.includes('ai')) {
+    return { kind: 'agent', label: 'Agent' };
+  }
+  return { kind: 'user', label: 'User' };
+}
+
+function cleanEventText(value: string | null | undefined): string {
+  const raw = (value ?? '').trim();
+  if (!raw) return '';
+  return raw
+    .replace(
+      /\b(?:title|size|mtime|path|created|updated)\s*=\s*("[^"]*"|'[^']*'|[^,\s;|]+)/gi,
+      ''
+    )
+    .replace(/\s*[|,;]\s*/g, ' · ')
+    .replace(/\s*·\s*·+\s*/g, ' · ')
+    .replace(/^·\s*|\s*·$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseDetailMap(value: string | null | undefined): Record<string, string> {
+  const input = (value ?? '').trim();
+  if (!input) return {};
+
+  const map: Record<string, string> = {};
+  const pairs = input.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*("[^"]*"|'[^']*'|[^\s|,;]+)/g) ?? [];
+  for (const pair of pairs) {
+    const match = pair.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+    if (!match) continue;
+    const key = match[1].trim().toLowerCase();
+    const valueText = match[2].trim().replace(/^["']|["']$/g, '');
+    map[key] = valueText;
+  }
+  return map;
+}
+
+function humanizeToken(value: string): string {
+  return value
+    .replace(/\.md$/i, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatMainLabel(entity: string, action: string, subject: string): string {
+  const entityLabel = humanizeToken(entity);
+  const actionLabel = humanizeToken(action);
+  if (!subject) return `${entityLabel} ${actionLabel}`;
+  return `${entityLabel} ${actionLabel}: ${humanizeToken(subject)}`;
+}
+
+function formatSecondaryLabel(details: Record<string, string>): string {
+  const from = details.from ?? '';
+  const to = details.to ?? '';
+  const status = details.status ?? '';
+  const target = details.target ?? '';
+
+  if (from && to) {
+    return `${humanizeToken(from)} -> ${humanizeToken(to)}`;
+  }
+  if (status) {
+    return `Status: ${humanizeToken(status)}`;
+  }
+  if (target) {
+    return humanizeToken(target);
+  }
+  return '';
+}
+
 const PAGE_SIZE = 50;
 
 function ActivityRouteComponent() {
@@ -54,7 +134,7 @@ function ActivityRouteComponent() {
       />
 
       <Card size="sm">
-        <CardContent className="space-y-2 px-2 py-2">
+        <CardContent className="space-y-1.5 px-1.5 py-1.5">
           {events.length === 0 ? (
             <div className="rounded-md border border-dashed px-4 py-4 text-center">
               <p className="text-muted-foreground text-sm">
@@ -63,37 +143,43 @@ function ActivityRouteComponent() {
             </div>
           ) : (
             <>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {pagedEvents.map((entry) => {
                   const actor = entry.actor?.trim() ? entry.actor.trim() : 'system';
                   const style = ENTITY_STYLES[entry.entity] ?? 'border-zinc-500/30 text-zinc-300';
-                  const actionLabel = `${entry.entity}.${entry.action}`;
+                  const actorInfo = classifyActor(actor);
+                  const subject = cleanEventText(entry.subject);
+                  const detailMap = parseDetailMap(entry.details);
+                  const mainLabel = formatMainLabel(entry.entity, entry.action, subject);
+                  const secondaryLabel = formatSecondaryLabel(detailMap);
 
                   return (
                     <article
                       key={entry.seq}
-                      className="bg-card grid grid-cols-[auto_1fr_auto] items-start gap-2 rounded-md border px-2.5 py-2"
+                      className="bg-card rounded-md border px-2 py-1.5"
                     >
-                      <span className="text-muted-foreground min-w-10 text-xs font-medium">#{entry.seq}</span>
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="truncate text-xs font-medium">{actionLabel}</div>
-                        <div className="text-muted-foreground truncate text-xs">{entry.subject}</div>
-                        {entry.details && (
-                          <div className="text-muted-foreground line-clamp-2 text-[11px]">{entry.details}</div>
-                        )}
-                      </div>
-                      <div className="flex min-w-0 flex-col items-end gap-1">
-                        <div className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
-                          <Clock3 className="size-3 text-violet-400" />
-                          <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                      <div className="grid min-w-0 grid-cols-[1fr_auto] items-center gap-1 text-[11px] leading-4">
+                        <div className="min-w-0 truncate">
+                          <span className="text-muted-foreground mr-2 shrink-0 font-medium">#{entry.seq}</span>
+                          {mainLabel}
+                          {secondaryLabel ? (
+                            <span className="text-muted-foreground font-normal"> · {secondaryLabel}</span>
+                          ) : null}
                         </div>
-                        <div className="flex items-center gap-1">
-                          <Badge variant="outline" className={style}>
+                        <div className="ml-auto flex shrink-0 items-center gap-1">
+                          <Badge variant="outline" className={`h-4.5 px-1.5 text-[10px] ${style}`}>
                             {entry.entity}
                           </Badge>
-                          <Badge variant="outline" className="text-muted-foreground">
-                            {actor}
+                          <Badge
+                            variant="outline"
+                            className={`h-4.5 px-1.5 text-[10px] ${ACTOR_STYLES[actorInfo.kind]}`}
+                          >
+                            {actorInfo.label}
                           </Badge>
+                          <span className="text-muted-foreground inline-flex items-center gap-1">
+                            <Clock3 className="size-2.5 text-violet-400" />
+                            <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                          </span>
                         </div>
                       </div>
                     </article>

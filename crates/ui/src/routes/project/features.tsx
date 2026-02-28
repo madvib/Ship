@@ -10,6 +10,7 @@ function FeaturesRouteComponent() {
       features={workspace.features}
       releases={workspace.releases}
       specs={workspace.specs}
+      adrs={workspace.adrs}
       onSelectFeature={workspace.handleSelectFeature}
       onCreateFeature={workspace.handleCreateFeature}
     />

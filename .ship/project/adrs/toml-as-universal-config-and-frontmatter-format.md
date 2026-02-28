@@ -6,7 +6,7 @@ date = "2026-02-26"
 tags = []
 +++
 
-## Decision
+## TOML as universal config and frontmatter format
 
 Use TOML for all config files and document frontmatter throughout the alpha.
 

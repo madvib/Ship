@@ -14,8 +14,8 @@ use runtime::{
     get_spec_raw as get_spec_content, ingest_external_events, init_project, list_adrs,
     list_events_since, list_features, list_issues_full, list_registered_projects, list_releases,
     list_specs, log_action, move_issue, read_log_entries, read_template, register_project,
-    update_adr, update_feature, update_issue, update_release, update_spec, AdrEntry, EventRecord,
-    Issue, IssueEntry, LogEntry, ADR, SHIP_DIR_NAME,
+    update_adr, update_feature, update_issue, update_release, update_spec, write_template,
+    AdrEntry, EventRecord, Issue, IssueEntry, LogEntry, ADR, SHIP_DIR_NAME,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -1151,6 +1151,20 @@ fn get_template_cmd(kind: String, state: State<AppState>) -> Result<String, Stri
     read_template(&project_dir, &kind).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+#[specta::specta]
+fn save_template_cmd(kind: String, content: String, state: State<AppState>) -> Result<(), String> {
+    let project_dir = get_active_dir(&state)?;
+    write_template(&project_dir, &kind, &content).map_err(|e| e.to_string())?;
+    log_action(
+        project_dir,
+        "template update",
+        &format!("Updated template: {}", kind),
+    )
+    .ok();
+    Ok(())
+}
+
 // ─── Commands: Log ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -1395,6 +1409,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         create_feature_cmd,
         update_feature_cmd,
         get_template_cmd,
+        save_template_cmd,
         // Log
         list_events_cmd,
         ingest_events_cmd,

@@ -17,6 +17,7 @@ interface DetailSheetProps {
   bodyClassName?: string;
   bodyScrollable?: boolean;
   showHeader?: boolean;
+  inlineHeader?: boolean;
 }
 
 export default function DetailSheet({
@@ -32,6 +33,7 @@ export default function DetailSheet({
   bodyClassName,
   bodyScrollable = true,
   showHeader = true,
+  inlineHeader = false,
 }: DetailSheetProps) {
   return (
     <div
@@ -47,26 +49,39 @@ export default function DetailSheet({
       >
         {showHeader && (
           <header className={cn('border-b px-4 py-3 md:px-5 md:py-4', headerClassName)}>
-            <div
-              className={cn(
-                'flex items-start gap-3',
-                title || meta ? 'mb-2' : 'mb-0',
-                label ? 'justify-between' : 'justify-end'
-              )}
-            >
-              {label && (
-                <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-                  {label}
-                </Badge>
-              )}
-              <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
-                <X className="size-4" />
-              </Button>
-            </div>
-            <div className="space-y-1">
-              {title}
-              {meta}
-            </div>
+            {inlineHeader ? (
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  {title}
+                </div>
+                <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div
+                  className={cn(
+                    'flex items-start gap-3',
+                    title || meta ? 'mb-2' : 'mb-0',
+                    label ? 'justify-between' : 'justify-end'
+                  )}
+                >
+                  {label && (
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                      {label}
+                    </Badge>
+                  )}
+                  <Button variant="ghost" size="icon-sm" onClick={onClose} title="Close panel">
+                    <X className="size-4" />
+                  </Button>
+                </div>
+                <div className="space-y-1">
+                  {title}
+                  {meta}
+                </div>
+              </>
+            )}
           </header>
         )}
 

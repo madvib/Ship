@@ -5,9 +5,13 @@ import DetailSheet from './DetailSheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
+import TemplateEditorButton from './TemplateEditorButton';
+import ReleaseMetadataPanel from '@/components/editor/ReleaseMetadataPanel';
+import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
 interface ReleasesPageProps {
   releases: ReleaseEntry[];
@@ -16,6 +20,13 @@ interface ReleasesPageProps {
   onCreateRelease: (version: string, content: string) => Promise<void>;
 }
 
+type ReleaseSort = 'newest' | 'oldest' | 'status';
+const RELEASE_SORT_OPTIONS: Array<{ value: ReleaseSort; label: string }> = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'status', label: 'Status' },
+];
+
 export default function ReleasesPage({
   releases,
   features,
@@ -23,10 +34,35 @@ export default function ReleasesPage({
   onCreateRelease,
 }: ReleasesPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
-  const [version, setVersion] = useState('');
   const [content, setContent] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<ReleaseSort>('newest');
+  const [search, setSearch] = useState('');
+
+  const createInitialReleaseDocument = () => {
+    return `+++
+version = "v0.1.0-alpha"
+status = "planned"
+supported = false
+target_date = ""
+tags = []
++++
+
+## Goal
+
+
+## Scope
+
+- [ ]
+
+## Included Features
+
+- [ ]
+
+## Notes
+`;
+  };
 
   const featureCountsByRelease = useMemo(() => {
     const counts = new Map<string, number>();
@@ -38,9 +74,34 @@ export default function ReleasesPage({
     return counts;
   }, [features]);
 
+  const sortedReleases = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    const next = releases.filter((release) => {
+      if (!needle) return true;
+      return (
+        release.version.toLowerCase().includes(needle) ||
+        release.status.toLowerCase().includes(needle) ||
+        release.file_name.toLowerCase().includes(needle)
+      );
+    });
+    next.sort((a, b) => {
+      switch (sortBy) {
+        case 'oldest':
+          return new Date(a.updated).getTime() - new Date(b.updated).getTime();
+        case 'status':
+          return a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+        case 'newest':
+        default:
+          return new Date(b.updated).getTime() - new Date(a.updated).getTime();
+      }
+    });
+    return next;
+  }, [releases, search, sortBy]);
+
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
-    const cleanVersion = version.trim();
+    const parsed = splitFrontmatterDocument(content);
+    const cleanVersion = readFrontmatterStringField(parsed.frontmatter, 'version').trim();
     if (!cleanVersion) {
       setError('Version is required.');
       return;
@@ -49,8 +110,7 @@ export default function ReleasesPage({
       setCreating(true);
       await onCreateRelease(cleanVersion, content);
       setCreateOpen(false);
-      setVersion('');
-      setContent('');
+      setContent(createInitialReleaseDocument());
       setError(null);
     } catch (createError) {
       setError(String(createError));
@@ -77,16 +137,24 @@ export default function ReleasesPage({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [createOpen, creating]);
 
+  useEffect(() => {
+    if (createOpen) return;
+    setContent(createInitialReleaseDocument());
+  }, [createOpen]);
+
   return (
     <PageFrame>
       <PageHeader
         title="Releases"
         description="Anchor feature delivery in named milestones."
         actions={
-          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            New Release
-          </Button>
+          <div className="flex items-center gap-2">
+            <TemplateEditorButton kind="release" />
+            <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              New Release
+            </Button>
+          </div>
         }
       />
 
@@ -109,13 +177,39 @@ export default function ReleasesPage({
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Release Timeline</CardTitle>
-            <CardDescription>
-              {releases.length} release{releases.length !== 1 ? 's' : ''} in this project
-            </CardDescription>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-sm">Release Timeline</CardTitle>
+                <CardDescription>
+                  {releases.length} release{releases.length !== 1 ? 's' : ''} in this project
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search releases"
+                  className="h-8 w-[220px]"
+                />
+                <Select value={sortBy} onValueChange={(value) => setSortBy(value as ReleaseSort)}>
+                  <SelectTrigger size="sm" className="w-[180px]">
+                    <SelectValue>
+                      {RELEASE_SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RELEASE_SORT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {releases.map((release) => (
+            {sortedReleases.map((release) => (
               <div
                 key={release.path}
                 className="hover:bg-muted/40 grid gap-2 rounded-md border p-3 transition-colors md:grid-cols-[1fr_auto] md:items-center"
@@ -172,23 +266,23 @@ export default function ReleasesPage({
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Version</label>
-              <Input
-                autoFocus
-                value={version}
-                placeholder="v0.1.0-alpha"
-                onChange={(event) => {
-                  setVersion(event.target.value);
-                  setError(null);
-                }}
-                disabled={creating}
-              />
-            </div>
             <MarkdownEditor
               label="Release Notes"
               value={content}
-              onChange={setContent}
+              onChange={(next) => {
+                setContent(next);
+                setError(null);
+              }}
+              frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+                <ReleaseMetadataPanel
+                  frontmatter={frontmatter}
+                  delimiter={delimiter}
+                  defaultVersion="v0.1.0-alpha"
+                  defaultStatus="planned"
+                  tagSuggestions={[]}
+                  onChange={onChange}
+                />
+              )}
               placeholder="# Release Goal"
               rows={22}
               defaultMode="doc"

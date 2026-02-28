@@ -67,6 +67,7 @@ dist/
 .claude
 .gemini
 .codex
+.qwen
 
 .devcontainer
 

@@ -197,6 +197,7 @@
     background: var(--card);
     color: var(--foreground);
     font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+    font-size: 0.95rem;
 
     --crepe-color-background: var(--card);
     --crepe-color-on-background: var(--foreground);
@@ -204,7 +205,7 @@
     --crepe-color-surface-low: var(--muted);
     --crepe-color-on-surface: var(--foreground);
     --crepe-color-on-surface-variant: var(--muted-foreground);
-    --crepe-color-outline: var(--border);
+    --crepe-color-outline: color-mix(in oklch, var(--foreground) 58%, var(--background));
     --crepe-color-primary: var(--primary);
     --crepe-color-secondary: var(--secondary);
     --crepe-color-on-secondary: var(--secondary-foreground);
@@ -213,7 +214,7 @@
     --crepe-color-inline-code: var(--primary);
     --crepe-color-error: var(--destructive);
     --crepe-color-hover: var(--muted);
-    --crepe-color-selected: var(--muted);
+    --crepe-color-selected: color-mix(in oklch, var(--primary) 24%, var(--background));
     --crepe-color-inline-area: var(--muted);
     --crepe-font-title: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
     --crepe-font-default: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
@@ -223,6 +224,63 @@
   .ship-milkdown-shell .milkdown .ProseMirror {
     min-height: 100%;
     padding: 0.85rem;
+    line-height: 1.6;
+    caret-color: var(--crepe-color-on-background);
+  }
+
+  .ship-milkdown-shell .milkdown .ProseMirror ::selection {
+    background: color-mix(in oklch, var(--primary) 28%, var(--background));
+    color: var(--foreground);
+  }
+
+  .ship-milkdown-shell .milkdown .ProseMirror-focused {
+    --prosemirror-virtual-cursor-color: var(--crepe-color-on-background);
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu {
+    max-width: min(92vw, 380px);
+    min-width: 260px;
+    animation: ship-slash-fade 120ms ease-out 90ms both;
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu .menu-groups {
+    max-height: min(56vh, 320px);
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu .menu-groups .menu-group li {
+    min-width: 0;
+    padding: 10px 10px;
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu .menu-groups .menu-group li.active,
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu .menu-groups .menu-group li.hover {
+    background: color-mix(in oklch, var(--primary) 18%, var(--muted));
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-slash-menu .menu-groups .menu-group li > span {
+    font-size: 13px;
+    color: var(--foreground);
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-toolbar .toolbar-item.active,
+  .ship-milkdown-shell .milkdown .milkdown-toolbar .toolbar-item:active {
+    background: color-mix(in oklch, var(--primary) 18%, var(--muted));
+  }
+
+  .ship-milkdown-shell .milkdown .milkdown-toolbar .toolbar-item.active svg {
+    color: var(--foreground);
+    fill: var(--foreground);
+  }
+
+  @keyframes ship-slash-fade {
+    from {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .ship-markdown-preview {

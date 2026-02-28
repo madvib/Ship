@@ -4,7 +4,3 @@ workflow/issues
 events.ndjson
 generated/
 
-# Runtime — never commit
-ship.db
-ship.db-shm
-ship.db-wal

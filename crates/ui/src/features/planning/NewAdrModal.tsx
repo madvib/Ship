@@ -5,6 +5,7 @@ import AdrEditor from './AdrEditor';
 import DetailSheet from './DetailSheet';
 import { loadProjectTemplate } from '@/components/editor/templateLoader';
 import { Button } from '@/components/ui/button';
+import { deriveAdrHeaderTitle } from './adrTitle';
 
 interface NewAdrModalProps {
   onClose: () => void;
@@ -38,6 +39,7 @@ function createInitialAdr(): ADR {
 export default function NewAdrModal({ onClose, onSubmit, tagSuggestions, specSuggestions }: NewAdrModalProps) {
   const [draft, setDraft] = useState<ADR>(() => createInitialAdr());
   const [error, setError] = useState<string | null>(null);
+  const headerTitle = deriveAdrHeaderTitle(draft, 'New ADR');
 
   const submit = useCallback(async () => {
     const title = draft.metadata.title.trim();
@@ -59,7 +61,7 @@ export default function NewAdrModal({ onClose, onSubmit, tagSuggestions, specSug
 
   const insertTemplate = useCallback(async () => {
     const template = await loadProjectTemplate('adr', { bodyOnly: true });
-    const snippet = template?.trim();
+    const snippet = template?.trim().replace(/^\s*#\s+Decision\s*\n+/i, '');
     if (!snippet) return;
     setDraft((current) => {
       const nextBody = current.body.trimEnd() ? `${current.body.trimEnd()}\n\n${snippet}` : snippet;
@@ -94,18 +96,15 @@ export default function NewAdrModal({ onClose, onSubmit, tagSuggestions, specSug
 
   return (
     <DetailSheet
-      title={<h2 className="text-xl font-semibold tracking-tight">New ADR</h2>}
-      meta={
-        <p className="text-muted-foreground text-[11px]">
-          Capture the rationale and trade-offs.
-        </p>
-      }
+      title={<h2 className="truncate text-lg font-semibold tracking-tight">{headerTitle}</h2>}
+      meta={null}
       onClose={onClose}
       className="max-w-[1800px]"
       headerClassName="px-3 py-2.5 md:px-4 md:py-3"
       bodyScrollable={false}
       bodyClassName="overflow-hidden p-0"
       footerClassName="px-3 py-2 md:px-4 md:py-2.5"
+      inlineHeader
       footer={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button type="button" variant="outline" onClick={onClose}>
@@ -133,7 +132,6 @@ export default function NewAdrModal({ onClose, onSubmit, tagSuggestions, specSug
             }}
             specSuggestions={specSuggestions}
             tagSuggestions={tagSuggestions}
-            placeholder="Why this decision? What are the trade-offs?"
             onInsertTemplate={insertTemplate}
             mcpEnabled={false}
             sampleLabel="Generate Draft"

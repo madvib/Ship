@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Issue, IssueEntry, IssueLink, StatusConfig } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import MarkdownEditor from '@/components/editor';
-import { loadProjectTemplate } from '@/components/editor/templateLoader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -231,7 +230,6 @@ export default function IssueDetail({
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>
-          {dirty && <Button onClick={saveIssue}>Save Changes</Button>}
           {!confirmDelete ? (
             <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
               Delete
@@ -422,6 +420,11 @@ export default function IssueDetail({
         <div className="min-h-0 flex-1">
         <MarkdownEditor
           label={undefined}
+          toolbarStart={
+            <Button size="xs" className="h-7 px-2 text-xs" onClick={saveIssue} disabled={!dirty}>
+              Save Issue
+            </Button>
+          }
           value={draft.description}
           onChange={(description) => {
             setDraft((current) => ({ ...current, description }));
@@ -433,10 +436,6 @@ export default function IssueDetail({
           fillHeight
           showStats={false}
           mcpEnabled={mcpEnabled}
-          sampleInline
-          sampleLabel="Insert Template"
-          sampleRequiresMcp={false}
-          onMcpSample={() => loadProjectTemplate('issue', { bodyOnly: true })}
         />
         </div>
       </div>

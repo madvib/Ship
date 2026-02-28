@@ -20,7 +20,11 @@ export const DEFAULT_STATUSES: StatusConfig[] = [
 ];
 
 const STATUS_COLOR_CLASSES: Record<string, { color: string; bg: string; border: string }> = {
-  gray: { color: 'text-zinc-400', bg: 'bg-zinc-800', border: 'border-zinc-700' },
+  gray: {
+    color: 'text-zinc-600 dark:text-zinc-400',
+    bg: 'bg-zinc-100 dark:bg-zinc-800',
+    border: 'border-zinc-200 dark:border-zinc-700',
+  },
   blue: { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
   red: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' },
   green: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },

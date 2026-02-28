@@ -8,6 +8,7 @@ function SpecsRouteComponent() {
   return (
     <SpecsPage
       specs={workspace.specs}
+      tagSuggestions={workspace.tagSuggestions}
       onSelectSpec={workspace.handleSelectSpec}
       onCreateSpec={workspace.handleCreateSpec}
     />
