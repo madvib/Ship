@@ -6,6 +6,7 @@ import {
   generateIssueDescriptionCmd,
 } from '@/lib/platform/tauri/commands';
 import { Config, DEFAULT_STATUSES } from '@/lib/workspace-ui';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -989,9 +990,9 @@ export default function SettingsPanel({
               </CardHeader>
               <CardContent className="space-y-3">
                 {agentError && (
-                  <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                    {agentError}
-                  </p>
+                  <Alert variant="destructive">
+                    <AlertDescription>{agentError}</AlertDescription>
+                  </Alert>
                 )}
                 <div className="flex flex-wrap gap-2">
                   {(['claude', 'codex', 'gemini'] as const).map((target) => (

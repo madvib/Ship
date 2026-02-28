@@ -2,8 +2,10 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, FileCode2, Plus } from 'lucide-react';
 import { SpecInfo as SpecEntry } from '@/bindings';
 import DetailSheet from './DetailSheet';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import SpecMetadataPanel from '@/components/editor/SpecMetadataPanel';
@@ -146,21 +148,17 @@ tags = []
       />
 
       {specs.length === 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileCode2 className="size-4" />
-              No specs yet
-            </CardTitle>
-            <CardDescription>Specs define scope, decisions, and delivery criteria.</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          icon={<FileCode2 className="size-4" />}
+          title="No specs yet"
+          description="Specs define scope, decisions, and delivery criteria."
+          action={
             <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
+              <Plus className="mr-2 size-4" />
               Create First Spec
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
@@ -248,9 +246,9 @@ tags = []
         >
           <form id="new-spec-form" onSubmit={submitCreate} className="space-y-4">
             {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
             <MarkdownEditor
               label="Content"

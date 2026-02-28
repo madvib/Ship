@@ -2,11 +2,11 @@ import { createFileRoute } from '@tanstack/react-router';
 import IssueList from '@/features/planning/IssueList';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import TemplateEditorButton from '@/features/planning/TemplateEditorButton';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
-import { getStatusStyles } from '@/lib/workspace-ui';
+import { Plus } from 'lucide-react';
 
 function IssuesRouteComponent() {
   const workspace = useWorkspace();
@@ -14,7 +14,6 @@ function IssuesRouteComponent() {
   const statusTotals = workspace.statuses.map((status) => ({
     id: status.id,
     label: status.name,
-    styles: getStatusStyles(status),
     count: workspace.issues.filter((issue) => issue.status === status.id).length,
   }));
 
@@ -35,8 +34,7 @@ function IssuesRouteComponent() {
               {statusTotals.map((status) => (
                 <Badge
                   key={status.id}
-                  variant="outline"
-                  className={`${status.styles.border} ${status.styles.bg} ${status.styles.color}`}
+                  variant={workspace.statuses.find((s) => s.id === status.id)?.color as any}
                 >
                   {status.label}: {status.count}
                 </Badge>
@@ -46,15 +44,16 @@ function IssuesRouteComponent() {
         }
       />
       {totalIssues === 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle>No issues yet</CardTitle>
-            <CardDescription>Create your first issue to start tracking work.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => workspace.setShowNewIssue(true)}>Create First Issue</Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          title="No issues yet"
+          description="Create your first issue to start tracking work."
+          action={
+            <Button onClick={() => workspace.setShowNewIssue(true)}>
+              <Plus className="mr-2 size-4" />
+              Create First Issue
+            </Button>
+          }
+        />
       ) : (
         <IssueList
           issues={workspace.issues}

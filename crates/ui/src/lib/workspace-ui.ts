@@ -19,31 +19,38 @@ export const DEFAULT_STATUSES: StatusConfig[] = [
   { id: 'done', name: 'Done', color: 'green' },
 ];
 
-const STATUS_COLOR_CLASSES: Record<string, { color: string; bg: string; border: string }> = {
-  gray: {
-    color: 'text-zinc-600 dark:text-zinc-400',
-    bg: 'bg-zinc-100 dark:bg-zinc-800',
-    border: 'border-zinc-200 dark:border-zinc-700',
-  },
-  blue: { color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
-  red: { color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/30' },
-  green: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
-  yellow: { color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/30' },
-  purple: { color: 'text-violet-400', bg: 'bg-violet-500/10', border: 'border-violet-500/30' },
-  orange: { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30' },
-};
-
 export function getStatusStyles(status: StatusConfig): {
   label: string;
   color: string;
   bg: string;
   border: string;
 } {
-  const classes = STATUS_COLOR_CLASSES[status.color ?? 'gray'] ?? STATUS_COLOR_CLASSES.gray;
+  const colorMap: Record<string, string> = {
+    gray: 'gray',
+    blue: 'blue',
+    red: 'red',
+    green: 'green',
+    yellow: 'yellow',
+    purple: 'purple',
+    orange: 'orange',
+  };
+  const colorName = colorMap[status.color ?? 'gray'] ?? 'gray';
+  
   return {
     label: status.name,
-    color: classes.color,
-    bg: classes.bg,
-    border: classes.border,
+    color: `text-status-${colorName}`,
+    bg: `bg-status-${colorName}/10`,
+    border: `border-status-${colorName}/30`,
   };
+}
+
+const ADR_STATUS_COLORS: Record<string, string> = {
+  accepted: 'text-status-green bg-status-green/10',
+  rejected: 'text-status-red bg-status-red/10',
+  superseded: 'text-status-yellow bg-status-yellow/10',
+  proposed: 'text-status-blue bg-status-blue/10',
+};
+
+export function getAdrStatusClasses(status: string): string {
+  return ADR_STATUS_COLORS[status] ?? 'text-muted-foreground';
 }

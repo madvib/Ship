@@ -4,10 +4,12 @@ import { AdrEntry } from '@/bindings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import TemplateEditorButton from './TemplateEditorButton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { getAdrStatusClasses } from '@/lib/workspace-ui';
 
 interface AdrListProps {
   adrs: AdrEntry[];
@@ -21,13 +23,6 @@ const ADR_SORT_OPTIONS: Array<{ value: AdrSort; label: string }> = [
   { value: 'oldest', label: 'Oldest first' },
   { value: 'status', label: 'Status' },
 ];
-
-const STATUS_COLORS: Record<string, string> = {
-  accepted: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
-  rejected: 'bg-red-500/15 text-red-600 dark:text-red-300',
-  superseded: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
-  proposed: 'bg-blue-500/15 text-blue-600 dark:text-blue-300',
-};
 
 export default function AdrList({ adrs, onNewAdr, onSelectAdr }: AdrListProps) {
   const [sortBy, setSortBy] = useState<AdrSort>('newest');
@@ -86,23 +81,17 @@ export default function AdrList({ adrs, onNewAdr, onSelectAdr }: AdrListProps) {
       />
 
       {adrs.length === 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Compass className="size-4" />
-              No decisions yet
-            </CardTitle>
-            <CardDescription>
-              Document your architecture decisions to keep the team aligned.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          icon={<Compass className="size-4" />}
+          title="No decisions yet"
+          description="Document your architecture decisions to keep the team aligned."
+          action={
             <Button onClick={onNewAdr}>
-              <Plus className="size-4" />
+              <Plus className="mr-2 size-4" />
               Record First Decision
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <Card size="sm">
           <CardHeader className="pb-3">
@@ -149,7 +138,7 @@ export default function AdrList({ adrs, onNewAdr, onSelectAdr }: AdrListProps) {
                       <span className="text-muted-foreground text-xs">{formatDate(entry.adr.metadata.date)}</span>
                       <Badge
                         variant="outline"
-                        className={`w-fit ${STATUS_COLORS[entry.adr.metadata.status] ?? 'text-muted-foreground'}`}
+                        className={`w-fit ${getAdrStatusClasses(entry.adr.metadata.status)}`}
                       >
                         {entry.adr.metadata.status}
                       </Badge>

@@ -4,6 +4,7 @@ import { generateAdrCmd } from '@/lib/platform/tauri/commands';
 import AdrEditor from './AdrEditor';
 import DetailSheet from './DetailSheet';
 import { loadProjectTemplate } from '@/components/editor/templateLoader';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { deriveAdrHeaderTitle } from './adrTitle';
 
@@ -118,9 +119,9 @@ export default function NewAdrModal({ onClose, onSubmit, tagSuggestions, specSug
     >
       <form id="new-adr-form" onSubmit={handleSubmit} className="flex h-full min-h-0 flex-col gap-2.5 p-3">
         {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         <div className="min-h-0 flex-1">

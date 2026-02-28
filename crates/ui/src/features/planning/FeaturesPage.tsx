@@ -2,9 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Flag, Plus } from 'lucide-react';
 import { AdrEntry, FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry, SpecInfo as SpecEntry } from '@/bindings';
 import DetailSheet from './DetailSheet';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import FeatureMetadataPanel from '@/components/editor/FeatureMetadataPanel';
@@ -168,21 +170,17 @@ tags = []
       />
 
       {features.length === 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Flag className="size-4" />
-              No features yet
-            </CardTitle>
-            <CardDescription>Create feature docs and track their delivery by release.</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          icon={<Flag className="size-4" />}
+          title="No features yet"
+          description="Create feature docs and track their delivery by release."
+          action={
             <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
+              <Plus className="mr-2 size-4" />
               Create First Feature
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
@@ -268,9 +266,9 @@ tags = []
         >
           <form id="new-feature-form" onSubmit={submitCreate} className="space-y-4">
             {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
             <MarkdownEditor
               label="Feature Plan"

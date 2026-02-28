@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import DetailSheet from './DetailSheet';
 import MarkdownEditor from '@/components/editor';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { getTemplateCmd, saveTemplateCmd, TemplateKind } from '@/lib/platform/tauri/commands';
 
@@ -106,9 +107,9 @@ export default function TemplateEditorModal({ kind, title, onClose }: TemplateEd
     >
       <form id="template-editor-form" onSubmit={handleSubmit} className="flex h-full min-h-0 flex-col gap-2 p-2">
         {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {loading ? (

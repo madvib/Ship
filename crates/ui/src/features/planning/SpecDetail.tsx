@@ -5,6 +5,7 @@ import MarkdownEditor from '@/components/editor';
 import SpecMetadataPanel from '@/components/editor/SpecMetadataPanel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useKeyboardShortcuts } from '@/lib/hooks/use-keyboard-shortcuts';
 
 interface SpecDetailProps {
   spec: SpecDocument;
@@ -46,21 +47,11 @@ export default function SpecDetail({
     }
   }, [content, dirty, onSave, saving, spec.file_name]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-        event.preventDefault();
-        void saveSpec();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, saveSpec]);
+  useKeyboardShortcuts({
+    onEscape: onClose,
+    onSave: saveSpec,
+    disabled: !dirty,
+  });
 
   return (
     <DetailSheet

@@ -2,9 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, PackagePlus, Plus } from 'lucide-react';
 import { FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry } from '@/bindings';
 import DetailSheet from './DetailSheet';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import TemplateEditorButton from './TemplateEditorButton';
@@ -159,21 +161,17 @@ tags = []
       />
 
       {releases.length === 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <PackagePlus className="size-4" />
-              No releases yet
-            </CardTitle>
-            <CardDescription>Create an alpha milestone and attach features as you ship.</CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          icon={<PackagePlus className="size-4" />}
+          title="No releases yet"
+          description="Create an alpha milestone and attach features as you ship."
+          action={
             <Button onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
+              <Plus className="mr-2 size-4" />
               Create First Release
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
@@ -262,9 +260,9 @@ tags = []
         >
           <form id="new-release-form" onSubmit={submitCreate} className="space-y-4">
             {error && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
             <MarkdownEditor
               label="Release Notes"

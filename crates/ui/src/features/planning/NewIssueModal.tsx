@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { StatusConfig } from '@/bindings';
 import { generateIssueDescriptionCmd } from '@/lib/platform/tauri/commands';
 import DetailSheet from './DetailSheet';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import AutocompleteInput from '@/components/ui/autocomplete-input';
@@ -122,9 +123,9 @@ export default function NewIssueModal({
     >
       <form id="new-issue-form" onSubmit={handleSubmit} className="flex h-full min-h-0 flex-col gap-2 p-3">
         {error && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         <div className="grid gap-2 md:grid-cols-[1fr_220px]">

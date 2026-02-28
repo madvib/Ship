@@ -178,7 +178,7 @@ export default function Sidebar({
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="px-1 pb-1">Project Switcher</DropdownMenuLabel>
                 {activeProject ? (
-                  <div className="border-amber-400/40 bg-amber-500/[0.06] mb-1 rounded-md border px-2.5 py-2">
+                  <div className="border-amber-400/40 bg-amber-500/6 mb-1 rounded-md border px-2.5 py-2">
                     <p className="truncate text-sm font-medium">{activeProject.name}</p>
                     <p className="text-muted-foreground truncate text-xs">{activeProject.path}</p>
                   </div>
@@ -197,7 +197,7 @@ export default function Sidebar({
                   otherProjects.map((project) => (
                     <DropdownMenuItem
                       key={project.path}
-                      className="border-amber-400/35 bg-amber-500/[0.05] mb-1 h-auto rounded-md border px-2.5 py-2"
+                      className="border-amber-400/35 bg-amber-500/5 mb-1 h-auto rounded-md border px-2.5 py-2"
                       title={project.path}
                       onClick={() => onSelectProject(project)}
                     >

@@ -1,9 +1,10 @@
-import { KeyboardEvent, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Plus, Tag, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, Plus, Tag } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { FacetedFilter } from '@/components/ui/faceted-filter';
 import AutocompleteInput from '@/components/ui/autocomplete-input';
 import { cn } from '@/lib/utils';
 import {
@@ -37,7 +38,6 @@ export default function FrontmatterPanel({
 }: FrontmatterPanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [rawText, setRawText] = useState(frontmatter ?? '');
-  const [tagInput, setTagInput] = useState('');
 
   const currentDelimiter: FrontmatterDelimiter = delimiter ?? '+++';
   const summary = useMemo(() => readFrontmatterSummary(frontmatter), [frontmatter]);
@@ -70,23 +70,6 @@ export default function FrontmatterPanel({
   const updateTags = (tags: string[]) => {
     const next = setFrontmatterStringListField(frontmatter, 'tags', tags, currentDelimiter);
     applyUpdate(next);
-  };
-
-  const addTag = () => {
-    const clean = tagInput.trim();
-    if (!clean) return;
-    if (summary.tags.includes(clean)) {
-      setTagInput('');
-      return;
-    }
-    updateTags([...summary.tags, clean]);
-    setTagInput('');
-  };
-
-  const onTagInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    addTag();
   };
 
   if (!frontmatter) {
@@ -172,34 +155,14 @@ export default function FrontmatterPanel({
             <label className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
               Tags {summary.tags.length ? `(${summary.tags.length})` : ''}
             </label>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {summary.tags.length === 0 && <span className="text-muted-foreground text-xs">No tags yet.</span>}
-              {summary.tags.map((tag) => (
-                <Badge key={tag} variant="outline" className="gap-1 text-[11px]">
-                  {tag}
-                  <button
-                    type="button"
-                    className="rounded-full p-0.5 hover:bg-muted"
-                    aria-label={`Remove tag ${tag}`}
-                    onClick={() => updateTags(summary.tags.filter((value) => value !== tag))}
-                  >
-                    <X className="size-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Input
-                value={tagInput}
-                placeholder="add-tag"
-                className="h-8"
-                onChange={(event) => setTagInput(event.target.value)}
-                onKeyDown={onTagInputKeyDown}
-              />
-              <Button type="button" variant="outline" size="xs" onClick={addTag}>
-                Add Tag
-              </Button>
-            </div>
+            <FacetedFilter
+              title="Add tag"
+              options={[]}
+              selectedValues={summary.tags}
+              onSelectionChange={updateTags}
+              allowNew
+              onAddNew={(tag) => updateTags([...summary.tags, tag])}
+            />
           </div>
 
           <div className="space-y-1">
