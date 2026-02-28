@@ -26,3 +26,7 @@ path = "tests/git_hook.rs"
 [[test]]
 name = "branch_config"
 path = "tests/branch_config.rs"
+
+[[test]]
+name = "git_workflow"
+path = "tests/git_workflow.rs"

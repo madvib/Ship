@@ -662,7 +662,7 @@ pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
     let known: &[(&str, &str)] = &[
         ("issues", "workflow/issues"),
         ("specs", "workflow/specs"),
-        ("features", "workflow/features"),
+        ("features", "project/features"),
         ("releases", "project/releases"),
         ("adrs", "project/adrs"),
         ("notes", "project/notes"),

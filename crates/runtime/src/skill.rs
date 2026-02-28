@@ -175,6 +175,12 @@ pub fn create_skill(project_dir: &Path, id: &str, name: &str, content: &str) -> 
         source: "custom".to_string(),
     };
     write_skill(&path, &skill)?;
+    // Register in project config so checkout hook includes this skill automatically.
+    let mut config = crate::config::get_config(Some(project_dir.to_path_buf()))?;
+    if !config.agent.skills.contains(&id.to_string()) {
+        config.agent.skills.push(id.to_string());
+        crate::config::save_config(&config, Some(project_dir.to_path_buf()))?;
+    }
     Ok(skill)
 }
 

@@ -1,7 +1,7 @@
 +++
 id = "feat-alpha-feature-delivery-foundation"
 title = "Alpha Feature Delivery Foundation"
-status = "active"
+status = "in-progress"
 created = "2026-02-25T00:00:00Z"
 updated = "2026-02-25T00:00:00Z"
 owner = "ship"

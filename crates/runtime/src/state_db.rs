@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, anyhow};
+use serde_json;
 use chrono::Utc;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, SqliteConnection};
@@ -42,7 +43,26 @@ CREATE TABLE IF NOT EXISTS global_state (
 );
 "#;
 
-const PROJECT_MIGRATIONS: &[(&str, &str)] = &[("0001_project_schema", PROJECT_SCHEMA_V1)];
+const PROJECT_SCHEMA_OPERATIONAL: &str = r#"
+CREATE TABLE IF NOT EXISTS managed_mcp_state (
+  provider TEXT PRIMARY KEY,
+  server_ids_json TEXT NOT NULL DEFAULT '[]',
+  last_mode TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS branch_context (
+  branch TEXT PRIMARY KEY,
+  doc_type TEXT NOT NULL,
+  doc_id TEXT NOT NULL,
+  last_synced TEXT NOT NULL
+);
+"#;
+
+const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_project_schema", PROJECT_SCHEMA_V1),
+    ("0002_operational_state", PROJECT_SCHEMA_OPERATIONAL),
+];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[("0001_global_schema", GLOBAL_SCHEMA_V1)];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -68,6 +88,117 @@ pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationRepor
 pub fn ensure_global_database(global_dir: &Path) -> Result<DatabaseMigrationReport> {
     let db_path = global_dir.join("ship.db");
     ensure_database(&db_path, GLOBAL_MIGRATIONS)
+}
+
+// ─── CRUD helpers ─────────────────────────────────────────────────────────────
+
+fn open_project_db(ship_dir: &Path) -> Result<SqliteConnection> {
+    ensure_project_database(ship_dir)?;
+    let db_path = project_db_path(ship_dir)?;
+    let db_url = sqlite_url(&db_path);
+    let options = SqliteConnectOptions::from_str(&db_url)
+        .with_context(|| format!("Invalid sqlite url {}", db_url))?;
+    block_on(async { SqliteConnection::connect_with(&options).await })
+}
+
+/// Returns `(server_ids, last_mode)` for the given provider, or empty defaults.
+pub fn get_managed_state_db(
+    ship_dir: &Path,
+    provider: &str,
+) -> Result<(Vec<String>, Option<String>)> {
+    let mut conn = open_project_db(ship_dir)?;
+    let row_opt = block_on(async {
+        sqlx::query(
+            "SELECT server_ids_json, last_mode FROM managed_mcp_state WHERE provider = ?",
+        )
+        .bind(provider)
+        .fetch_optional(&mut conn)
+        .await
+    })?;
+    if let Some(row) = row_opt {
+        use sqlx::Row;
+        let ids_json: String = row.get(0);
+        let last_mode: Option<String> = row.get(1);
+        let ids: Vec<String> = serde_json::from_str(&ids_json).unwrap_or_default();
+        Ok((ids, last_mode))
+    } else {
+        Ok((Vec::new(), None))
+    }
+}
+
+/// Persist the managed server ids and last mode for the given provider.
+pub fn set_managed_state_db(
+    ship_dir: &Path,
+    provider: &str,
+    ids: &[String],
+    last_mode: Option<&str>,
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    let ids_json = serde_json::to_string(ids)
+        .with_context(|| format!("Failed to serialize server ids for provider {}", provider))?;
+    let now = Utc::now().to_rfc3339();
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO managed_mcp_state (provider, server_ids_json, last_mode, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(provider) DO UPDATE SET
+               server_ids_json = excluded.server_ids_json,
+               last_mode = excluded.last_mode,
+               updated_at = excluded.updated_at",
+        )
+        .bind(provider)
+        .bind(&ids_json)
+        .bind(last_mode)
+        .bind(&now)
+        .execute(&mut conn)
+        .await
+    })?;
+    Ok(())
+}
+
+/// Look up which document is associated with `branch`. Returns `(doc_type, doc_uuid)` or `None`.
+pub fn get_branch_doc(ship_dir: &Path, branch: &str) -> Result<Option<(String, String)>> {
+    let mut conn = open_project_db(ship_dir)?;
+    let row_opt = block_on(async {
+        sqlx::query("SELECT doc_type, doc_id FROM branch_context WHERE branch = ?")
+            .bind(branch)
+            .fetch_optional(&mut conn)
+            .await
+    })?;
+    if let Some(row) = row_opt {
+        use sqlx::Row;
+        Ok(Some((row.get(0), row.get(1))))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Record that `branch` is associated with `doc_type` and the document's UUID.
+pub fn set_branch_doc(
+    ship_dir: &Path,
+    branch: &str,
+    doc_type: &str,
+    doc_uuid: &str,
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    let now = Utc::now().to_rfc3339();
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO branch_context (branch, doc_type, doc_id, last_synced)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(branch) DO UPDATE SET
+               doc_type = excluded.doc_type,
+               doc_id = excluded.doc_id,
+               last_synced = excluded.last_synced",
+        )
+        .bind(branch)
+        .bind(doc_type)
+        .bind(doc_uuid)
+        .bind(&now)
+        .execute(&mut conn)
+        .await
+    })?;
+    Ok(())
 }
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -193,6 +324,12 @@ fn block_on<F, T>(future: F) -> Result<T>
 where
     F: std::future::Future<Output = std::result::Result<T, sqlx::Error>>,
 {
+    // When called from within an existing tokio runtime (e.g. MCP async handlers),
+    // we can't start a second runtime on the same thread. Return an error so callers
+    // can fall back to non-DB paths.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        return Err(anyhow!("SQLite block_on called from within async context"));
+    }
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()

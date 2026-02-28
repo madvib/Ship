@@ -22,6 +22,8 @@ pub struct SpecMetadata {
     pub updated: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
 }
@@ -40,6 +42,7 @@ impl Default for SpecMetadata {
             created: now,
             updated: now,
             author: None,
+            branch: None,
             tags: Vec::new(),
         }
     }
@@ -101,6 +104,7 @@ impl Spec {
                     created: now,
                     updated: now,
                     author: None,
+                    branch: None,
                     tags: Vec::new(),
                 },
                 body: content.to_string(),
@@ -156,6 +160,7 @@ pub fn create_spec(project_dir: PathBuf, title: &str, body: &str) -> Result<Path
             created: now,
             updated: now,
             author: None,
+            branch: None,
             tags: Vec::new(),
         },
         body: if body.is_empty() {

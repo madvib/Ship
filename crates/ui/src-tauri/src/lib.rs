@@ -8,7 +8,7 @@ use runtime::project::{
     set_active_project_global, specs_dir,
 };
 use runtime::{
-    Prompt, ProviderInfo, create_adr, create_feature, create_issue, create_prompt, create_release,
+    FeatureStatus, Prompt, ProviderInfo, create_adr, create_feature, create_issue, create_prompt, create_release,
     create_spec, create_skill, create_user_skill, delete_adr, delete_issue, delete_prompt,
     delete_skill, delete_user_skill, delete_spec, get_feature,
     get_feature_raw as get_feature_content, get_issue, get_project_dir, get_project_name,
@@ -96,6 +96,9 @@ pub struct FeatureInfo {
     pub title: String,
     pub status: String,
     pub release: Option<String>,
+    pub spec: Option<String>,
+    pub branch: Option<String>,
+    pub description: Option<String>,
     pub path: String,
     pub updated: String,
 }
@@ -106,6 +109,9 @@ pub struct FeatureDocument {
     pub title: String,
     pub status: String,
     pub release: Option<String>,
+    pub spec: Option<String>,
+    pub branch: Option<String>,
+    pub description: Option<String>,
     pub path: String,
     pub updated: String,
     pub content: String,
@@ -248,8 +254,11 @@ fn feature_document_from_path(path: PathBuf) -> Result<FeatureDocument, String> 
     Ok(FeatureDocument {
         file_name,
         title: feature.metadata.title,
-        status: feature.metadata.status,
+        status: feature.metadata.status.to_string(),
         release: feature.metadata.release,
+        spec: feature.metadata.spec,
+        branch: feature.metadata.branch,
+        description: feature.metadata.description,
         path: path.to_string_lossy().to_string(),
         updated: feature.metadata.updated.to_rfc3339(),
         content,
@@ -1073,14 +1082,17 @@ fn update_release_cmd(
 #[specta::specta]
 fn list_features_cmd(state: State<AppState>) -> Result<Vec<FeatureInfo>, String> {
     let project_dir = get_active_dir(&state)?;
-    let entries = list_features(project_dir).map_err(|e| e.to_string())?;
+    let entries = list_features(project_dir, None).map_err(|e| e.to_string())?;
     Ok(entries
         .into_iter()
         .map(|entry| FeatureInfo {
             file_name: entry.file_name,
             title: entry.title,
-            status: entry.status,
+            status: entry.status.to_string(),
             release: entry.release,
+            spec: entry.spec,
+            branch: entry.branch,
+            description: entry.description,
             path: entry.path,
             updated: entry.updated.to_rfc3339(),
         })

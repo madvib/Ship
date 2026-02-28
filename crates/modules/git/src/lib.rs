@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use runtime::{
     Feature, FeatureAgentConfig, IssueEntry, ProjectConfig, Skill, agent_export,
-    get_effective_config, get_effective_skill, get_feature, list_issues_full,
+    get_effective_config, get_effective_skill, get_feature, get_spec, list_issues_full,
 };
 use std::collections::HashSet;
 use std::fs;
@@ -166,51 +166,214 @@ pub fn find_feature_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<P
     Ok(None)
 }
 
-pub fn on_post_checkout(ship_dir: &Path, new_branch: &str) -> Result<()> {
+/// Which document is associated with the checked-out branch.
+pub enum BranchDocument {
+    Feature(PathBuf),
+    Spec(PathBuf),
+}
+
+fn find_spec_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<PathBuf>> {
+    let specs_dir = runtime::project::specs_dir(ship_dir);
+    if !specs_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&specs_dir)
+        .with_context(|| format!("Failed to list specs: {}", specs_dir.display()))?
+    {
+        let path = entry?.path();
+        if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if file_name == "TEMPLATE.md" || file_name == "README.md" {
+                continue;
+            }
+            candidates.push(path);
+        }
+    }
+    candidates.sort();
+
+    for path in candidates {
+        let spec = get_spec(path.clone())
+            .with_context(|| format!("Invalid spec: {}", path.display()))?;
+        if spec.metadata.branch.as_deref() == Some(branch) {
+            return Ok(Some(path));
+        }
+    }
+
+    Ok(None)
+}
+
+fn find_feature_by_uuid(ship_dir: &Path, uuid: &str) -> Option<PathBuf> {
+    let dir = runtime::project::features_dir(ship_dir);
+    fs::read_dir(&dir).ok()?.flatten().find_map(|e| {
+        let path = e.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("md") {
+            return None;
+        }
+        let feature = get_feature(path.clone()).ok()?;
+        if feature.metadata.id == uuid {
+            Some(path)
+        } else {
+            None
+        }
+    })
+}
+
+fn find_spec_by_uuid(ship_dir: &Path, uuid: &str) -> Option<PathBuf> {
+    let dir = runtime::project::specs_dir(ship_dir);
+    fs::read_dir(&dir).ok()?.flatten().find_map(|e| {
+        let path = e.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("md") {
+            return None;
+        }
+        let spec = get_spec(path.clone()).ok()?;
+        if spec.metadata.id == uuid {
+            Some(path)
+        } else {
+            None
+        }
+    })
+}
+
+/// Find which document (feature or spec) is associated with the given branch.
+/// Checks the DB index first (O(1)), then falls back to a frontmatter file scan.
+pub fn find_document_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<BranchDocument>> {
+    if branch.trim().is_empty() {
+        return Ok(None);
+    }
+
+    // Fast path: DB index stores document UUID populated by `feature_start`
+    if let Ok(Some((doc_type, doc_uuid))) = runtime::state_db::get_branch_doc(ship_dir, branch) {
+        match doc_type.as_str() {
+            "feature" => {
+                if let Some(path) = find_feature_by_uuid(ship_dir, &doc_uuid) {
+                    return Ok(Some(BranchDocument::Feature(path)));
+                }
+            }
+            "spec" => {
+                if let Some(path) = find_spec_by_uuid(ship_dir, &doc_uuid) {
+                    return Ok(Some(BranchDocument::Spec(path)));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback: scan frontmatter of all features then specs
+    if let Some(path) = find_feature_for_branch(ship_dir, branch)? {
+        return Ok(Some(BranchDocument::Feature(path)));
+    }
+    if let Some(path) = find_spec_for_branch(ship_dir, branch)? {
+        return Ok(Some(BranchDocument::Spec(path)));
+    }
+    Ok(None)
+}
+
+pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) -> Result<()> {
+    // Ensure generated agent files are gitignored regardless of branch type.
+    let _ = write_root_gitignore(project_root);
+
     let config = get_effective_config(Some(ship_dir.to_path_buf()))?;
 
-    let Some(feature_path) = find_feature_for_branch(ship_dir, new_branch)? else {
+    let Some(doc) = find_document_for_branch(ship_dir, new_branch)? else {
         for provider in &config.providers {
             agent_export::teardown(ship_dir.to_path_buf(), provider)?;
         }
         return Ok(());
     };
 
-    let feature = get_feature(feature_path)?;
-    let resolved_agent = resolve_agent_config(ship_dir, &config, feature.metadata.agent.as_ref())?;
-
-    // Effective providers: feature override wins, else project default.
-    let providers = if let Some(agent) = &feature.metadata.agent {
-        if !agent.providers.is_empty() {
-            agent.providers.clone()
-        } else {
-            config.providers.clone()
-        }
-    } else {
-        config.providers.clone()
-    };
-
-    let project_root = ship_dir
-        .parent()
-        .ok_or_else(|| anyhow!("Cannot determine project root from {}", ship_dir.display()))?;
-
     let mut open_issues = list_issues_full(ship_dir.to_path_buf())?;
     open_issues.retain(|issue| issue.status != "done");
 
-    for provider in &providers {
-        match provider.as_str() {
-            "claude" => {
-                generate_claude_md(project_root, &feature, &open_issues, &resolved_agent.skills)?;
-                agent_export::export_to(ship_dir.to_path_buf(), "claude")?;
-                ensure_required_mcp_servers(project_root, &resolved_agent.mcp_server_ids)?;
+    match doc {
+        BranchDocument::Feature(feature_path) => {
+            let feature = get_feature(feature_path)?;
+            let resolved_agent =
+                resolve_agent_config(ship_dir, &config, feature.metadata.agent.as_ref())?;
+
+            // Effective providers: feature override wins, else project default.
+            let providers = if let Some(agent) = &feature.metadata.agent {
+                if !agent.providers.is_empty() {
+                    agent.providers.clone()
+                } else {
+                    config.providers.clone()
+                }
+            } else {
+                config.providers.clone()
+            };
+
+            // When the feature explicitly declares a subset of MCP servers, filter the
+            // export to only those; otherwise write all project servers.
+            let feature_server_filter = feature
+                .metadata
+                .agent
+                .as_ref()
+                .filter(|a| !a.mcp_servers.is_empty())
+                .map(|_| resolved_agent.mcp_server_ids.as_slice());
+
+            for provider in &providers {
+                match provider.as_str() {
+                    "claude" => {
+                        generate_claude_md(
+                            project_root,
+                            &feature,
+                            &open_issues,
+                            &resolved_agent.skills,
+                        )?;
+                        agent_export::export_to_filtered(
+                            ship_dir.to_path_buf(),
+                            "claude",
+                            feature_server_filter,
+                        )?;
+                        ensure_required_mcp_servers(
+                            project_root,
+                            &resolved_agent.mcp_server_ids,
+                        )?;
+                    }
+                    other => {
+                        agent_export::export_to_filtered(
+                            ship_dir.to_path_buf(),
+                            other,
+                            feature_server_filter,
+                        )?;
+                    }
+                }
             }
-            other => {
-                agent_export::export_to(ship_dir.to_path_buf(), other)?;
+
+            println!(
+                "[ship] loaded feature '{}' for: {}",
+                feature.metadata.title,
+                providers.join(", ")
+            );
+        }
+        BranchDocument::Spec(spec_path) => {
+            let spec = get_spec(spec_path)?;
+            let skill_ids = config.agent.skills.clone();
+            let mut skills = Vec::new();
+            for skill_id in skill_ids {
+                if let Ok(skill) = get_effective_skill(ship_dir, &skill_id) {
+                    skills.push(skill);
+                }
             }
+
+            for provider in &config.providers {
+                if provider == "claude" {
+                    generate_claude_md_for_spec(project_root, &spec, &open_issues, &skills)?;
+                    agent_export::export_to(ship_dir.to_path_buf(), "claude")?;
+                } else {
+                    agent_export::export_to(ship_dir.to_path_buf(), provider)?;
+                }
+            }
+
+            println!(
+                "[ship] loaded spec '{}' for: {}",
+                spec.metadata.title,
+                config.providers.join(", ")
+            );
         }
     }
 
-    println!("[ship] loaded feature '{}' for: {}", feature.metadata.title, providers.join(", "));
     Ok(())
 }
 
@@ -272,6 +435,67 @@ pub fn generate_claude_md(
     };
     content.push_str("---\n");
     content.push_str(&format!("_Branch: {} | Feature: {}_\n", branch, feature_id));
+
+    let claude_md = project_root.join("CLAUDE.md");
+    fs::write(&claude_md, content)
+        .with_context(|| format!("Failed to write {}", claude_md.display()))?;
+    Ok(())
+}
+
+pub fn generate_claude_md_for_spec(
+    project_root: &Path,
+    spec: &runtime::Spec,
+    open_issues: &[IssueEntry],
+    skills: &[Skill],
+) -> Result<()> {
+    let mut content = String::new();
+    content.push_str(&format!("# [ship] {}\n\n", spec.metadata.title));
+    content.push_str(
+        "> Auto-generated by ship on branch checkout. Do not edit manually - re-run `ship git sync` to regenerate.\n\n",
+    );
+
+    content.push_str("## Spec\n\n");
+    if spec.body.trim().is_empty() {
+        content.push_str("_No spec body provided._\n\n");
+    } else {
+        content.push_str(spec.body.trim());
+        content.push_str("\n\n");
+    }
+
+    content.push_str("## Open Issues\n\n");
+    if open_issues.is_empty() {
+        content.push_str("_No open issues._\n\n");
+    } else {
+        let mut ordered: Vec<&IssueEntry> = open_issues.iter().collect();
+        ordered.sort_by(|a, b| {
+            a.status
+                .cmp(&b.status)
+                .then_with(|| a.file_name.cmp(&b.file_name))
+        });
+        for issue in ordered {
+            content.push_str(&format!(
+                "- [ ] {} (`{}/{}`)\n",
+                issue.issue.metadata.title, issue.status, issue.file_name
+            ));
+        }
+        content.push('\n');
+    }
+
+    content.push_str("## Skills\n\n");
+    if skills.is_empty() {
+        content.push_str("_No skills configured._\n\n");
+    } else {
+        for skill in skills {
+            content.push_str(&format!("### {} (`{}`)\n\n", skill.name, skill.id));
+            content.push_str(skill.content.trim());
+            content.push_str("\n\n");
+        }
+    }
+
+    let branch = spec.metadata.branch.as_deref().unwrap_or("unassigned");
+    let spec_id = if spec.metadata.id.is_empty() { "unknown" } else { spec.metadata.id.as_str() };
+    content.push_str("---\n");
+    content.push_str(&format!("_Branch: {} | Spec: {}_\n", branch, spec_id));
 
     let claude_md = project_root.join("CLAUDE.md");
     fs::write(&claude_md, content)

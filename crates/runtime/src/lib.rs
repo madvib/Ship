@@ -35,7 +35,8 @@ pub use events::{
 };
 pub use feature::{
     Feature, FeatureAgentConfig, FeatureEntry, FeatureMcpRef, FeatureMetadata, FeatureSkillRef,
-    create_feature, get_feature, get_feature_raw, list_features, update_feature,
+    FeatureStatus, create_feature, feature_done, feature_start, get_feature, get_feature_raw,
+    list_features, update_feature,
 };
 pub use issue::{
     Issue, IssueEntry, IssueLink, IssueMetadata, add_link, append_note, backfill_issue_ids,
@@ -74,7 +75,10 @@ pub use spec::{
     Spec, SpecEntry, SpecMetadata, create_spec, delete_spec, get_spec, get_spec_raw, list_specs,
     update_spec,
 };
-pub use state_db::{DatabaseMigrationReport, ensure_global_database, ensure_project_database};
+pub use state_db::{
+    DatabaseMigrationReport, ensure_global_database, ensure_project_database, get_branch_doc,
+    get_managed_state_db, set_branch_doc, set_managed_state_db,
+};
 
 #[cfg(test)]
 mod tests {
@@ -571,7 +575,7 @@ mod tests {
         assert!(path.exists());
         let feature = get_feature(path)?;
         assert_eq!(feature.metadata.title, "Agent Config");
-        assert_eq!(feature.metadata.status, "active");
+        assert_eq!(feature.metadata.status, FeatureStatus::Planned);
         assert_eq!(
             feature.metadata.release,
             Some("v0.1.0-alpha.md".to_string())
@@ -609,7 +613,7 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         create_feature(project_dir.clone(), "Feature One", "", None, None, None)?;
         create_feature(project_dir.clone(), "Feature Two", "", None, None, None)?;
-        let features = list_features(project_dir)?;
+        let features = list_features(project_dir, None)?;
         assert_eq!(features.len(), 2);
         let titles: Vec<&str> = features.iter().map(|f| f.title.as_str()).collect();
         assert!(titles.contains(&"Feature One"));
@@ -706,7 +710,7 @@ mod tests {
         assert!(!gitignore.contains("ship.db"));
         assert!(!gitignore.contains("log.md"));
         assert!(!gitignore.contains("project/releases"));
-        assert!(!gitignore.contains("workflow/features"));
+        assert!(!gitignore.contains("project/features"));
         assert!(!gitignore.contains("workflow/specs"));
         assert!(!gitignore.contains("project/adrs"));
         assert!(!gitignore.contains("project/notes"));
@@ -768,7 +772,7 @@ mod tests {
         assert!(ship_path.join("workflow/issues/backlog").is_dir());
         assert!(ship_path.join("workflow/issues/in-progress").is_dir());
         assert!(ship_path.join("workflow/specs").is_dir());
-        assert!(ship_path.join("workflow/features").is_dir());
+        assert!(ship_path.join("project/features").is_dir());
         // project/ namespace
         assert!(ship_path.join("project/releases").is_dir());
         assert!(ship_path.join("project/adrs").is_dir());
@@ -781,7 +785,7 @@ mod tests {
         assert!(ship_path.join("generated").is_dir());
         // shared
         assert!(ship_path.join("project/releases/TEMPLATE.md").is_file());
-        assert!(ship_path.join("workflow/features/TEMPLATE.md").is_file());
+        assert!(ship_path.join("project/features/TEMPLATE.md").is_file());
         assert!(ship_path.join("project/TEMPLATE.md").is_file());
         assert!(ship_path.join("project/notes/TEMPLATE.md").is_file());
         assert!(ship_path.join("README.md").is_file());
@@ -825,7 +829,7 @@ mod tests {
     fn test_init_project_feature_template_has_rich_fields() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
-        let template = fs::read_to_string(ship_path.join("workflow/features/TEMPLATE.md"))?;
+        let template = fs::read_to_string(ship_path.join("project/features/TEMPLATE.md"))?;
         // New lifecycle fields
         assert!(template.contains("status = \"planned\""));
         assert!(template.contains("version"));
@@ -936,7 +940,7 @@ mod tests {
         let tmp = tempdir()?;
         let ship_path = init_demo_project(tmp.path().to_path_buf())?;
         let releases = list_releases(ship_path.clone())?;
-        let features = list_features(ship_path.clone())?;
+        let features = list_features(ship_path.clone(), None)?;
         let specs = list_specs(ship_path)?;
         assert!(!releases.is_empty());
         assert!(!features.is_empty());

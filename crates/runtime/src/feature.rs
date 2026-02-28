@@ -91,13 +91,39 @@ pub struct FeatureAgentConfig {
     pub providers: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum FeatureStatus {
+    Planned,
+    InProgress,
+    Implemented,
+    Deprecated,
+}
+
+impl Default for FeatureStatus {
+    fn default() -> Self {
+        FeatureStatus::Planned
+    }
+}
+
+impl std::fmt::Display for FeatureStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FeatureStatus::Planned => write!(f, "planned"),
+            FeatureStatus::InProgress => write!(f, "in-progress"),
+            FeatureStatus::Implemented => write!(f, "implemented"),
+            FeatureStatus::Deprecated => write!(f, "deprecated"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct FeatureMetadata {
     #[serde(default)]
     pub id: String,
     pub title: String,
-    #[serde(default = "default_status")]
-    pub status: String, // active | paused | complete | archived
+    #[serde(default)]
+    pub status: FeatureStatus,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,14 +136,14 @@ pub struct FeatureMetadata {
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<FeatureAgentConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default)]
     pub adrs: Vec<String>,
     #[serde(default)]
     pub tags: Vec<String>,
-}
-
-fn default_status() -> String {
-    "active".to_string()
 }
 
 #[derive(Debug, Clone, Type)]
@@ -131,8 +157,11 @@ pub struct FeatureEntry {
     pub file_name: String,
     pub path: String,
     pub title: String,
-    pub status: String,
+    pub status: FeatureStatus,
     pub release: Option<String>,
+    pub spec: Option<String>,
+    pub branch: Option<String>,
+    pub description: Option<String>,
     pub updated: DateTime<Utc>,
 }
 
@@ -172,7 +201,7 @@ impl Feature {
                 metadata: FeatureMetadata {
                     id: String::new(),
                     title,
-                    status: default_status(),
+                    status: FeatureStatus::default(),
                     created: now,
                     updated: now,
                     owner: None,
@@ -180,6 +209,8 @@ impl Feature {
                     spec: None,
                     branch: None,
                     agent: None,
+                    supersedes: None,
+                    description: None,
                     adrs: Vec::new(),
                     tags: Vec::new(),
                 },
@@ -263,7 +294,7 @@ pub fn create_feature(
         metadata: FeatureMetadata {
             id: Uuid::new_v4().to_string(),
             title: title.to_string(),
-            status: default_status(),
+            status: FeatureStatus::Planned,
             created: now,
             updated: now,
             owner: None,
@@ -271,6 +302,8 @@ pub fn create_feature(
             spec: spec.filter(|s| !s.trim().is_empty()).map(str::to_string),
             branch: branch.filter(|s| !s.trim().is_empty()).map(str::to_string),
             agent: None,
+            supersedes: None,
+            description: None,
             adrs: Vec::new(),
             tags: Vec::new(),
         },
@@ -334,8 +367,12 @@ pub fn update_feature(path: PathBuf, body: &str) -> Result<()> {
     Ok(())
 }
 
-/// List all feature files in `.ship/features/`.
-pub fn list_features(project_dir: PathBuf) -> Result<Vec<FeatureEntry>> {
+/// List all feature files in `.ship/project/features/`.
+/// Pass `status_filter` to return only features with that status.
+pub fn list_features(
+    project_dir: PathBuf,
+    status_filter: Option<FeatureStatus>,
+) -> Result<Vec<FeatureEntry>> {
     let features_dir = crate::project::features_dir(&project_dir);
     if !features_dir.exists() {
         return Ok(vec![]);
@@ -355,16 +392,63 @@ pub fn list_features(project_dir: PathBuf) -> Result<Vec<FeatureEntry>> {
                 continue;
             }
             if let Ok(feature) = get_feature(path.clone()) {
+                if let Some(ref f) = status_filter {
+                    if &feature.metadata.status != f {
+                        continue;
+                    }
+                }
                 entries.push(FeatureEntry {
                     file_name,
                     path: path.to_string_lossy().to_string(),
                     title: feature.metadata.title,
                     status: feature.metadata.status,
                     release: feature.metadata.release,
+                    spec: feature.metadata.spec,
+                    branch: feature.metadata.branch,
+                    description: feature.metadata.description,
                     updated: feature.metadata.updated,
                 });
             }
         }
     }
     Ok(entries)
+}
+
+/// Set a feature's status to `InProgress` and record its branch.
+pub fn feature_start(project_dir: PathBuf, file_name: &str, branch: &str) -> Result<()> {
+    let path = crate::project::features_dir(&project_dir).join(file_name);
+    let mut feature = get_feature(path.clone())?;
+    feature.metadata.status = FeatureStatus::InProgress;
+    feature.metadata.branch = Some(branch.to_string());
+    feature.metadata.updated = Utc::now();
+    write_atomic(&path, feature.to_markdown()?)?;
+    // Index branch → feature UUID in DB for fast checkout lookup (non-fatal if DB unavailable)
+    let _ = crate::state_db::set_branch_doc(&project_dir, branch, "feature", &feature.metadata.id);
+    append_event(
+        &project_dir,
+        "logic",
+        EventEntity::Feature,
+        EventAction::Update,
+        file_name,
+        Some(format!("started branch={}", branch)),
+    )?;
+    Ok(())
+}
+
+/// Set a feature's status to `Implemented`.
+pub fn feature_done(project_dir: PathBuf, file_name: &str) -> Result<()> {
+    let path = crate::project::features_dir(&project_dir).join(file_name);
+    let mut feature = get_feature(path.clone())?;
+    feature.metadata.status = FeatureStatus::Implemented;
+    feature.metadata.updated = Utc::now();
+    write_atomic(&path, feature.to_markdown()?)?;
+    append_event(
+        &project_dir,
+        "logic",
+        EventEntity::Feature,
+        EventAction::Update,
+        file_name,
+        Some("done — marked implemented".to_string()),
+    )?;
+    Ok(())
 }

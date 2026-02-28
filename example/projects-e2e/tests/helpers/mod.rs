@@ -3,6 +3,24 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::TempDir;
 
+/// Simulated existing-project file trees for testing `ship init` on non-empty directories.
+/// Each entry is (relative path, content).
+pub const EXISTING_JS_PROJECT: &[(&str, &str)] = &[
+    ("package.json", r#"{"name":"my-app","version":"0.1.0","scripts":{"dev":"next dev","build":"next build"}}"#),
+    ("src/index.js", "import React from 'react';\nexport default function App() { return <div>Hello</div>; }\n"),
+    ("src/components/Button.js", "export const Button = ({children}) => <button>{children}</button>;\n"),
+    ("public/index.html", "<!DOCTYPE html><html><body><div id=\"root\"></div></body></html>\n"),
+    (".gitignore", "node_modules/\n.env\n.next/\nbuild/\n"),
+    ("README.md", "# My App\n\nA sample project.\n"),
+];
+
+pub const EXISTING_RUST_PROJECT: &[(&str, &str)] = &[
+    ("Cargo.toml", "[package]\nname = \"my-app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+    ("src/main.rs", "fn main() { println!(\"Hello, world!\"); }\n"),
+    (".gitignore", "target/\n"),
+    ("README.md", "# My App\n"),
+];
+
 /// A temporary project with a real .ship/ directory and optional git repo.
 pub struct TestProject {
     pub dir: TempDir,
@@ -23,24 +41,51 @@ impl TestProject {
         Ok(Self { dir, ship_dir })
     }
 
+    /// Create a temp dir with pre-existing files (simulating an existing project),
+    /// then run `ship init`. Files are created before init runs.
+    pub fn with_existing_files(files: &[(&str, &str)]) -> Result<Self> {
+        let dir = TempDir::new()?;
+        for (rel, content) in files {
+            let path = dir.path().join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, content)?;
+        }
+        let ship_dir = runtime::init_project(dir.path().to_path_buf())?;
+        Ok(Self { dir, ship_dir })
+    }
+
+    /// Create a temp dir with a real git repo, pre-existing files, and run `ship init`.
+    pub fn with_git_and_files(files: &[(&str, &str)]) -> Result<Self> {
+        let dir = TempDir::new()?;
+        let root = dir.path();
+        for (rel, content) in files {
+            let path = root.join(rel);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(path, content)?;
+        }
+        Self::init_git(root)?;
+        let ship_dir = runtime::init_project(root.to_path_buf())?;
+        Ok(Self { dir, ship_dir })
+    }
+
     /// Create a temp dir with a real git repo and run `ship init`.
     pub fn with_git() -> Result<Self> {
         let dir = TempDir::new()?;
         let root = dir.path();
-        Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(root)
-            .output()?;
-        Command::new("git")
-            .args(["config", "user.email", "test@ship.dev"])
-            .current_dir(root)
-            .output()?;
-        Command::new("git")
-            .args(["config", "user.name", "Ship Test"])
-            .current_dir(root)
-            .output()?;
+        Self::init_git(root)?;
         let ship_dir = runtime::init_project(root.to_path_buf())?;
         Ok(Self { dir, ship_dir })
+    }
+
+    fn init_git(root: &Path) -> Result<()> {
+        Command::new("git").args(["init", "-b", "main"]).current_dir(root).output()?;
+        Command::new("git").args(["config", "user.email", "test@ship.dev"]).current_dir(root).output()?;
+        Command::new("git").args(["config", "user.name", "Ship Test"]).current_dir(root).output()?;
+        Ok(())
     }
 
     pub fn root(&self) -> &Path {
@@ -126,15 +171,26 @@ impl TestProject {
             .output()?)
     }
 
-    /// Add a git worktree at a sibling directory and return a TestWorktree.
+    /// Add a git worktree inside the project's temp dir and return a TestWorktree.
     /// The branch must already exist. The worktree's .ship/ is resolved via SHIP_DIR.
     pub fn add_worktree(&self, branch: &str) -> Result<TestWorktree> {
-        let worktree_path = self.root().parent().unwrap()
-            .join(format!("worktree-{}", branch.replace('/', "-")));
-        Command::new("git")
+        // Place worktrees inside the project's unique temp dir to avoid cross-test conflicts
+        // when tests run in parallel (multiple tests may use the same branch name).
+        let worktree_path = self.root()
+            .join(".worktrees")
+            .join(branch.replace('/', "-"));
+        // Note: git worktree add creates the directory itself — do not pre-create it.
+        let out = Command::new("git")
             .args(["worktree", "add", worktree_path.to_str().unwrap(), branch])
             .current_dir(self.root())
             .output()?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "git worktree add {} failed: {}",
+                branch,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         Ok(TestWorktree {
             ship_dir: self.ship_dir.clone(),
             path: worktree_path,
@@ -176,6 +232,96 @@ impl TestProject {
             name, needle, content
         );
     }
+
+    /// Read a file at project root.
+    pub fn read_root_file(&self, name: &str) -> String {
+        std::fs::read_to_string(self.root().join(name))
+            .unwrap_or_else(|_| panic!("{} not readable", name))
+    }
+
+    /// Read a file under .ship/.
+    pub fn read_ship_file(&self, rel: &str) -> String {
+        std::fs::read_to_string(self.ship_dir.join(rel))
+            .unwrap_or_else(|_| panic!(".ship/{} not readable", rel))
+    }
+
+    /// Write a file at project root (for test setup).
+    pub fn write_root_file(&self, name: &str, content: &str) {
+        let path = self.root().join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, content).unwrap();
+    }
+
+    /// Stage a specific file in git. Returns exit code.
+    pub fn git_stage(&self, rel: &str) -> bool {
+        Command::new("git")
+            .args(["add", rel])
+            .current_dir(self.root())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Attempt to commit staged changes. Returns (success, stderr).
+    pub fn git_commit(&self, msg: &str) -> (bool, String) {
+        let out = Command::new("git")
+            .args(["commit", "-m", msg])
+            .current_dir(self.root())
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        (out.status.success(), stderr)
+    }
+
+    /// Return the current git branch name.
+    pub fn current_branch(&self) -> String {
+        let out = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(self.root())
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// Return staged file list.
+    pub fn git_staged_files(&self) -> Vec<String> {
+        let out = Command::new("git")
+            .args(["diff", "--cached", "--name-only"])
+            .current_dir(self.root())
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// Create a release branch off the current branch.
+    pub fn create_release_branch(&self, name: &str) -> Result<()> {
+        let out = Command::new("git")
+            .args(["checkout", "-b", name])
+            .current_dir(self.root())
+            .output()?;
+        if !out.status.success() {
+            anyhow::bail!("git checkout -b {} failed: {}", name,
+                String::from_utf8_lossy(&out.stderr));
+        }
+        Ok(())
+    }
+
+    /// Create a feature branch off the current branch.
+    pub fn create_feature_branch(&self, name: &str) -> Result<()> {
+        self.create_release_branch(name)
+    }
+
+    pub fn install_hooks_and_hooks(&self) -> Result<()> {
+        ship_module_git::install_hooks(&self.root().join(".git"))?;
+        ship_module_git::write_root_gitignore(self.root())?;
+        Ok(())
+    }
 }
 
 impl TestWorktree {
@@ -187,6 +333,40 @@ impl TestWorktree {
             .env("SHIP_DIR", &self.ship_dir);
         cmd.args(args);
         cmd
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn assert_file(&self, name: &str) {
+        let path = self.path.join(name);
+        assert!(path.exists(), "worktree/{} should exist but doesn't", name);
+    }
+
+    pub fn assert_no_file(&self, name: &str) {
+        let path = self.path.join(name);
+        assert!(!path.exists(), "worktree/{} should not exist but does", name);
+    }
+
+    pub fn assert_file_contains(&self, name: &str, needle: &str) {
+        let path = self.path.join(name);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("worktree/{} not readable", name));
+        assert!(
+            content.contains(needle),
+            "worktree/{} should contain {:?}\n--- content ---\n{}",
+            name, needle, content
+        );
+    }
+
+    pub fn current_branch(&self) -> String {
+        let out = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(&self.path)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 }
 

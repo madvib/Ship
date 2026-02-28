@@ -6,7 +6,7 @@ use crate::prompt::Prompt;
 use crate::prompt::get_prompt;
 use crate::skill::list_effective_skills;
 use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -177,40 +177,44 @@ fn require_provider(id: &str) -> Result<&'static ProviderDescriptor> {
 
 // ─── Managed state ────────────────────────────────────────────────────────────
 
-/// Tracks which server IDs Ship wrote into each provider's config,
-/// keyed by provider id. Stored at `.ship/mcp_managed_state.toml`.
-#[derive(Serialize, Deserialize, Debug, Default)]
+/// In-memory view of which server IDs Ship wrote into each provider's config.
+/// Backed by the project SQLite DB (`managed_mcp_state` table).
+#[derive(Debug, Default)]
 struct ManagedState {
-    /// `[providers.<id>]` sections — one per provider.
-    #[serde(default)]
     providers: HashMap<String, ToolState>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct ToolState {
-    #[serde(default)]
     managed_servers: Vec<String>,
     last_mode: Option<String>,
 }
 
-fn managed_state_path(project_dir: &Path) -> PathBuf {
-    project_dir.join("mcp_managed_state.toml")
-}
-
 fn load_managed_state(project_dir: &Path) -> ManagedState {
-    let path = managed_state_path(project_dir);
-    if !path.exists() {
-        return ManagedState::default();
+    let mut state = ManagedState::default();
+    for p in PROVIDERS {
+        if let Ok((ids, last_mode)) = crate::state_db::get_managed_state_db(project_dir, p.id) {
+            if !ids.is_empty() || last_mode.is_some() {
+                state
+                    .providers
+                    .insert(p.id.to_string(), ToolState { managed_servers: ids, last_mode });
+            }
+        }
     }
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+    state
 }
 
 fn save_managed_state(project_dir: &Path, state: &ManagedState) -> Result<()> {
-    let path = managed_state_path(project_dir);
-    crate::fs_util::write_atomic(&path, toml::to_string_pretty(state)?)
+    for (provider, tool_state) in &state.providers {
+        // Non-fatal: DB writes fail gracefully when called from async context.
+        let _ = crate::state_db::set_managed_state_db(
+            project_dir,
+            provider,
+            &tool_state.managed_servers,
+            tool_state.last_mode.as_deref(),
+        );
+    }
+    Ok(())
 }
 
 // ─── Sync payload ─────────────────────────────────────────────────────────────
@@ -227,8 +231,29 @@ pub struct SyncPayload {
 
 /// Export the active mode (or global config) to the specified provider.
 pub fn export_to(project_dir: PathBuf, target: &str) -> Result<()> {
+    export_to_inner(project_dir, target, None)
+}
+
+/// Like `export_to` but restricts project MCP servers to those whose IDs appear in
+/// `server_filter`. Pass `None` to write all project servers (same as `export_to`).
+pub fn export_to_filtered(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+) -> Result<()> {
+    export_to_inner(project_dir, target, server_filter)
+}
+
+fn export_to_inner(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+) -> Result<()> {
     let desc = require_provider(target)?;
-    let payload = build_payload(&project_dir)?;
+    let mut payload = build_payload(&project_dir)?;
+    if let Some(ids) = server_filter {
+        payload.servers.retain(|s| ids.contains(&s.id));
+    }
     let project_root = project_dir
         .parent()
         .ok_or_else(|| anyhow!("Cannot determine project root from {:?}", project_dir))?;
@@ -347,10 +372,8 @@ pub fn import_from_provider(provider_id: &str, project_dir: PathBuf) -> Result<u
         return Ok(0);
     };
 
-    let state = load_managed_state(&project_dir);
-    let managed = state.providers.get(provider_id)
-        .map(|ts| ts.managed_servers.clone())
-        .unwrap_or_default();
+    let (managed, _) =
+        crate::state_db::get_managed_state_db(&project_dir, provider_id).unwrap_or_default();
 
     let mut config = get_config(Some(project_dir.clone()))?;
     let mut added = 0usize;
@@ -903,10 +926,11 @@ mod tests {
     fn claude_managed_state_written() {
         let (_tmp, project_dir) = project_with_servers(vec![make_stdio_server("gh")]);
         export_to(project_dir.clone(), "claude").unwrap();
-        let state_path = project_dir.join("mcp_managed_state.toml");
-        assert!(state_path.exists());
-        let content = std::fs::read_to_string(&state_path).unwrap();
-        assert!(content.contains("gh"), "managed server not recorded in state");
+        let (ids, _mode) =
+            crate::state_db::get_managed_state_db(&project_dir, "claude").unwrap();
+        assert!(ids.contains(&"gh".to_string()), "managed server not recorded in state");
+        // Clean up DB created in ~/.ship/state/ for this temp project
+        std::fs::remove_file(crate::state_db::project_db_path(&project_dir).unwrap()).ok();
     }
 
     // ── Gemini ─────────────────────────────────────────────────────────────────

@@ -56,7 +56,7 @@ pub fn specs_dir(ship_dir: &Path) -> PathBuf {
 }
 
 pub fn features_dir(ship_dir: &Path) -> PathBuf {
-    workflow_ns(ship_dir).join("features")
+    project_ns(ship_dir).join("features")
 }
 
 pub fn issues_dir(ship_dir: &Path) -> PathBuf {
@@ -256,6 +256,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     fs::create_dir_all(upcoming_releases_dir(&ship_path))?;
     fs::create_dir_all(adrs_dir(&ship_path))?;
     fs::create_dir_all(notes_dir(&ship_path))?;
+    fs::create_dir_all(features_dir(&ship_path))?;
 
     // workflow/ namespace
     let issues = issues_dir(&ship_path);
@@ -264,7 +265,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     }
     fs::create_dir_all(issues.join("done"))?;
     fs::create_dir_all(specs_dir(&ship_path))?;
-    fs::create_dir_all(features_dir(&ship_path))?;
 
     // agents/ namespace
     fs::create_dir_all(modes_dir(&ship_path))?;
@@ -375,7 +375,7 @@ fn write_directory_readmes(ship_path: &Path) -> Result<()> {
         ),
         (
             &features_dir(ship_path),
-            "# workflow/features/\n\nFeature execution plans. These can reference releases/specs.\n",
+            "# project/features/\n\nLong-lived feature records. Can reference releases and specs.\n",
         ),
         (
             &agents_ns(ship_path),
@@ -410,15 +410,17 @@ fn write_initial_config_with_comments(
     Ok(())
 }
 
-fn write_if_missing(path: &Path, content: &str) -> Result<()> {
+/// Write `content` to `path` only if it doesn't already exist.
+/// Returns `true` if the file was newly written, `false` if it already existed.
+fn write_if_missing(path: &Path, content: &str) -> Result<bool> {
     if path.exists() {
-        return Ok(());
+        return Ok(false);
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, content)?;
-    Ok(())
+    Ok(true)
 }
 
 fn cleanup_legacy_config_files(ship_path: &Path) -> Result<()> {
@@ -460,7 +462,15 @@ fn write_default_agent_mode_files(ship_path: &Path) -> Result<()> {
 
 fn write_default_skills(ship_path: &Path) -> Result<()> {
     let skill_path = crate::project::skills_dir(ship_path).join("task-policy.md");
-    write_if_missing(&skill_path, include_str!("skills/task-policy.md"))?;
+    if write_if_missing(&skill_path, include_str!("skills/task-policy.md"))? {
+        // Newly written — also register in project config's agent.skills so the
+        // post-checkout hook includes it automatically without requiring explicit feature config.
+        let mut config = crate::config::get_config(Some(ship_path.to_path_buf()))?;
+        if !config.agent.skills.contains(&"task-policy".to_string()) {
+            config.agent.skills.push("task-policy".to_string());
+            crate::config::save_config(&config, Some(ship_path.to_path_buf()))?;
+        }
+    }
     Ok(())
 }
 
@@ -553,7 +563,7 @@ fn template_rel_path(kind: &str) -> Result<&'static str> {
         "note" | "notes" => Ok("project/notes/TEMPLATE.md"),
         "spec" | "specs" => Ok("workflow/specs/TEMPLATE.md"),
         "release" | "releases" => Ok("project/releases/TEMPLATE.md"),
-        "feature" | "features" => Ok("workflow/features/TEMPLATE.md"),
+        "feature" | "features" => Ok("project/features/TEMPLATE.md"),
         "vision" => Ok("project/TEMPLATE.md"),
         _ => Err(anyhow!("Unknown template kind: {}", kind)),
     }

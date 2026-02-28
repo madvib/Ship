@@ -73,3 +73,9 @@ SHIPWRIGHT.md
 
 .devcontainer
 
+
+# Ship — generated agent config (never commit these)
+GEMINI.md
+.claude/
+.gemini/
+.codex/

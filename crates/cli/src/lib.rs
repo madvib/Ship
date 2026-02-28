@@ -2,11 +2,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use runtime::{
     McpServerConfig, McpServerType, NoteScope, add_mcp_server, add_mode, add_status,
-    backfill_issue_ids, create_adr, create_feature, create_issue, create_note, create_release,
-    create_skill, create_spec, create_user_skill, delete_skill, delete_user_skill,
-    find_release_path, get_active_mode, get_config, get_effective_skill, get_feature_raw,
-    get_git_config, get_global_dir, get_issue, get_note_raw, get_project_dir,
-    get_project_statuses, get_release_raw, get_skill, get_spec_raw, get_user_skill,
+    FeatureStatus, backfill_issue_ids, create_adr, create_feature, create_issue, create_note,
+    create_release, create_skill, create_spec, create_user_skill, delete_skill, delete_user_skill,
+    feature_done, feature_start, find_release_path, get_active_mode, get_config,
+    get_effective_skill, get_feature, get_feature_raw, get_git_config, get_global_dir, get_issue, get_note_raw,
+    get_project_dir, get_project_statuses, get_release_raw, get_skill, get_spec_raw, get_user_skill,
     ingest_external_events, init_demo_project, init_project, is_category_committed,
     list_effective_skills, list_events_since, list_features, list_issues, list_mcp_servers,
     list_notes, list_releases, list_skills, list_specs, list_user_skills, log_action,
@@ -453,7 +453,11 @@ pub enum FeatureCommands {
         branch: Option<String>,
     },
     /// List feature documents
-    List,
+    List {
+        /// Filter by status: planned, in-progress, implemented, deprecated
+        #[arg(long)]
+        status: Option<String>,
+    },
     /// Print a feature document's markdown content
     Get { file_name: String },
     /// Replace feature markdown content
@@ -462,6 +466,22 @@ pub enum FeatureCommands {
         /// Full replacement content
         #[arg(short, long)]
         content: String,
+    },
+    /// Mark a feature as in-progress and link it to a branch
+    Start {
+        file_name: String,
+        /// Git branch name to link (creates the branch if absent).
+        /// Defaults to `feature/<file-name-without-.md>` when omitted.
+        #[arg(long)]
+        branch: Option<String>,
+    },
+    /// Check out the branch linked to a feature and regenerate agent config
+    Switch {
+        file_name: String,
+    },
+    /// Mark a feature as implemented (done)
+    Done {
+        file_name: String,
     },
 }
 
@@ -876,8 +896,16 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         &format!("Created feature: {}", title),
                     )?;
                 }
-                FeatureCommands::List => {
-                    let mut features = list_features(project_dir)?;
+                FeatureCommands::List { status } => {
+                    let status_filter = match status.as_deref() {
+                        Some("planned") => Some(FeatureStatus::Planned),
+                        Some("in-progress") => Some(FeatureStatus::InProgress),
+                        Some("implemented") => Some(FeatureStatus::Implemented),
+                        Some("deprecated") => Some(FeatureStatus::Deprecated),
+                        Some(other) => anyhow::bail!("Unknown status: {}. Use: planned, in-progress, implemented, deprecated", other),
+                        None => None,
+                    };
+                    let mut features = list_features(project_dir, status_filter)?;
                     features.sort_by(|a, b| b.updated.cmp(&a.updated));
                     if features.is_empty() {
                         println!("No features found.");
@@ -910,6 +938,73 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         project_dir,
                         "feature update",
                         &format!("Updated feature: {}", file_name),
+                    )?;
+                }
+                FeatureCommands::Start { file_name, branch } => {
+                    // Derive branch name from file name when not explicitly provided.
+                    let branch = branch.unwrap_or_else(|| {
+                        let base = file_name.trim_end_matches(".md");
+                        format!("feature/{}", base)
+                    });
+                    // Create the branch if it doesn't exist
+                    let branch_exists = ProcessCommand::new("git")
+                        .args(["rev-parse", "--verify", &branch])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    if !branch_exists {
+                        let result = ProcessCommand::new("git")
+                            .args(["checkout", "-b", &branch])
+                            .status()?;
+                        if !result.success() {
+                            anyhow::bail!("Failed to create branch: {}", branch);
+                        }
+                    }
+                    feature_start(project_dir.clone(), &file_name, &branch)?;
+                    // Generate agent config for the new branch
+                    let project_root = project_dir
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| project_dir.clone());
+                    let _ = on_post_checkout(&project_dir, &branch, &project_root);
+                    println!("Feature started: {} on branch {}", file_name, branch);
+                    log_action(
+                        project_dir,
+                        "feature start",
+                        &format!("Started feature: {} branch={}", file_name, branch),
+                    )?;
+                }
+                FeatureCommands::Switch { file_name } => {
+                    let path = runtime::project::features_dir(&project_dir).join(&file_name);
+                    if !path.exists() {
+                        anyhow::bail!("Feature not found: {}", file_name);
+                    }
+                    let feature = get_feature(path)?;
+                    let branch = feature.metadata.branch.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Feature has no linked branch — run 'ship feature start' first"
+                        )
+                    })?;
+                    let result = ProcessCommand::new("git")
+                        .args(["checkout", &branch])
+                        .status()?;
+                    if !result.success() {
+                        anyhow::bail!("Failed to checkout branch: {}", branch);
+                    }
+                    let project_root = project_dir
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| project_dir.clone());
+                    let _ = on_post_checkout(&project_dir, &branch, &project_root);
+                    println!("Switched to feature: {} on branch {}", file_name, branch);
+                }
+                FeatureCommands::Done { file_name } => {
+                    feature_done(project_dir.clone(), &file_name)?;
+                    println!("Feature done: {}", file_name);
+                    log_action(
+                        project_dir,
+                        "feature done",
+                        &format!("Marked feature implemented: {}", file_name),
                     )?;
                 }
             }
@@ -1043,9 +1138,9 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     );
                 }
                 GitCommands::PostCheckout { old, new, flag } => {
-                    let project_root = project_dir
-                        .parent()
-                        .ok_or_else(|| anyhow::anyhow!("Could not resolve project root"))?;
+                    // Use CWD as project_root so worktrees write CLAUDE.md to the
+                    // worktree directory, not the main repo root.
+                    let cwd = env::current_dir()?;
                     let old_ref = old
                         .or_else(|| env::var("SHIP_GIT_OLD_REF").ok())
                         .or_else(|| env::var("GIT_OLD_REF").ok());
@@ -1062,16 +1157,14 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         None
                     }
                     .or_else(|| env::var("SHIP_GIT_BRANCH").ok())
-                    .unwrap_or(current_branch(project_root)?);
+                    .unwrap_or(current_branch(&cwd)?);
 
-                    on_post_checkout(&project_dir, &branch)?;
+                    on_post_checkout(&project_dir, &branch, &cwd)?;
                 }
                 GitCommands::Sync => {
-                    let project_root = project_dir
-                        .parent()
-                        .ok_or_else(|| anyhow::anyhow!("Could not resolve project root"))?;
-                    let branch = current_branch(project_root)?;
-                    on_post_checkout(&project_dir, &branch)?;
+                    let cwd = env::current_dir()?;
+                    let branch = current_branch(&cwd)?;
+                    on_post_checkout(&project_dir, &branch, &cwd)?;
                 }
             }
         }
