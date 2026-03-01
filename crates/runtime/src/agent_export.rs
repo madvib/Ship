@@ -78,7 +78,7 @@ pub enum PromptOutput {
 pub enum SkillsOutput {
     /// `.claude/skills/<id>/SKILL.md` — Claude Code native skills (.claude/commands/ is deprecated)
     ClaudeSkills,
-    /// `.agent/skills/<id>/SKILL.md` — Gemini CLI, Google Antigravity
+    /// `.gemini/skills/<id>/SKILL.md` — Gemini CLI
     AgentSkills,
     /// `.agents/skills/<id>/SKILL.md` — OpenAI Codex
     CodexSkills,
@@ -449,7 +449,7 @@ fn export_to_inner(
     // Skills output (provider-specific)
     match desc.skills_output {
         SkillsOutput::ClaudeSkills => export_skills_to_claude(&project_dir, project_root)?,
-        SkillsOutput::AgentSkills => export_skills_to_dir(&project_dir, &project_root.join(".agent").join("skills"))?,
+        SkillsOutput::AgentSkills => export_skills_to_dir(&project_dir, &project_root.join(".gemini").join("skills"))?,
         SkillsOutput::CodexSkills => export_skills_to_dir(&project_dir, &project_root.join(".agents").join("skills"))?,
         SkillsOutput::None => {}
     }
@@ -512,7 +512,7 @@ pub fn teardown(project_dir: PathBuf, target: &str) -> Result<()> {
             remove_ship_managed_skill_dirs(&project_root.join(".claude").join("skills"));
         }
         SkillsOutput::AgentSkills => {
-            remove_ship_managed_skill_dirs(&project_root.join(".agent").join("skills"));
+            remove_ship_managed_skill_dirs(&project_root.join(".gemini").join("skills"));
         }
         SkillsOutput::CodexSkills => {
             remove_ship_managed_skill_dirs(&project_root.join(".agents").join("skills"));

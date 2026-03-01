@@ -1,10 +1,10 @@
-# Ship
+# Shipwright
 
 **Project memory and execution infrastructure for AI-assisted software teams.**
 
-Every agent session starts blank. Ship fixes that.
+Every agent session starts blank. Shipwright fixes that.
 
-Ship is a local-first project OS that persists your team's context — decisions, features, specs, open work — and injects exactly the right context into every AI agent, on every branch, for every provider. Claude, Gemini, Codex: each gets its native config format, automatically, on checkout.
+Shipwright is a local-first project OS that persists your team's context — decisions, features, specs, open work — and injects exactly the right context into every AI agent, on every branch, for every provider. Claude, Gemini, Codex: each gets its native config format, automatically, on checkout.
 
 ---
 
@@ -16,9 +16,9 @@ The underlying issue is structural: there's no persistent, structured project me
 
 ---
 
-## What Ship Does
+## What Shipwright Does
 
-Ship sits in your repository as a `.ship/` directory. It stores your project's working memory as structured markdown files with TOML frontmatter, versioned in git alongside your code. A git hook fires on every branch checkout and writes the right context files for your active agents — `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` — each populated with the current feature spec, open issues, applicable skills, and always-on rules.
+Shipwright sits in your repository as a `.ship/` directory. It stores your project's working memory as structured markdown files with TOML frontmatter, versioned in git alongside your code. A git hook fires on every branch checkout and writes the right context files for your active agents — `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` — each populated with the current feature spec, open issues, applicable skills, and always-on rules.
 
 **The workflow loop:**
 
@@ -26,9 +26,7 @@ Ship sits in your repository as a `.ship/` directory. It stores your project's w
 Vision → Release → Feature → Spec → Issues → Close Feature → Ship Release
 ```
 
-ADRs and notes are ambient — created whenever a decision or insight surfaces, not as a workflow step. They're the project's long-term memory, always available to agents, never blocking progress.
-
-At each transition, Ship knows where you are and what your agents need to know.
+At each transition, Shipwright knows where you are and what your agents need to know. Notes and ADRs exist outside the loop — ambient records created whenever a decision or insight surfaces, never blocking progress.
 
 ---
 
@@ -67,13 +65,13 @@ mcp_servers = [{id = "stripe-docs"}]
 
 ### Multi-provider, native formats
 
-Ship knows how each agent tool works. It writes config in the format each provider actually reads:
+Shipwright knows how each agent tool works. It writes config in the format each provider actually reads:
 
-| Provider     | Context file | MCP config                  | Skills                           |
-| ------------ | ------------ | --------------------------- | -------------------------------- |
-| Claude Code  | `CLAUDE.md`  | `.mcp.json` (JSON)          | `.claude/skills/<id>/SKILL.md`   |
-| Gemini CLI   | `GEMINI.md`  | `.gemini/settings.json`     | `.agent/skills/<id>/SKILL.md`    |
-| OpenAI Codex | `AGENTS.md`  | `.codex/config.toml` (TOML) | `.agents/skills/<id>/SKILL.md`   |
+| Provider     | Context file | MCP config                  | Skills                        |
+| ------------ | ------------ | --------------------------- | ----------------------------- |
+| Claude Code  | `CLAUDE.md`  | `.mcp.json` (JSON)          | `.claude/skills/<id>/SKILL.md`  |
+| Gemini CLI   | `GEMINI.md`  | `.gemini/settings.json`     | `.gemini/skills/<id>/SKILL.md`  |
+| OpenAI Codex | `AGENTS.md`  | `.codex/config.toml` (TOML) | `.agents/skills/<id>/SKILL.md`  |
 
 Add a provider in one command. Ship handles the rest:
 
@@ -85,7 +83,7 @@ ship providers connect gemini
 
 ### MCP server — agents as first-class consumers
 
-Ship runs as an MCP server, giving agents structured read/write access to the entire project state: issues, specs, features, releases, ADRs, skills, providers, events. Agents don't need file access — they use typed tools.
+Shipwright runs as an MCP server, giving agents structured read/write access to the entire project state: issues, specs, features, releases, ADRs, skills, providers, events. Agents don't need file access — they use typed tools.
 
 ```bash
 ship mcp serve   # stdio transport, works with any MCP-compatible agent
@@ -173,13 +171,13 @@ ship git sync
     └── modes/                # named agent configurations
 ```
 
-**Git policy** — Ship has an opinionated default: decisions and specs are committed (features, releases, specs, ADRs, templates), execution state is local (issues, notes, events). Override per-category with `ship git include/exclude`.
+**Git policy** — Shipwright has an opinionated default: decisions and specs are committed (features, releases, specs, ADRs, templates), execution state is local (issues, notes, events). Override per-category with `ship git include/exclude`.
 
 ---
 
 ## Architecture
 
-Ship is a Rust monorepo:
+Shipwright is a Rust monorepo:
 
 | Crate                | Role                                                         |
 | -------------------- | ------------------------------------------------------------ |
