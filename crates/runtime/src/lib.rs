@@ -29,8 +29,9 @@ pub use adr::{
 };
 pub use agent_config::{AgentConfig, resolve_agent_config};
 pub use agent_export::{
-    ModelInfo, ProviderInfo, detect_binary, detect_version, export_to, import_from_claude,
-    list_models, list_providers, sync_active_mode,
+    ModelInfo, ProviderInfo, autodetect_providers, detect_binary, detect_version,
+    disable_provider, enable_provider, export_to, import_from_claude, list_models, list_providers,
+    sync_active_mode,
 };
 pub use catalog::{CatalogEntry, CatalogKind, list_catalog, list_catalog_by_kind, search_catalog};
 pub use config::{

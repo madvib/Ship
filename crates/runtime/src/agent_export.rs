@@ -265,6 +265,48 @@ pub fn list_providers(project_dir: &std::path::Path) -> anyhow::Result<Vec<Provi
         .collect())
 }
 
+/// Add a provider to the project's enabled list (idempotent).
+/// Returns `true` if the list was changed.
+pub fn enable_provider(project_dir: &std::path::Path, provider_id: &str) -> Result<bool> {
+    require_provider(provider_id)?;
+    let mut config = get_config(Some(project_dir.to_path_buf()))?;
+    if config.providers.iter().any(|p| p == provider_id) {
+        return Ok(false);
+    }
+    config.providers.push(provider_id.to_string());
+    crate::config::save_config(&config, Some(project_dir.to_path_buf()))?;
+    Ok(true)
+}
+
+/// Remove a provider from the project's enabled list.
+/// Returns `true` if the list was changed.
+pub fn disable_provider(project_dir: &std::path::Path, provider_id: &str) -> Result<bool> {
+    require_provider(provider_id)?;
+    let mut config = get_config(Some(project_dir.to_path_buf()))?;
+    let before = config.providers.len();
+    config.providers.retain(|p| p != provider_id);
+    if config.providers.len() == before {
+        return Ok(false);
+    }
+    crate::config::save_config(&config, Some(project_dir.to_path_buf()))?;
+    Ok(true)
+}
+
+/// Detect which known providers are installed in PATH and enable them.
+/// Intended for use in `ship init`. Skips already-enabled providers.
+/// Returns the list of provider IDs that were newly enabled.
+pub fn autodetect_providers(project_dir: &std::path::Path) -> Result<Vec<String>> {
+    let mut newly_enabled = Vec::new();
+    for d in PROVIDERS {
+        if detect_binary(d.binary) {
+            if enable_provider(project_dir, d.id)? {
+                newly_enabled.push(d.id.to_string());
+            }
+        }
+    }
+    Ok(newly_enabled)
+}
+
 /// Return models for a specific provider by ID.
 pub fn list_models(provider_id: &str) -> Result<Vec<ModelInfo>> {
     let d = require_provider(provider_id)?;
