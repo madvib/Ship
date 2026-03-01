@@ -1,18 +1,25 @@
 +++
 id = ""
 title = ""
-status = "active"
 created = ""
 updated = ""
-owner = ""
-release = ""
-spec = ""
-adrs = []
+branch = ""
+release_id = ""
+spec_id = ""
+adr_ids = []
 tags = []
+
+[agent]
+model = "claude"
+max_cost_per_session = 10.0
+mcp_servers = []
+skills = []
 +++
 
-## Why
+## Description
 
+One paragraph. What this feature does, for whom, and why it matters.
+Keep this current — it feeds the feature catalog and documentation pipeline.
 
 ## Acceptance Criteria
 
@@ -22,4 +29,10 @@ tags = []
 
 - [ ]
 
-## Notes
+## Implementation Notes
+
+Key technical decisions or constraints relevant to ongoing work.
+
+## History
+
+- Initial

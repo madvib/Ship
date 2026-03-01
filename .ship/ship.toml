@@ -3,6 +3,7 @@ name = "Shipwright"
 description = "AI native project managment "
 modes = []
 hooks = []
+providers = ["claude"]
 
 [[statuses]]
 id = "backlog"
@@ -38,9 +39,6 @@ commit = [
     "ship.toml",
 ]
 
-[ai]
-provider = "claude"
-
 [[mcp_servers]]
 id = "shadcn"
 name = "shadcn/ui"
@@ -49,6 +47,11 @@ args = [
     "shadcn@latest",
     "mcp",
 ]
+[[mcp_servers]]
+id = "ship"
+name = "Shipwright"
+command = "/home/madvib/.cargo/bin/ship-mcp"
+args = []
 scope = "project"
 server_type = "stdio"
 disabled = false
@@ -58,11 +61,10 @@ disabled = false
 [agent]
 skills = [
     "clean-code",
-    "solid",
+    "solid","task-policy"
 ]
 prompts = []
 context = []
-rules = []
 
 [[namespaces]]
 id = "project"
