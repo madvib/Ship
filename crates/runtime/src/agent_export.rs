@@ -64,12 +64,12 @@ pub enum ManagedMarker {
 /// Where to write the active prompt / system instructions.
 #[derive(Debug, Clone, Copy)]
 pub enum PromptOutput {
-    /// `CLAUDE.md` at project root — written by the git module, not here.
+    /// `CLAUDE.md` at project root.
     ClaudeMd,
     /// `GEMINI.md` at project root.
     GeminiMd,
-    /// `instructions` key in the TOML config file.
-    InstructionsKey,
+    /// `AGENTS.md` at project root — Codex, Roo Code, Amp, Goose all read this.
+    AgentsMd,
     None,
 }
 
@@ -165,7 +165,7 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         http_url_field: "url",
         emit_type_field: false,
         managed_marker: ManagedMarker::StateFileOnly,
-        prompt_output: PromptOutput::InstructionsKey,
+        prompt_output: PromptOutput::AgentsMd,
         skills_output: SkillsOutput::None,
         models: CODEX_MODELS,
     },
@@ -240,7 +240,7 @@ fn provider_info(d: &ProviderDescriptor, enabled: bool) -> ProviderInfo {
         prompt_output: match d.prompt_output {
             PromptOutput::ClaudeMd => "claude-md".to_string(),
             PromptOutput::GeminiMd => "gemini-md".to_string(),
-            PromptOutput::InstructionsKey => "instructions-key".to_string(),
+            PromptOutput::AgentsMd => "agents-md".to_string(),
             PromptOutput::None => "none".to_string(),
         },
         skills_output: match d.skills_output {
@@ -332,6 +332,37 @@ pub struct SyncPayload {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/// Write a context file (CLAUDE.md, GEMINI.md, Codex instructions, etc.) for the given provider.
+///
+/// Called by the git module after building provider-agnostic Markdown content.
+/// Each provider has a specific destination:
+/// - Claude  → `CLAUDE.md` at project root
+/// - Gemini  → `GEMINI.md` at project root
+/// - Codex / Roo / Amp / Goose → `AGENTS.md` at project root
+/// - Unknown provider / `PromptOutput::None` → no-op
+pub fn write_context(project_root: &Path, provider_id: &str, content: &str) -> Result<()> {
+    let desc = match get_provider(provider_id) {
+        Some(d) => d,
+        None => return Ok(()),
+    };
+    match desc.prompt_output {
+        PromptOutput::ClaudeMd => {
+            let path = project_root.join("CLAUDE.md");
+            crate::fs_util::write_atomic(&path, content)?;
+        }
+        PromptOutput::GeminiMd => {
+            let path = project_root.join("GEMINI.md");
+            crate::fs_util::write_atomic(&path, content)?;
+        }
+        PromptOutput::AgentsMd => {
+            let path = project_root.join("AGENTS.md");
+            crate::fs_util::write_atomic(&path, content)?;
+        }
+        PromptOutput::None => {}
+    }
+    Ok(())
+}
+
 /// Export the active mode (or global config) to the specified provider.
 pub fn export_to(project_dir: PathBuf, target: &str) -> Result<()> {
     export_to_inner(project_dir, target, None)
@@ -418,7 +449,11 @@ pub fn teardown(project_dir: PathBuf, target: &str) -> Result<()> {
             let f = project_root.join("GEMINI.md");
             if f.exists() { fs::remove_file(&f).ok(); }
         }
-        PromptOutput::InstructionsKey | PromptOutput::None => {}
+        PromptOutput::AgentsMd => {
+            let f = project_root.join("AGENTS.md");
+            if f.exists() { fs::remove_file(&f).ok(); }
+        }
+        PromptOutput::None => {}
     }
 
     // Clear managed state for this provider
@@ -629,7 +664,7 @@ fn export_json(
                 let content = format!("<!-- managed by ship — prompt: {} -->\n\n{}\n", prompt.id, prompt.content);
                 crate::fs_util::write_atomic(&md, content)?;
             }
-            PromptOutput::ClaudeMd | PromptOutput::InstructionsKey | PromptOutput::None => {}
+            PromptOutput::ClaudeMd | PromptOutput::AgentsMd | PromptOutput::None => {}
         }
     }
 
@@ -690,11 +725,6 @@ fn export_toml(
     }
 
     root.insert(desc.mcp_key.to_string(), toml::Value::Table(new_mcp));
-
-    // Prompt → instructions field
-    if let (PromptOutput::InstructionsKey, Some(prompt)) = (desc.prompt_output, &payload.prompt) {
-        root.insert("instructions".into(), toml::Value::String(prompt.content.clone()));
-    }
 
     crate::fs_util::write_atomic(&config_path, toml::to_string_pretty(&doc)?)?;
 

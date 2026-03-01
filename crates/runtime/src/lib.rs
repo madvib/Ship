@@ -895,8 +895,8 @@ mod tests {
         // New lifecycle fields
         // Status is directory-based, not in frontmatter
         assert!(template.contains("release_id"));
-        assert!(template.contains("## Description"));
-        assert!(template.contains("## Implementation Notes"));
+        assert!(template.contains("## Why"));
+        assert!(template.contains("## Delivery Todos"));
         Ok(())
     }
 
