@@ -1,4 +1,5 @@
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
+import { useUpdateChecker } from '@/lib/hooks/useUpdateChecker';
 import Sidebar from '@/components/app/Sidebar';
 import AgentModeControl from '@/features/agents/AgentModeControl';
 import IssueDetail from '@/features/planning/IssueDetail';
@@ -29,6 +30,7 @@ import {
 } from '@/lib/constants/routes';
 
 export default function App() {
+  useUpdateChecker();
   const location = useLocation();
   const navigate = useNavigate();
   const workspace = useWorkspace();

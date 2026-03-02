@@ -31,5 +31,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER — replace with output of: tauri signer generate -w ~/.tauri/shipwright.key",
+      "endpoints": [
+        "https://github.com/madvib/Shipwright/releases/latest/download/latest.json"
+      ],
+      "dialog": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
