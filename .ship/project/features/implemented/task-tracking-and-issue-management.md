@@ -2,10 +2,10 @@
 id = "Va8CWEb4"
 title = "Task Tracking and Issue Management"
 created = "2026-02-28T15:56:07Z"
-updated = "2026-02-28T15:56:07Z"
-branch = ""
+updated = "2026-03-02T17:30:54.582737384+00:00"
 release_id = "v0.1.0-alpha"
 spec_id = ""
+branch = ""
 adr_ids = []
 tags = []
 

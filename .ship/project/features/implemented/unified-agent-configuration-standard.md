@@ -2,10 +2,10 @@
 id = "FqLNtSDx"
 title = "Unified Agent Configuration Standard"
 created = "2026-02-28T15:56:07Z"
-updated = "2026-02-28T15:56:07Z"
-branch = ""
+updated = "2026-03-02T17:30:11.369185731+00:00"
 release_id = "v0.1.0-alpha"
 spec_id = ""
+branch = ""
 adr_ids = []
 tags = []
 

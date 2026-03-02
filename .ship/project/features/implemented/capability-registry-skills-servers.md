@@ -2,10 +2,10 @@
 id = "UMuREHqq"
 title = "Capability Registry (Skills/Servers)"
 created = "2026-02-28T15:56:07Z"
-updated = "2026-02-28T15:56:07Z"
-branch = ""
+updated = "2026-03-02T17:30:11.251426433+00:00"
 release_id = "v0.1.0-alpha"
 spec_id = ""
+branch = ""
 adr_ids = []
 tags = []
 

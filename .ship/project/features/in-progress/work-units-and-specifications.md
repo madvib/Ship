@@ -18,27 +18,28 @@ skills = []
 
 ## Why
 
-Non-trivial features need a written contract before implementation begins — scope, goals, non-goals, approach, open questions. Without a spec, agents and developers improvise and diverge. Shipwright treats specs as first-class documents linked to features, surfaced in agent context, and versioned in git. They are the handoff between planning and execution.
+Specs and issues are sibling execution primitives under a feature — not a hierarchy. A spec is targeted context for a unit of work (the contract: scope, goals, approach). An issue is a discrete task (the execution: what to do, who does it). Both live inside the feature hub. Neither is a child of the other.
 
 ## Acceptance Criteria
 
-- [ ] Spec CRUD: create, list, get, update via CLI and MCP
-- [ ] Status via directory: `draft/`, `active/`, `archived/`
-- [ ] `feature_id` and `release_id` cross-references in spec frontmatter
-- [ ] `ship spec new` creates a spec and optionally links it to a feature
-- [ ] `ship spec start` moves spec to `active/` (same pattern as feature start)
-- [ ] Spec content injected into CLAUDE.md for the linked branch
-- [ ] UI: spec list view with status filter; inline editor
+- [ ] Spec CRUD fully working via CLI, MCP, and UI
+- [ ] Specs displayed as siblings of issues inside the feature hub (not a separate top-level page)
+- [ ] Spec status: draft → active → archived (directory-based, same pattern as features)
+- [ ] `ship spec start` / `ship spec done` lifecycle commands
+- [ ] Active spec narrows agent context injection (only that spec's content in CLAUDE.md)
+- [ ] Issues can reference a spec (soft link, not required)
+- [ ] UI: spec list with status chips inside feature hub Specs tab
 
 ## Delivery Todos
 
-- [ ] Confirm `spec.rs` CRUD handles all status directories
-- [ ] `ship spec start` / `ship spec done` lifecycle commands (backlog issue filed)
-- [ ] Link spec to feature at create time (`--feature <id>`)
-- [ ] Wire spec content into CLAUDE.md generation for linked features
-- [ ] MCP: `list_specs`, `get_spec`, `create_spec`, `update_spec`
-- [ ] UI spec views
+- [ ] Confirm `spec.rs` CRUD handles draft/active/archived directories
+- [ ] `ship spec start` / `ship spec done` commands
+- [ ] Link spec to feature at create time
+- [ ] Active spec scoping in CLAUDE.md generation
+- [ ] Issue → spec soft link (optional `spec_id` on issue)
+- [ ] Feature hub Specs tab (part of feature-hub-ui feature)
+- [ ] Remove specs from top-level nav — surface only inside feature context
 
 ## Notes
 
-Spec lifecycle mirrors feature lifecycle: draft → active → archived. A spec is "active" when the implementation branch exists. "Archived" when the feature ships. The spec is the contract; the feature is the delivery vehicle. One feature, one spec — enforced by convention, not schema.
+One feature can have multiple specs — each representing a distinct unit of implementation work. Activating a spec narrows the agent's context to just that spec's symbols and files, reducing token cost on large features.
