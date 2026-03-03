@@ -590,6 +590,7 @@ dependencies = [
  "runtime",
  "ship-module-git",
  "ship-module-project",
+ "tempfile",
  "time-tracker",
 ]
 

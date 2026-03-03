@@ -3,9 +3,10 @@ mod tests {
     use crate::{
         FeatureStatus, IssueStatus, ReleaseStatus, SpecStatus, create_feature, create_issue,
         create_release, create_spec, delete_issue, delete_spec, get_feature_by_id, get_issue_by_id,
-        get_release_by_id, get_spec_by_id, import_releases_from_files, init_demo_project,
-        init_project, list_adrs, list_features, list_issues, list_releases, list_specs, move_issue,
-        move_spec, update_feature_content, update_issue, update_release_content, update_spec,
+        get_release_by_id, get_spec_by_id, import_features_from_files, import_releases_from_files,
+        init_demo_project, init_project, list_adrs, list_features, list_issues, list_releases,
+        list_specs, move_issue, move_spec, update_feature_content, update_issue,
+        update_release_content, update_spec,
     };
     use tempfile::tempdir;
 
@@ -183,6 +184,47 @@ mod tests {
             .collect();
         assert!(versions.contains(&"v0.3.0-alpha"));
         assert!(versions.contains(&"v0.0.9-alpha"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_import_features_from_files_is_idempotent() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        let feature_path =
+            runtime::project::features_dir(&project_dir).join("planned/import-idempotent.md");
+        std::fs::create_dir_all(feature_path.parent().unwrap())?;
+        std::fs::write(
+            &feature_path,
+            "+++\nid = \"feature-import-idempotent\"\ntitle = \"Import Idempotent\"\ncreated = \"2026-01-01T00:00:00Z\"\nupdated = \"2026-01-01T00:00:00Z\"\ntags = []\n+++\n\nbody\n",
+        )?;
+
+        let first = import_features_from_files(&project_dir)?;
+        let second = import_features_from_files(&project_dir)?;
+        assert_eq!(first, 1);
+        assert_eq!(second, 0);
+        assert_eq!(list_features(&project_dir)?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_import_releases_from_files_is_idempotent() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        let release_path = runtime::project::releases_dir(&project_dir).join("v0.4.0-alpha.md");
+        std::fs::create_dir_all(release_path.parent().unwrap())?;
+        std::fs::write(
+            &release_path,
+            "+++\nid = \"v0.4.0-alpha\"\nversion = \"v0.4.0-alpha\"\nstatus = \"planned\"\ncreated = \"2026-01-01T00:00:00Z\"\nupdated = \"2026-01-01T00:00:00Z\"\ntags = []\n+++\n\nbody\n",
+        )?;
+
+        let first = import_releases_from_files(&project_dir)?;
+        let second = import_releases_from_files(&project_dir)?;
+        assert_eq!(first, 1);
+        assert_eq!(second, 0);
+        assert_eq!(list_releases(&project_dir)?.len(), 1);
         Ok(())
     }
 

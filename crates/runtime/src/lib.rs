@@ -57,9 +57,12 @@ pub use skill::{
     list_user_skills, update_skill, update_user_skill,
 };
 pub use state_db::{
-    DatabaseMigrationReport, clear_branch_doc, clear_branch_link, ensure_global_database,
-    ensure_project_database, get_branch_doc, get_branch_link, get_managed_state_db, set_branch_doc,
-    set_branch_link, set_managed_state_db, upsert_workspace_db,
+    DatabaseMigrationReport, clear_branch_doc, clear_branch_link, clear_global_migration_meta,
+    clear_project_migration_meta, ensure_global_database, ensure_project_database, get_branch_doc,
+    get_branch_link, get_managed_state_db, mark_migration_meta_complete_global,
+    mark_migration_meta_complete_project, migration_meta_complete_global,
+    migration_meta_complete_project, set_branch_doc, set_branch_link, set_managed_state_db,
+    upsert_workspace_db,
 };
 pub use workspace::{
     CreateWorkspaceRequest, Workspace, WorkspaceStatus, WorkspaceType, activate_workspace,

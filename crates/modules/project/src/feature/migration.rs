@@ -1,4 +1,4 @@
-use super::db::upsert_feature_db;
+use super::db::{get_feature_db, upsert_feature_db};
 use super::types::{Feature, FeatureStatus};
 use anyhow::{Context, Result};
 use std::fs;
@@ -46,6 +46,9 @@ pub fn import_features_from_files(ship_dir: &Path) -> Result<usize> {
                             .unwrap_or(FeatureStatus::Planned)
                     };
 
+                    if get_feature_db(ship_dir, &feature.metadata.id)?.is_some() {
+                        continue;
+                    }
                     upsert_feature_db(ship_dir, &feature, &status)?;
                     count += 1;
                 }

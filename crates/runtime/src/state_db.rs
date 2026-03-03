@@ -214,6 +214,14 @@ CREATE TABLE IF NOT EXISTS spec (
 CREATE INDEX IF NOT EXISTS spec_status_idx ON spec(status);
 "#;
 
+const SCHEMA_MIGRATION_META: &str = r#"
+CREATE TABLE IF NOT EXISTS migration_meta (
+  entity_type TEXT PRIMARY KEY,
+  migrated_at TEXT NOT NULL,
+  file_count  INTEGER NOT NULL DEFAULT 0
+);
+"#;
+
 const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_project_schema", PROJECT_SCHEMA_V1),
     ("0002_operational_state", PROJECT_SCHEMA_OPERATIONAL),
@@ -223,10 +231,12 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0006_features_releases", PROJECT_SCHEMA_FEATURES_RELEASES),
     ("0007_workspace_lifecycle", PROJECT_SCHEMA_WORKSPACE_V2),
     ("0008_issues_specs", PROJECT_SCHEMA_ISSUES_SPECS),
+    ("0009_migration_meta", SCHEMA_MIGRATION_META),
 ];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_global_schema", GLOBAL_SCHEMA_V1),
     ("0002_notes", PROJECT_SCHEMA_NOTES),
+    ("0003_migration_meta", SCHEMA_MIGRATION_META),
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -356,6 +366,82 @@ pub fn get_managed_state_db(
     } else {
         Ok((Vec::new(), None))
     }
+}
+
+pub fn migration_meta_complete_project(ship_dir: &Path, entity_type: &str) -> Result<bool> {
+    let mut conn = open_project_db(ship_dir)?;
+    migration_meta_complete(&mut conn, entity_type)
+}
+
+pub fn migration_meta_complete_global(entity_type: &str) -> Result<bool> {
+    let mut conn = open_global_connection()?;
+    migration_meta_complete(&mut conn, entity_type)
+}
+
+pub fn mark_migration_meta_complete_project(
+    ship_dir: &Path,
+    entity_type: &str,
+    file_count: usize,
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    mark_migration_meta_complete(&mut conn, entity_type, file_count)
+}
+
+pub fn mark_migration_meta_complete_global(entity_type: &str, file_count: usize) -> Result<()> {
+    let mut conn = open_global_connection()?;
+    mark_migration_meta_complete(&mut conn, entity_type, file_count)
+}
+
+pub fn clear_project_migration_meta(ship_dir: &Path) -> Result<usize> {
+    let mut conn = open_project_db(ship_dir)?;
+    clear_migration_meta(&mut conn)
+}
+
+pub fn clear_global_migration_meta() -> Result<usize> {
+    let mut conn = open_global_connection()?;
+    clear_migration_meta(&mut conn)
+}
+
+fn migration_meta_complete(conn: &mut SqliteConnection, entity_type: &str) -> Result<bool> {
+    let row_opt = block_on(async {
+        sqlx::query("SELECT entity_type FROM migration_meta WHERE entity_type = ?")
+            .bind(entity_type)
+            .fetch_optional(&mut *conn)
+            .await
+    })?;
+    Ok(row_opt.is_some())
+}
+
+fn mark_migration_meta_complete(
+    conn: &mut SqliteConnection,
+    entity_type: &str,
+    file_count: usize,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO migration_meta (entity_type, migrated_at, file_count)
+             VALUES (?, ?, ?)
+             ON CONFLICT(entity_type) DO UPDATE SET
+               migrated_at = excluded.migrated_at,
+               file_count = excluded.file_count",
+        )
+        .bind(entity_type)
+        .bind(&now)
+        .bind(file_count as i64)
+        .execute(&mut *conn)
+        .await
+    })?;
+    Ok(())
+}
+
+fn clear_migration_meta(conn: &mut SqliteConnection) -> Result<usize> {
+    let result = block_on(async {
+        sqlx::query("DELETE FROM migration_meta")
+            .execute(&mut *conn)
+            .await
+    })?;
+    Ok(result.rows_affected() as usize)
 }
 
 /// Persist the managed server ids and last mode for the given provider.
@@ -1176,6 +1262,32 @@ mod tests {
         let link_id: Option<String> = row.get(1);
         assert_eq!(link_type.as_deref(), Some("feature"));
         assert_eq!(link_id.as_deref(), Some("ABC123"));
+        Ok(())
+    }
+
+    #[test]
+    fn migration_meta_project_roundtrip() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("migration-meta.db");
+        ensure_database(&db_path, PROJECT_MIGRATIONS)?;
+
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        assert!(!migration_meta_complete(&mut conn, "feature")?);
+        assert!(!migration_meta_complete(&mut conn, "release")?);
+
+        mark_migration_meta_complete(&mut conn, "feature", 3)?;
+        mark_migration_meta_complete(&mut conn, "release", 1)?;
+
+        assert!(migration_meta_complete(&mut conn, "feature")?);
+        assert!(migration_meta_complete(&mut conn, "release")?);
+
+        let cleared = clear_migration_meta(&mut conn)?;
+        assert_eq!(cleared, 2);
+        assert!(!migration_meta_complete(&mut conn, "feature")?);
+        assert!(!migration_meta_complete(&mut conn, "release")?);
         Ok(())
     }
 }

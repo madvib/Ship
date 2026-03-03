@@ -146,7 +146,11 @@ pub enum Commands {
     Version,
     /// Migrate legacy YAML issues and JSON config to TOML
     #[command(hide = true)]
-    Migrate,
+    Migrate {
+        /// Re-run startup markdown imports even if already marked complete
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -612,8 +616,10 @@ pub enum ProjectCommands {
 }
 
 pub fn handle_cli(cli: Cli) -> Result<()> {
-    // Ensure global notes are imported
-    let _ = import_notes_from_files(NoteScope::User, None);
+    let _ = ensure_user_notes_imported_once(false, false);
+    if let Ok(project_dir) = get_project_dir(None) {
+        let _ = ensure_project_imported_once(&project_dir, false, false);
+    }
 
     match cli.command {
         Some(Commands::Init { path: init_path }) => {
@@ -978,7 +984,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
         }
         Some(Commands::Release { action }) => {
             let project_dir = get_project_dir_cli()?;
-            ensure_imported(&project_dir)?;
             match action {
                 ReleaseCommands::Create { version, content } => {
                     let body = content.unwrap_or_default();
@@ -1027,7 +1032,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
         }
         Some(Commands::Feature { action }) => {
             let project_dir = get_project_dir_cli()?;
-            ensure_imported(&project_dir)?;
             match action {
                 FeatureCommands::Create {
                     title,
@@ -1787,7 +1791,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             println!("ship version {} ({})", version, git_hash);
             println!("built at {}", build_time);
         }
-        Some(Commands::Migrate) => {
+        Some(Commands::Migrate { force }) => {
             let project_dir = get_project_dir_cli()?;
             let global_dir = get_global_dir()?;
             let global = migrate_global_state(&global_dir)?;
@@ -1795,8 +1799,13 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             let issues = import_issues_from_files(&project_dir)?;
             let specs = import_specs_from_files(&project_dir)?;
             let config = migrate_json_config_file(&project_dir)?;
+            let cleared_project_markers = runtime::clear_project_migration_meta(&project_dir)?;
+            let cleared_global_markers = runtime::clear_global_migration_meta()?;
+            ensure_user_notes_imported_once(true, true)?;
+            ensure_project_imported_once(&project_dir, true, true)?;
             println!(
-                "Migration complete:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- imported docs: {} issue{}, {} spec{}{}.",
+                "Migration complete{}:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- startup import markers reset: {} project marker{}, {} global marker{}\n- imported docs: {} issue{}, {} spec{}{}.",
+                if force { " (forced)" } else { "" },
                 project.files.copied_files,
                 project.files.skipped_identical_files,
                 project.files.conflict_files,
@@ -1808,6 +1817,14 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 global.registry_entries_after,
                 global.normalized_paths,
                 global.app_state_paths_normalized,
+                cleared_project_markers,
+                if cleared_project_markers == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                cleared_global_markers,
+                if cleared_global_markers == 1 { "" } else { "s" },
                 issues,
                 if issues == 1 { "" } else { "s" },
                 specs,
@@ -1928,44 +1945,89 @@ fn current_branch(project_root: &std::path::Path) -> Result<String> {
 }
 
 fn get_project_dir_cli() -> Result<PathBuf> {
-    let project_dir = get_project_dir(None)?;
-    ensure_imported(&project_dir)?;
-    Ok(project_dir)
+    get_project_dir(None)
 }
 
-fn ensure_imported(project_dir: &Path) -> Result<()> {
-    if let Ok(count) = import_adrs_from_files(project_dir) {
-        if count > 0 {
-            println!("[ship] Imported {} ADRs from files to SQLite", count);
-        }
-    }
-    if let Ok(count) = import_notes_from_files(NoteScope::Project, Some(project_dir)) {
-        if count > 0 {
-            println!(
-                "[ship] Imported {} project notes from files to SQLite",
-                count
-            );
-        }
-    }
-    if let Ok(count) = import_notes_from_files(NoteScope::User, None) {
-        if count > 0 {
-            println!(
-                "[ship] Imported {} global notes from files to SQLite",
-                count
-            );
-        }
-    }
-    if let Ok(count) = import_features_from_files(project_dir) {
-        if count > 0 {
-            println!("[ship] Imported {} features from files to SQLite", count);
-        }
-    }
-    if let Ok(count) = import_releases_from_files(project_dir) {
-        if count > 0 {
-            println!("[ship] Imported {} releases from files to SQLite", count);
-        }
-    }
+fn ensure_project_imported_once(project_dir: &Path, force: bool, strict: bool) -> Result<()> {
+    run_project_import(project_dir, "adr", "ADRs", force, strict, || {
+        import_adrs_from_files(project_dir)
+    })?;
+    run_project_import(
+        project_dir,
+        "note_project",
+        "project notes",
+        force,
+        strict,
+        || import_notes_from_files(NoteScope::Project, Some(project_dir)),
+    )?;
+    run_project_import(project_dir, "feature", "features", force, strict, || {
+        import_features_from_files(project_dir)
+    })?;
+    run_project_import(project_dir, "release", "releases", force, strict, || {
+        import_releases_from_files(project_dir)
+    })?;
     Ok(())
+}
+
+fn ensure_user_notes_imported_once(force: bool, strict: bool) -> Result<()> {
+    if !force && runtime::migration_meta_complete_global("note_user")? {
+        return Ok(());
+    }
+
+    match import_notes_from_files(NoteScope::User, None) {
+        Ok(count) => {
+            runtime::mark_migration_meta_complete_global("note_user", count)?;
+            if count > 0 {
+                println!(
+                    "[ship] Imported {} global notes from files to SQLite",
+                    count
+                );
+            }
+            Ok(())
+        }
+        Err(err) if strict => Err(err),
+        Err(err) => {
+            eprintln!(
+                "[ship] warning: failed to import global notes from files: {}",
+                err
+            );
+            Ok(())
+        }
+    }
+}
+
+fn run_project_import<F>(
+    project_dir: &Path,
+    entity_type: &str,
+    label: &str,
+    force: bool,
+    strict: bool,
+    importer: F,
+) -> Result<()>
+where
+    F: FnOnce() -> Result<usize>,
+{
+    if !force && runtime::migration_meta_complete_project(project_dir, entity_type)? {
+        return Ok(());
+    }
+
+    match importer() {
+        Ok(count) => {
+            runtime::mark_migration_meta_complete_project(project_dir, entity_type, count)?;
+            if count > 0 {
+                println!("[ship] Imported {} {} from files to SQLite", count, label);
+            }
+            Ok(())
+        }
+        Err(err) if strict => Err(err),
+        Err(err) => {
+            eprintln!(
+                "[ship] warning: failed to import {} from files: {}",
+                label, err
+            );
+            Ok(())
+        }
+    }
 }
 
 fn parse_note_scope(raw: &str) -> Result<NoteScope> {
@@ -2125,4 +2187,60 @@ fn handle_time_command(action: TimeCommands, project_dir: &PathBuf) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn write_feature_file(ship_dir: &Path, id: &str, title: &str, file_name: &str) -> Result<()> {
+        let path = runtime::project::features_dir(ship_dir)
+            .join("planned")
+            .join(file_name);
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        std::fs::write(
+            path,
+            format!(
+                "+++\nid = \"{}\"\ntitle = \"{}\"\ncreated = \"2026-01-01T00:00:00Z\"\nupdated = \"2026-01-01T00:00:00Z\"\ntags = []\n+++\n\nbody\n",
+                id, title
+            ),
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn ensure_project_imported_once_skips_after_marker_and_force_reimports() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        write_feature_file(
+            &project_dir,
+            "feature-startup-1",
+            "Startup Import One",
+            "startup-import-one.md",
+        )?;
+
+        ensure_project_imported_once(&project_dir, false, true)?;
+        assert!(runtime::migration_meta_complete_project(
+            &project_dir,
+            "feature"
+        )?);
+        assert_eq!(list_features(&project_dir)?.len(), 1);
+
+        write_feature_file(
+            &project_dir,
+            "feature-startup-2",
+            "Startup Import Two",
+            "startup-import-two.md",
+        )?;
+
+        // Marker is already set, so regular startup import should skip re-scan.
+        ensure_project_imported_once(&project_dir, false, true)?;
+        assert_eq!(list_features(&project_dir)?.len(), 1);
+
+        ensure_project_imported_once(&project_dir, true, true)?;
+        assert_eq!(list_features(&project_dir)?.len(), 2);
+        Ok(())
+    }
 }

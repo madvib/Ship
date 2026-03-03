@@ -1,8 +1,9 @@
 +++
 id = "H6tnM9P2"
 title = "CLI startup import — idempotent incremental sync"
+status = "done"
 created = "2026-03-03T06:11:57.220594614+00:00"
-updated = "2026-03-03T18:05:00.000000000+00:00"
+updated = "2026-03-03T20:48:00.000000000+00:00"
 author = ""
 tags = []
 +++
