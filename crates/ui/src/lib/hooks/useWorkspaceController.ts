@@ -48,6 +48,7 @@ function mergeModes(base: ModeConfig[] = [], overlay: ModeConfig[] = []): ModeCo
 }
 
 export function useWorkspaceController() {
+  const [notesScope, setNotesScope] = useState<'project' | 'global'>('project');
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [detectedProject, setDetectedProject] = useState<Project | null>(null);
   const [detectingProject, setDetectingProject] = useState(false);
@@ -338,12 +339,14 @@ export function useWorkspaceController() {
     adrSuggestions,
     issueFileSuggestions,
     mcpEnabled,
+    notesScope,
     setSelectedIssue,
     setSelectedAdr,
     setSelectedSpec,
     setSelectedRelease,
     setSelectedFeature,
     setSelectedNote,
+    setNotesScope,
     setShowNewIssue,
     setShowNewAdr,
     setSidebarCollapsed,

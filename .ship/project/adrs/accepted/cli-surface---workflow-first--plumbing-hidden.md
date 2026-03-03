@@ -1,7 +1,6 @@
 +++
-id = "6bd1af81-9808-4b24-960e-196cd00255bb"
+id = "uTyTs349"
 title = "CLI surface — workflow-first, plumbing hidden"
-status = "accepted"
 date = "2026-03-01"
 tags = []
 +++

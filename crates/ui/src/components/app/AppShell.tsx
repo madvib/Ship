@@ -4,8 +4,6 @@ import Sidebar from '@/components/app/Sidebar';
 import AgentModeControl from '@/features/agents/AgentModeControl';
 import IssueDetail from '@/features/planning/IssueDetail';
 import NewIssueModal from '@/features/planning/NewIssueModal';
-import NewAdrModal from '@/features/planning/NewAdrModal';
-import AdrDetail from '@/features/planning/AdrDetail';
 import ProjectOnboarding from '@/features/planning/ProjectOnboarding';
 import SpecDetail from '@/features/planning/SpecDetail';
 import ReleaseDetail from '@/features/planning/ReleaseDetail';
@@ -21,7 +19,7 @@ import {
   AGENTS_RULES_ROUTE,
   AGENTS_ROUTE,
   AGENTS_SKILLS_ROUTE,
-  ADRS_ROUTE,
+  NOTES_ROUTE,
   ROUTE_LABELS,
   SETTINGS_ROUTE,
   OVERVIEW_ROUTE,
@@ -37,8 +35,18 @@ export default function App() {
   const routePath = normalizePath(location.pathname) as AppRoutePath;
 
   const navigateTo = (path: AppRoutePath) => {
+    if (path === NOTES_ROUTE) {
+      workspace.setNotesScope('project');
+    }
     if (normalizePath(location.pathname) !== path) {
       void navigate({ to: path });
+    }
+  };
+
+  const openGlobalNotes = () => {
+    workspace.setNotesScope('global');
+    if (normalizePath(location.pathname) !== NOTES_ROUTE) {
+      void navigate({ to: NOTES_ROUTE });
     }
   };
 
@@ -115,6 +123,7 @@ export default function App() {
         onOpenProject={workspace.handleOpenProject}
         onNewProject={workspace.handleNewProject}
         onSelectProject={handleSelectProject}
+        onOpenGlobalNotes={openGlobalNotes}
       />
 
       <main className="main-content">
@@ -202,30 +211,6 @@ export default function App() {
           specSuggestions={workspace.specSuggestions}
           onSubmit={workspace.handleCreateIssue}
           defaultStatus={workspace.config.default_status ?? workspace.statuses[0]?.id}
-        />
-      )}
-      {workspace.showNewAdr && (
-        <NewAdrModal
-          onClose={() => workspace.setShowNewAdr(false)}
-          specSuggestions={workspace.specSuggestions}
-          tagSuggestions={workspace.tagSuggestions}
-          adrSuggestions={workspace.adrs.map((e) => e.file_name)}
-          onSubmit={workspace.handleCreateAdr}
-        />
-      )}
-      {workspace.selectedAdr && (
-        <AdrDetail
-          entry={workspace.selectedAdr}
-          onClose={() => {
-            workspace.setSelectedAdr(null);
-            navigateTo(ADRS_ROUTE);
-          }}
-          onSave={workspace.handleSaveAdr}
-          onDelete={workspace.handleDeleteAdr}
-          specSuggestions={workspace.specSuggestions}
-          adrSuggestions={workspace.adrs.map((e) => e.file_name)}
-          tagSuggestions={workspace.tagSuggestions}
-          mcpEnabled={workspace.mcpEnabled}
         />
       )}
       {workspace.selectedSpec && (

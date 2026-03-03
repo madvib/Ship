@@ -1,7 +1,6 @@
 +++
-id = "05f4b09a-a2ce-419d-97da-e23aba7a0850"
+id = "X4RTGz6L"
 title = "Per-provider agent config export architecture"
-status = "accepted"
 date = "2026-03-01"
 tags = []
 +++

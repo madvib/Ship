@@ -29,6 +29,7 @@ import {
   NoteInfo as NoteEntry,
   ProjectDiscovery as Project,
   ReleaseInfo as ReleaseEntry,
+  SpecInfo as SpecEntry,
   StatusConfig,
 } from '@/bindings';
 import {
@@ -36,6 +37,7 @@ import {
   AppRoutePath,
   FEATURES_ROUTE,
   ISSUES_ROUTE,
+  NOTES_ROUTE,
   PROJECTS_ROUTE,
   RELEASES_ROUTE,
   ACTIVITY_ROUTE,
@@ -48,6 +50,7 @@ import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 interface ProjectOverviewProps {
   project: Project;
   issues: IssueEntry[];
+  specs: SpecEntry[];
   adrs: AdrEntry[];
   releases: ReleaseEntry[];
   features: FeatureEntry[];
@@ -60,6 +63,7 @@ interface ProjectOverviewProps {
 export default function ProjectOverview({
   project,
   issues,
+  specs,
   adrs,
   releases,
   features,
@@ -161,6 +165,7 @@ export default function ProjectOverview({
 
   const recentAdrs = [...adrs]
     .slice(0, 3);
+  const specCount = specs.length;
 
   return (
     <PageFrame>
@@ -267,6 +272,9 @@ export default function ProjectOverview({
               <CardDescription>Architectural decision records.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
+              <div className="text-muted-foreground text-[10px] uppercase tracking-wider">
+                {specCount} spec{specCount === 1 ? '' : 's'} in context
+              </div>
               {recentAdrs.map(adr => (
                 <div key={adr.file_name} className="flex items-center justify-between rounded-md border bg-card/30 px-3 py-2 text-xs">
                   <span className="font-medium truncate">{adr.adr.metadata.title}</span>
@@ -293,7 +301,7 @@ export default function ProjectOverview({
                   <ScrollText className="size-4 text-emerald-500" />
                   Inbox (Notes)
                 </CardTitle>
-                <Button size="xs" variant="ghost" onClick={() => onNavigate("/project/notes" as AppRoutePath)}>
+                <Button size="xs" variant="ghost" onClick={() => onNavigate(NOTES_ROUTE)}>
                   <MessageSquarePlus className="size-3.5" />
                 </Button>
               </div>
@@ -301,7 +309,7 @@ export default function ProjectOverview({
             </CardHeader>
             <CardContent className="space-y-2">
               {recentNotes.map(note => (
-                <div key={note.file_name} className="flex flex-col gap-1 rounded-md border bg-card/30 px-3 py-2 transition-colors hover:bg-accent/30 cursor-pointer" onClick={() => onNavigate("/project/notes" as AppRoutePath)}>
+                <div key={note.id} className="flex flex-col gap-1 rounded-md border bg-card/30 px-3 py-2 transition-colors hover:bg-accent/30 cursor-pointer" onClick={() => onNavigate(NOTES_ROUTE)}>
                   <span className="text-xs font-bold truncate">{note.title || 'Untitled'}</span>
                   <span className="text-[10px] text-muted-foreground">{new Date(note.updated).toLocaleDateString()}</span>
                 </div>
@@ -310,7 +318,7 @@ export default function ProjectOverview({
                 <div className="rounded-md border border-dashed py-8 text-center bg-muted/5">
                   <Lightbulb className="size-5 text-muted-foreground mx-auto mb-2 opacity-50" />
                   <p className="text-xs text-muted-foreground">Your inbox is empty.</p>
-                  <Button variant="link" size="xs" onClick={() => onNavigate("/project/notes" as AppRoutePath)}>Capture a thought</Button>
+                  <Button variant="link" size="xs" onClick={() => onNavigate(NOTES_ROUTE)}>Capture a thought</Button>
                 </div>
               )}
             </CardContent>

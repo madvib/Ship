@@ -33,6 +33,7 @@ export interface CreateProjectPayload {
 }
 
 export type TemplateKind = 'issue' | 'adr' | 'spec' | 'release' | 'feature' | 'vision';
+export type NotesScope = 'project' | 'global';
 
 const unwrapResult = async <T>(promise: Promise<Result<T, string>>): Promise<T> => {
   const result = await promise;
@@ -47,7 +48,8 @@ export const listAdrs = (): Promise<AdrEntry[]> => invoke('list_adrs_cmd');
 export const listSpecs = (): Promise<SpecEntry[]> => invoke('list_specs_cmd');
 export const listReleases = (): Promise<ReleaseEntry[]> => invoke('list_releases_cmd');
 export const listFeatures = (): Promise<FeatureEntry[]> => invoke('list_features_cmd');
-export const listNotes = (): Promise<NoteEntry[]> => invoke('list_notes_cmd');
+export const listNotes = (scope: NotesScope = 'project'): Promise<NoteEntry[]> =>
+  invoke('list_notes_cmd', { scope });
 export const listLogEntries = (): Promise<LogEntry[]> => invoke('get_log');
 export const listEventEntries = (
   since?: number,
@@ -148,14 +150,22 @@ export const createFeatureCmd = (
 export const updateFeatureCmd = (fileName: string, content: string): Promise<Result<FeatureDocument, string>> =>
   invoke('update_feature_cmd', { fileName, content }).then(data => ({ status: 'ok', data } as Result<FeatureDocument, string>)).catch(error => ({ status: 'error', error: String(error) }));
 
-export const getNoteCmd = (fileName: string): Promise<NoteDocument> =>
-  invoke('get_note_cmd', { fileName });
+export const getNoteCmd = (id: string, scope: NotesScope = 'project'): Promise<NoteDocument> =>
+  invoke('get_note_cmd', { id, scope });
 
-export const createNoteCmd = (title: string, content: string): Promise<NoteDocument> =>
-  invoke('create_note_cmd', { title, content });
+export const createNoteCmd = (
+  title: string,
+  content: string,
+  scope: NotesScope = 'project'
+): Promise<NoteDocument> =>
+  invoke('create_note_cmd', { title, content, scope });
 
-export const updateNoteCmd = (fileName: string, content: string): Promise<NoteDocument> =>
-  invoke('update_note_cmd', { fileName, content });
+export const updateNoteCmd = (
+  id: string,
+  content: string,
+  scope: NotesScope = 'project'
+): Promise<NoteDocument> =>
+  invoke('update_note_cmd', { id, content, scope });
 
 export const getTemplateCmd = (kind: TemplateKind): Promise<string> =>
   invoke('get_template_cmd', { kind });

@@ -30,7 +30,7 @@ export function useNoteActions({
         }
 
         try {
-            const latest = await getNoteCmd(entry.file_name);
+            const latest = await getNoteCmd(entry.id);
             setSelectedNote(latest);
         } catch (error) {
             setError(String(error));
@@ -45,10 +45,7 @@ export function useNoteActions({
 
         try {
             const created = await createNoteCmd(title, content);
-            setNotes((prev) => [
-                { file_name: created.file_name, title: created.title, path: created.path, updated: created.updated },
-                ...prev,
-            ]);
+            setNotes((prev) => [{ id: created.id, title: created.title, updated: created.updated }, ...prev.filter((entry) => entry.id !== created.id)]);
             setSelectedNote(created);
             await refreshActivity();
             return created;
@@ -58,18 +55,18 @@ export function useNoteActions({
         }
     };
 
-    const handleSaveNote = async (fileName: string, content: string) => {
+    const handleSaveNote = async (id: string, content: string) => {
         if (!isTauriRuntime()) {
             setError('Saving notes is only available in Tauri runtime.');
             return;
         }
 
         try {
-            const updated = await updateNoteCmd(fileName, content);
+            const updated = await updateNoteCmd(id, content);
             setNotes((prev) =>
                 prev.map((entry) =>
-                    entry.file_name === updated.file_name
-                        ? { file_name: updated.file_name, title: updated.title, path: updated.path, updated: updated.updated }
+                    entry.id === updated.id
+                        ? { id: updated.id, title: updated.title, updated: updated.updated }
                         : entry
                 )
             );

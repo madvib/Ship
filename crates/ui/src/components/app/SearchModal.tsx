@@ -17,7 +17,7 @@ import {
     CommandItem,
     CommandList,
 } from '@/components/ui/command';
-import { NOTES_ROUTE } from '@/lib/constants/routes';
+import { ADRS_ROUTE, NOTES_ROUTE } from '@/lib/constants/routes';
 
 export function SearchModal() {
     const [open, setOpen] = React.useState(false);
@@ -29,7 +29,8 @@ export function SearchModal() {
         adrs,
         issues,
         releases,
-        setSelectedNote,
+        handleSelectNote,
+        setNotesScope,
         setSelectedSpec,
         setSelectedFeature,
         setSelectedAdr,
@@ -64,11 +65,12 @@ export function SearchModal() {
                     <CommandGroup heading="Notes">
                         {notes.map((note) => (
                             <CommandItem
-                                key={`note-${note.file_name}`}
+                                key={`note-${note.id}`}
                                 onSelect={() =>
                                     runCommand(() => {
+                                        setNotesScope('project');
                                         void navigate({ to: NOTES_ROUTE });
-                                        setSelectedNote(note as any); // Cast as it will fetch the full doc on select in the context
+                                        void handleSelectNote(note);
                                     })
                                 }
                             >
@@ -122,6 +124,7 @@ export function SearchModal() {
                                 key={`adr-${adr.file_name}`}
                                 onSelect={() =>
                                     runCommand(() => {
+                                        void navigate({ to: ADRS_ROUTE });
                                         setSelectedAdr(adr);
                                     })
                                 }

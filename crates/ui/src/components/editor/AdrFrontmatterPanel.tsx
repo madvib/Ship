@@ -1,12 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import { ADR } from '@/bindings';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import DatePicker from '@/components/ui/date-picker';
 import AutocompleteInput from '@/components/ui/autocomplete-input';
-
-const ADR_STATUSES = ['proposed', 'accepted', 'rejected', 'superseded', 'deprecated'];
 
 interface AdrFrontmatterPanelProps {
   adr: ADR;
@@ -25,10 +23,6 @@ export default function AdrFrontmatterPanel({
 }: AdrFrontmatterPanelProps) {
   const [tagInput, setTagInput] = useState('');
   const [tagInputOpen, setTagInputOpen] = useState(false);
-
-  const statusOptions = useMemo(() => ADR_STATUSES, []);
-
-  const meta = adr.metadata as any;
 
   const updateMetadata = (patch: Partial<ADR['metadata']>) => {
     onChange({
@@ -60,75 +54,69 @@ export default function AdrFrontmatterPanel({
       <div className="mb-3 flex items-center justify-between border-b border-border/30 pb-2">
         <div className="flex items-center gap-2">
           <div className="size-1.5 rounded-full bg-primary/60" />
-          <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Properties</h3>
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">
+            Properties
+          </h3>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="h-5 bg-background/50 px-1.5 font-mono text-[9px] font-medium text-muted-foreground/70">
-            {meta.id}
-          </Badge>
-        </div>
+        <Badge
+          variant="outline"
+          className="h-5 bg-background/50 px-1.5 font-mono text-[9px] font-medium text-muted-foreground/70"
+        >
+          {adr.metadata.id || 'pending'}
+        </Badge>
       </div>
 
       <div className="grid gap-x-8 gap-y-4 md:grid-cols-2 lg:grid-cols-3">
-        {/* Status & Date */}
-        <div className="space-y-3.5">
-          <div className="space-y-1">
-            <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">Status</label>
-            <AutocompleteInput
-              value={meta.status || 'proposed'}
-              options={statusOptions.map((value) => ({ value }))}
-              placeholder="Select status"
-              className="h-8 border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50 focus:bg-background"
-              noResultsText="No matching status."
-              onValueChange={(status) => {
-                updateMetadata({ status: (status || '').trim() || 'proposed' } as any);
-              }}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">Date</label>
-            <DatePicker
-              value={meta.date}
-              className="h-8 w-full border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
-              onValueChange={(date) => updateMetadata({ date })}
-            />
-          </div>
+        <div className="space-y-1">
+          <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">
+            Date
+          </label>
+          <DatePicker
+            value={adr.metadata.date}
+            className="h-8 w-full border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
+            onValueChange={(date) => updateMetadata({ date })}
+          />
         </div>
 
-        {/* Relationships */}
-        <div className="space-y-3.5">
-          <div className="space-y-1">
-            <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">Reference Spec</label>
-            <AutocompleteInput
-              value={meta.spec_id || ''}
-              options={specSuggestions.map((spec) => ({ value: spec }))}
-              className="h-8 border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
-              placeholder="None"
-              noResultsText="No specs found."
-              onValueChange={(spec) => updateMetadata({ spec_id: (spec || '').trim() || null })}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">Supersedes</label>
-            <AutocompleteInput
-              value={meta.supersedes_id || ''}
-              options={adrSuggestions.map((id) => ({ value: id }))}
-              className="h-8 border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
-              placeholder="None"
-              noResultsText="No ADRs found."
-              onValueChange={(sid) => updateMetadata({ supersedes_id: (sid || '').trim() || null })}
-            />
-          </div>
+        <div className="space-y-1">
+          <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">
+            Reference Spec
+          </label>
+          <AutocompleteInput
+            value={adr.metadata.spec_id || ''}
+            options={specSuggestions.map((spec) => ({ value: spec }))}
+            className="h-8 border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
+            placeholder="None"
+            noResultsText="No specs found."
+            onValueChange={(spec) => updateMetadata({ spec_id: (spec || '').trim() || null })}
+          />
         </div>
 
-        {/* Tags Section */}
-        <div className="space-y-1 md:col-span-2 lg:col-span-1">
-          <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">Tags</label>
+        <div className="space-y-1">
+          <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">
+            Supersedes
+          </label>
+          <AutocompleteInput
+            value={adr.metadata.supersedes_id || ''}
+            options={adrSuggestions.map((id) => ({ value: id }))}
+            className="h-8 border-border/40 bg-background/30 text-xs transition-colors hover:bg-background/50"
+            placeholder="None"
+            noResultsText="No ADRs found."
+            onValueChange={(id) => updateMetadata({ supersedes_id: (id || '').trim() || null })}
+          />
+        </div>
+
+        <div className="space-y-1 md:col-span-2 lg:col-span-3">
+          <label className="text-muted-foreground/60 text-[9px] font-bold uppercase tracking-widest">
+            Tags
+          </label>
           <div className="flex min-h-[72px] flex-wrap content-start gap-1.5 rounded-md border border-border/30 bg-background/20 p-2 shadow-inner transition-colors focus-within:bg-background/40">
-            {(meta.tags ?? []).map((tag: string) => (
-              <Badge key={tag} variant="secondary" className="h-5 gap-1 rounded-sm bg-primary/10 px-1.5 text-[10px] font-medium text-primary hover:bg-primary/20">
+            {(adr.metadata.tags ?? []).map((tag: string) => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                className="h-5 gap-1 rounded-sm bg-primary/10 px-1.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+              >
                 {tag}
                 <button
                   type="button"
@@ -154,7 +142,15 @@ export default function AdrFrontmatterPanel({
                   }}
                   onValueChange={setTagInput}
                 />
-                <Button variant="ghost" size="icon-xs" className="size-5 shrink-0" onClick={() => { addTag(); setTagInputOpen(false); }}>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-5 shrink-0"
+                  onClick={() => {
+                    addTag();
+                    setTagInputOpen(false);
+                  }}
+                >
                   <Check className="size-3" />
                 </Button>
               </div>

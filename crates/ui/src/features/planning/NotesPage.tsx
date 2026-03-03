@@ -8,14 +8,22 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
 import { relativeDate } from '@/lib/date';
+import { NoteDocument, NoteInfo as NoteEntry } from '@/bindings';
+import { createNoteCmd, getNoteCmd, listNotes, updateNoteCmd } from '@/lib/platform/tauri/commands';
+import { isTauriRuntime } from '@/lib/platform/tauri/runtime';
 
-// Memoized individual note item to prevent full list re-renders
+type EditableNote = {
+    title: string;
+    content: string;
+    id?: string;
+};
+
 const NoteListItem = memo(({
     note,
     isActive,
     onClick
 }: {
-    note: { file_name: string; title: string; updated: string };
+    note: NoteEntry;
     isActive: boolean;
     onClick: () => void
 }) => (
@@ -37,70 +45,200 @@ NoteListItem.displayName = 'NoteListItem';
 
 export default function NotesPage() {
     const {
-        notes,
-        selectedNote,
-        loading: isLoading,
-        handleSelectNote,
-        handleCreateNote,
-        handleSaveNote,
-        setSelectedNote,
+        notes: projectNotes,
+        selectedNote: projectSelectedNote,
+        loading: projectLoading,
+        notesScope,
+        handleSelectNote: handleSelectProjectNote,
+        handleCreateNote: handleCreateProjectNote,
+        handleSaveNote: handleSaveProjectNote,
+        setSelectedNote: setProjectSelectedNote,
+        setError,
+        refreshActivity,
     } = useWorkspace();
+
+    const isGlobalScope = notesScope === 'global';
+    const [globalNotes, setGlobalNotes] = useState<NoteEntry[]>([]);
+    const [globalSelectedNote, setGlobalSelectedNote] = useState<NoteDocument | null>(null);
+    const [globalLoading, setGlobalLoading] = useState(false);
+
+    const notes = isGlobalScope ? globalNotes : projectNotes;
+    const selectedNote = isGlobalScope ? globalSelectedNote : projectSelectedNote;
+    const isLoading = isGlobalScope ? globalLoading : projectLoading;
 
     const [saveIndicator, setSaveIndicator] = useState<'idle' | 'saving' | 'saved'>('idle');
     const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const titleInputRef = useRef<HTMLInputElement>(null);
+    const [localNote, setLocalNote] = useState<EditableNote | null>(null);
+    const activeNoteId = useRef<string | null>(null);
 
-    // localNote only tracks the note being edited to decouple from workspace updates
-    const [localNote, setLocalNote] = useState<{ title: string; content: string; file_name?: string } | null>(null);
+    useEffect(() => {
+        if (!isGlobalScope) return;
 
-    // Track the active file name to avoid redundant syncs
-    const activeFileName = useRef<string | null>(null);
+        let cancelled = false;
 
-    // Sync local state ONLY when selection changes, not on every content update
+        const loadGlobalNotes = async () => {
+            if (!isTauriRuntime()) {
+                setGlobalNotes([]);
+                setGlobalSelectedNote(null);
+                setGlobalLoading(false);
+                return;
+            }
+
+            setGlobalLoading(true);
+            try {
+                const entries = await listNotes('global');
+                if (cancelled) return;
+                setGlobalNotes(entries);
+                setGlobalSelectedNote((current) =>
+                    current && entries.some((entry) => entry.id === current.id) ? current : null
+                );
+            } catch (error) {
+                if (!cancelled) {
+                    setError(String(error));
+                }
+            } finally {
+                if (!cancelled) {
+                    setGlobalLoading(false);
+                }
+            }
+        };
+
+        void loadGlobalNotes();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isGlobalScope, setError]);
+
+    useEffect(() => {
+        activeNoteId.current = null;
+        setLocalNote(null);
+        setSaveIndicator('idle');
+    }, [isGlobalScope]);
+
     useEffect(() => {
         if (selectedNote) {
-            // Only update if it's a DIFFERENT note
-            if (activeFileName.current !== selectedNote.file_name) {
-                activeFileName.current = selectedNote.file_name;
+            if (activeNoteId.current !== selectedNote.id) {
+                activeNoteId.current = selectedNote.id;
                 setLocalNote({
                     title: selectedNote.title,
                     content: selectedNote.content,
-                    file_name: selectedNote.file_name,
+                    id: selectedNote.id,
                 });
                 setSaveIndicator('idle');
             }
-        } else if (localNote?.file_name) {
-            // Note was deleted or deselected
-            activeFileName.current = null;
+        } else if (localNote?.id) {
+            activeNoteId.current = null;
             setLocalNote(null);
         }
-    }, [selectedNote, localNote?.file_name]);
+    }, [selectedNote, localNote?.id]);
+
+    const clearSelectedNote = useCallback(() => {
+        if (isGlobalScope) {
+            setGlobalSelectedNote(null);
+            return;
+        }
+        setProjectSelectedNote(null);
+    }, [isGlobalScope, setProjectSelectedNote]);
+
+    const handleSelectScopedNote = useCallback(async (entry: NoteEntry) => {
+        if (!isGlobalScope) {
+            await handleSelectProjectNote(entry);
+            return;
+        }
+
+        if (!isTauriRuntime()) {
+            setGlobalSelectedNote({
+                ...entry,
+                content: '',
+            });
+            return;
+        }
+
+        try {
+            const latest = await getNoteCmd(entry.id, 'global');
+            setGlobalSelectedNote(latest);
+        } catch (error) {
+            setError(String(error));
+        }
+    }, [isGlobalScope, handleSelectProjectNote, setError]);
+
+    const handleCreateScopedNote = useCallback(async (title: string, content: string) => {
+        if (!isGlobalScope) {
+            return handleCreateProjectNote(title, content);
+        }
+
+        if (!isTauriRuntime()) {
+            setError('Note creation is only available in Tauri runtime.');
+            return;
+        }
+
+        try {
+            const created = await createNoteCmd(title, content, 'global');
+            setGlobalNotes((prev) => [{ id: created.id, title: created.title, updated: created.updated }, ...prev.filter((entry) => entry.id !== created.id)]);
+            setGlobalSelectedNote(created);
+            await refreshActivity();
+            return created;
+        } catch (error) {
+            setError(String(error));
+            throw error;
+        }
+    }, [isGlobalScope, handleCreateProjectNote, refreshActivity, setError]);
+
+    const handleSaveScopedNote = useCallback(async (noteId: string, content: string) => {
+        if (!isGlobalScope) {
+            return handleSaveProjectNote(noteId, content);
+        }
+
+        if (!isTauriRuntime()) {
+            setError('Saving notes is only available in Tauri runtime.');
+            return;
+        }
+
+        try {
+            const updated = await updateNoteCmd(noteId, content, 'global');
+            setGlobalNotes((prev) =>
+                prev.map((entry) =>
+                    entry.id === updated.id
+                        ? { id: updated.id, title: updated.title, updated: updated.updated }
+                        : entry
+                )
+            );
+            setGlobalSelectedNote(updated);
+            await refreshActivity();
+            return updated;
+        } catch (error) {
+            setError(String(error));
+            throw error;
+        }
+    }, [isGlobalScope, handleSaveProjectNote, refreshActivity, setError]);
 
     const handleNewNote = useCallback(() => {
-        const stub = {
+        const stub: EditableNote = {
             title: '',
             content: '',
         };
-        activeFileName.current = '';
-        setSelectedNote(null);
+        activeNoteId.current = '';
+        clearSelectedNote();
         setLocalNote(stub);
         setSaveIndicator('idle');
         setTimeout(() => titleInputRef.current?.focus(), 50);
-    }, [setSelectedNote]);
+    }, [clearSelectedNote]);
 
-    const scheduleAutoSave = useCallback((title: string, content: string, fileName?: string) => {
+    const scheduleAutoSave = useCallback((title: string, content: string, noteId?: string) => {
         if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
         autoSaveTimer.current = setTimeout(async () => {
             setSaveIndicator('saving');
             try {
-                if (!fileName) {
+                if (!noteId) {
                     if (!title.trim() && !content.trim()) {
                         setSaveIndicator('idle');
                         return;
                     }
-                    await handleCreateNote(title || 'Untitled', content);
+                    await handleCreateScopedNote(title || 'Untitled', content);
                 } else {
-                    await handleSaveNote(fileName, content);
+                    await handleSaveScopedNote(noteId, content);
                 }
                 setSaveIndicator('saved');
                 setTimeout(() => setSaveIndicator('idle'), 2000);
@@ -109,20 +247,20 @@ export default function NotesPage() {
                 setSaveIndicator('idle');
             }
         }, 1500);
-    }, [handleCreateNote, handleSaveNote]);
+    }, [handleCreateScopedNote, handleSaveScopedNote]);
 
     const handleTitleChange = (title: string) => {
         if (!localNote) return;
         const next = { ...localNote, title };
         setLocalNote(next);
-        scheduleAutoSave(next.title, next.content, next.file_name);
+        scheduleAutoSave(next.title, next.content, next.id);
     };
 
     const handleContentChange = (content: string) => {
         if (!localNote) return;
         const next = { ...localNote, content };
         setLocalNote(next);
-        scheduleAutoSave(next.title, next.content, next.file_name);
+        scheduleAutoSave(next.title, next.content, next.id);
     };
 
     const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -144,15 +282,15 @@ export default function NotesPage() {
         [notes]
     );
 
-    const isCreating = localNote && !localNote.file_name;
+    const isCreating = Boolean(localNote && !localNote.id);
 
     return (
         <PageFrame className="h-screen overflow-hidden flex flex-col md:p-8">
             <div className="flex-none">
                 <PageHeader
-                    title="Notes"
-                    description="Capture freeform thoughts and project context."
-                    badge={<Badge variant="outline">Notes</Badge>}
+                    title={isGlobalScope ? 'Global Notes' : 'Notes'}
+                    description={isGlobalScope ? 'Capture personal notes shared across projects.' : 'Capture freeform thoughts and project context.'}
+                    badge={<Badge variant="outline">{isGlobalScope ? 'Global' : 'Project'}</Badge>}
                     actions={
                         <Button size="sm" onClick={handleNewNote}>
                             <Plus className="size-3.5" />
@@ -163,7 +301,6 @@ export default function NotesPage() {
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-4 pb-4">
-                {/* Left: Note List */}
                 <div className="lg:w-72 flex flex-col gap-2 rounded-lg border bg-card/30 p-2 overflow-hidden shadow-sm">
                     <div className="flex-1 overflow-y-auto pr-1">
                         {isLoading ? (
@@ -178,16 +315,16 @@ export default function NotesPage() {
                             <div className="space-y-1 pr-1">
                                 {isCreating && (
                                     <div className="border-primary/40 bg-primary/10 rounded-md border px-2.5 py-2 animate-in fade-in slide-in-from-top-2">
-                                        <p className="truncate text-sm font-medium">{localNote.title || 'Untitled'}</p>
+                                        <p className="truncate text-sm font-medium">{localNote?.title || 'Untitled'}</p>
                                         <Badge variant="secondary" className="text-[9px] h-4 mt-1">Unsaved</Badge>
                                     </div>
                                 )}
                                 {sortedNotes.map((note) => (
                                     <NoteListItem
-                                        key={note.file_name}
+                                        key={note.id}
                                         note={note}
-                                        isActive={note.file_name === selectedNote?.file_name}
-                                        onClick={() => void handleSelectNote(note)}
+                                        isActive={note.id === selectedNote?.id}
+                                        onClick={() => void handleSelectScopedNote(note)}
                                     />
                                 ))}
                             </div>
@@ -195,7 +332,6 @@ export default function NotesPage() {
                     </div>
                 </div>
 
-                {/* Right: Editor */}
                 <div className="flex-1 min-h-0 flex flex-col rounded-lg border bg-card/30 overflow-hidden shadow-sm">
                     {!localNote ? (
                         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center p-8">

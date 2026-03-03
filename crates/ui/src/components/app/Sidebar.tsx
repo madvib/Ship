@@ -10,6 +10,7 @@ import {
   FolderSearch,
   FolderOpen,
   FolderPlus,
+  Globe2,
   LayoutDashboard,
   NotebookPen,
   Package,
@@ -62,6 +63,7 @@ interface SidebarProps {
   onOpenProject: () => void;
   onNewProject: () => void;
   onSelectProject: (project: Project) => void;
+  onOpenGlobalNotes: () => void;
 }
 
 type NavItem = {
@@ -115,6 +117,7 @@ export default function Sidebar({
   onOpenProject,
   onNewProject,
   onSelectProject,
+  onOpenGlobalNotes,
 }: SidebarProps) {
   const [projectOpen, setProjectOpen] = useState(true);
   const [workflowOpen, setWorkflowOpen] = useState(true);
@@ -234,6 +237,11 @@ export default function Sidebar({
             </DropdownMenuGroup>
             <DropdownMenuSeparator className="mx-1 my-1 opacity-50" />
             <DropdownMenuGroup className="p-1 space-y-0.5">
+              <DropdownMenuItem onClick={onOpenGlobalNotes} className="cursor-pointer gap-2 py-2 rounded-md">
+                <Globe2 className="size-4 opacity-60" />
+                <span className="text-sm font-medium">Global Notes</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="my-1" />
               <DropdownMenuItem onClick={onOpenProject} className="cursor-pointer gap-2 py-2 rounded-md">
                 <FolderOpen className="size-4 opacity-60" />
                 <span className="text-sm font-medium">Open Folder...</span>
