@@ -289,7 +289,6 @@ export default function NotesPage() {
             <div className="flex-none">
                 <PageHeader
                     title={isGlobalScope ? 'Global Notes' : 'Notes'}
-                    description={isGlobalScope ? 'Capture personal notes shared across projects.' : 'Capture freeform thoughts and project context.'}
                     badge={<Badge variant="outline">{isGlobalScope ? 'Global' : 'Project'}</Badge>}
                     actions={
                         <Button size="sm" onClick={handleNewNote}>

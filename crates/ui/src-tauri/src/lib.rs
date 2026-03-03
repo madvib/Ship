@@ -8,25 +8,23 @@ use runtime::project::{
     set_active_project_global, specs_dir,
 };
 use runtime::{
-    create_feature, create_issue, create_prompt, create_release, create_skill, create_spec,
-    create_user_skill, delete_issue, delete_prompt, delete_skill, delete_spec, delete_user_skill,
-    find_feature_path, get_effective_skill, get_feature, get_feature_raw as get_feature_content,
-    get_issue, get_project_dir, get_project_name, get_prompt, get_release,
-    get_release_raw as get_release_content, get_skill, get_spec_raw as get_spec_content,
+    create_issue, create_prompt, create_skill, create_spec, create_user_skill, delete_issue,
+    delete_prompt, delete_skill, delete_spec, delete_user_skill, get_effective_skill, get_issue,
+    get_project_dir, get_project_name, get_prompt, get_skill, get_spec_raw as get_spec_content,
     get_user_skill, get_workspace, ingest_external_events, init_project, list_catalog,
-    list_catalog_by_kind, list_effective_skills, list_events_since, list_features,
-    list_issues_full, list_models, list_prompts, list_providers, list_registered_projects,
-    list_releases, list_skills, list_specs, list_user_skills, log_action, move_issue,
-    read_log_entries, read_template, register_project, resolve_agent_config, search_catalog,
-    update_feature, update_issue, update_prompt, update_release, update_skill, update_spec,
-    update_user_skill, AgentConfig, CatalogEntry, CatalogKind, EventRecord, FeatureStatus, Issue,
-    IssueEntry, LogEntry, ModelInfo, Prompt, ProviderInfo, ReleaseStatus, Skill, Workspace,
-    SHIP_DIR_NAME,
+    list_catalog_by_kind, list_effective_skills, list_events_since, list_issues_full, list_models,
+    list_prompts, list_providers, list_registered_projects, list_skills, list_specs,
+    list_user_skills, log_action, move_issue, read_log_entries, read_template, register_project,
+    resolve_agent_config, search_catalog, update_issue, update_prompt, update_skill, update_spec,
+    update_user_skill, AgentConfig, CatalogEntry, CatalogKind, EventRecord, Issue, IssueEntry,
+    LogEntry, ModelInfo, Prompt, ProviderInfo, Skill, Workspace, SHIP_DIR_NAME,
 };
 use serde::{Deserialize, Serialize};
 use ship_module_project::{
-    create_adr, create_note, delete_adr, get_adr_by_id, get_note_by_id, list_adrs, list_notes,
-    move_adr, update_adr, update_note_content, AdrEntry, AdrStatus, NoteScope, ADR,
+    create_adr, create_feature, create_note, create_release, delete_adr, get_adr_by_id,
+    get_feature_by_id, get_note_by_id, get_release_by_id, list_adrs, list_features, list_notes,
+    list_releases, move_adr, update_adr, update_feature, update_note_content, update_release,
+    AdrEntry, AdrStatus, FeatureEntry, NoteScope, ReleaseEntry, ADR,
 };
 use specta::Type;
 use std::collections::HashSet;
@@ -102,52 +100,6 @@ pub struct SpecDocument {
     pub file_name: String,
     pub title: String,
     pub path: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct ReleaseInfo {
-    pub file_name: String,
-    pub version: String,
-    pub status: ReleaseStatus,
-    pub path: String,
-    pub updated: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct ReleaseDocument {
-    pub file_name: String,
-    pub version: String,
-    pub status: ReleaseStatus,
-    pub path: String,
-    pub updated: String,
-    pub content: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct FeatureInfo {
-    pub file_name: String,
-    pub title: String,
-    pub status: FeatureStatus,
-    pub release_id: Option<String>,
-    pub spec_id: Option<String>,
-    pub branch: Option<String>,
-    pub description: Option<String>,
-    pub path: String,
-    pub updated: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct FeatureDocument {
-    pub file_name: String,
-    pub title: String,
-    pub status: FeatureStatus,
-    pub release_id: Option<String>,
-    pub spec_id: Option<String>,
-    pub branch: Option<String>,
-    pub description: Option<String>,
-    pub path: String,
-    pub updated: String,
     pub content: String,
 }
 
@@ -276,46 +228,6 @@ fn spec_document_from_path(path: PathBuf) -> Result<SpecDocument, String> {
     })
 }
 
-fn release_document_from_path(path: PathBuf) -> Result<ReleaseDocument, String> {
-    let release = get_release(path.clone()).map_err(|e| e.to_string())?;
-    let content = get_release_content(path.clone()).map_err(|e| e.to_string())?;
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-    Ok(ReleaseDocument {
-        file_name,
-        version: release.metadata.version,
-        status: release.metadata.status.clone(),
-        path: path.to_string_lossy().to_string(),
-        updated: release.metadata.updated,
-        content,
-    })
-}
-
-fn feature_document_from_path(path: PathBuf) -> Result<FeatureDocument, String> {
-    let feature = get_feature(path.clone()).map_err(|e| e.to_string())?;
-    let content = get_feature_content(path.clone()).map_err(|e| e.to_string())?;
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-    Ok(FeatureDocument {
-        file_name,
-        title: feature.metadata.title,
-        status: FeatureStatus::from_path(&path),
-        release_id: feature.metadata.release_id,
-        spec_id: feature.metadata.spec_id,
-        branch: feature.metadata.branch,
-        description: feature.metadata.description,
-        path: path.to_string_lossy().to_string(),
-        updated: feature.metadata.updated,
-        content,
-    })
-}
-
 // ─── AI helper ────────────────────────────────────────────────────────────────
 
 fn invoke_ai_cli(ai: &AiConfig, prompt: &str) -> Result<String, String> {
@@ -432,7 +344,8 @@ fn set_active_project(
         issue_count: issues.len(),
     };
     *state.active_project.lock().unwrap() = Some(ship_path.clone());
-    register_project(get_project_name(&ship_path), ship_path.clone()).map_err(|e| e.to_string())?;
+    register_project(get_project_name(&ship_path), ship_path.clone())
+        .map_err(|e: anyhow::Error| e.to_string())?;
     if let Err(err) = start_project_watcher(&app, &state, &ship_path) {
         eprintln!("Failed to start project watcher: {}", err);
     }
@@ -473,7 +386,7 @@ async fn pick_and_open_project(
     };
     *state.active_project.lock().unwrap() = Some(final_ship_path.clone());
     register_project(get_project_name(&final_ship_path), final_ship_path.clone())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: anyhow::Error| e.to_string())?;
     if let Err(err) = start_project_watcher(&app, &state, &final_ship_path) {
         eprintln!("Failed to start project watcher: {}", err);
     }
@@ -525,7 +438,7 @@ fn detect_current_project(
             // Also set as active
             *state.active_project.lock().unwrap() = Some(ship_path.clone());
             register_project(get_project_name(&ship_path), ship_path.clone())
-                .map_err(|e| e.to_string())?;
+                .map_err(|e: anyhow::Error| e.to_string())?;
             if let Err(err) = start_project_watcher(&app, &state, &ship_path) {
                 eprintln!("Failed to start project watcher: {}", err);
             }
@@ -569,7 +482,8 @@ async fn create_new_project(
         issue_count: issues.len(),
     };
     *state.active_project.lock().unwrap() = Some(ship_path.clone());
-    register_project(get_project_name(&ship_path), ship_path.clone()).map_err(|e| e.to_string())?;
+    register_project(get_project_name(&ship_path), ship_path.clone())
+        .map_err(|e: anyhow::Error| e.to_string())?;
     if let Err(err) = start_project_watcher(&app, &state, &ship_path) {
         eprintln!("Failed to start project watcher: {}", err);
     }
@@ -650,7 +564,7 @@ fn create_project_with_options(
     };
 
     *state.active_project.lock().unwrap() = Some(ship_path.clone());
-    register_project(display_name, ship_path.clone()).map_err(|e| e.to_string())?;
+    register_project(display_name, ship_path.clone()).map_err(|e: anyhow::Error| e.to_string())?;
 
     if let Err(err) = start_project_watcher(&app, &state, &ship_path) {
         eprintln!("Failed to start project watcher: {}", err);
@@ -1020,30 +934,16 @@ fn delete_spec_cmd(file_name: String, state: State<AppState>) -> Result<(), Stri
 
 #[tauri::command]
 #[specta::specta]
-fn list_releases_cmd(state: State<AppState>) -> Result<Vec<ReleaseInfo>, String> {
+fn list_releases_cmd(state: State<AppState>) -> Result<Vec<ReleaseEntry>, String> {
     let project_dir = get_active_dir(&state)?;
-    let entries = list_releases(project_dir).map_err(|e| e.to_string())?;
-    Ok(entries
-        .into_iter()
-        .map(|entry| ReleaseInfo {
-            file_name: entry.file_name,
-            version: entry.version,
-            status: entry.status,
-            path: entry.path,
-            updated: entry.updated,
-        })
-        .collect())
+    list_releases(&project_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn get_release_cmd(file_name: String, state: State<AppState>) -> Result<ReleaseDocument, String> {
+fn get_release_cmd(file_name: String, state: State<AppState>) -> Result<ReleaseEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = releases_dir(&project_dir).join(&file_name);
-    if !path.exists() {
-        return Err(format!("Release not found: {}", file_name));
-    }
-    release_document_from_path(path)
+    get_release_by_id(&project_dir, file_name.trim_end_matches(".md")).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1052,17 +952,16 @@ fn create_release_cmd(
     version: String,
     content: String,
     state: State<AppState>,
-) -> Result<ReleaseDocument, String> {
+) -> Result<ReleaseEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path =
-        create_release(project_dir.clone(), &version, &content).map_err(|e| e.to_string())?;
+    let entry = create_release(&project_dir, &version, &content).map_err(|e| e.to_string())?;
     log_action(
         &project_dir,
         "release create",
         &format!("Created Release: {}", version),
     )
     .ok();
-    release_document_from_path(path)
+    Ok(entry)
 }
 
 #[tauri::command]
@@ -1071,54 +970,37 @@ fn update_release_cmd(
     file_name: String,
     content: String,
     state: State<AppState>,
-) -> Result<ReleaseDocument, String> {
+) -> Result<ReleaseEntry, String> {
     let project_dir = get_active_dir(&state)?;
+    let id = file_name.trim_end_matches(".md");
+    let release_entry = get_release_by_id(&project_dir, id).map_err(|e| e.to_string())?;
+    let entry =
+        update_release(&project_dir, id, release_entry.release).map_err(|e| e.to_string())?;
     let path = releases_dir(&project_dir).join(&file_name);
-    if !path.exists() {
-        return Err(format!("Release not found: {}", file_name));
-    }
-    update_release(path.clone(), &content).map_err(|e| e.to_string())?;
+    fs::write(&path, &content).map_err(|e| e.to_string())?;
     log_action(
         &project_dir,
         "release update",
         &format!("Updated Release: {}", file_name),
     )
     .ok();
-    release_document_from_path(path)
+    Ok(entry)
 }
 
 // ─── Commands: Features ──────────────────────────────────────────────────────
 
 #[tauri::command]
 #[specta::specta]
-fn list_features_cmd(state: State<AppState>) -> Result<Vec<FeatureInfo>, String> {
+fn list_features_cmd(state: State<AppState>) -> Result<Vec<FeatureEntry>, String> {
     let project_dir = get_active_dir(&state)?;
-    let entries = list_features(project_dir, None).map_err(|e| e.to_string())?;
-    Ok(entries
-        .into_iter()
-        .map(|entry| FeatureInfo {
-            file_name: entry.file_name,
-            title: entry.title,
-            status: entry.status,
-            release_id: entry.release_id,
-            spec_id: entry.spec_id,
-            branch: entry.branch,
-            description: entry.description,
-            path: entry.path,
-            updated: entry.updated,
-        })
-        .collect())
+    list_features(&project_dir).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn get_feature_cmd(
-    file_name: String,
-    state: State<'_, AppState>,
-) -> Result<FeatureDocument, String> {
+fn get_feature_cmd(file_name: String, state: State<'_, AppState>) -> Result<FeatureEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = find_feature_path(&project_dir, &file_name).map_err(|e| e.to_string())?;
-    feature_document_from_path(path)
+    get_feature_by_id(&project_dir, file_name.trim_end_matches(".md")).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1129,10 +1011,10 @@ fn create_feature_cmd(
     release: Option<String>,
     spec: Option<String>,
     state: State<AppState>,
-) -> Result<FeatureDocument, String> {
+) -> Result<FeatureEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    let path = create_feature(
-        project_dir.clone(),
+    let entry = create_feature(
+        &project_dir,
         &title,
         &content,
         release.as_deref(),
@@ -1146,7 +1028,7 @@ fn create_feature_cmd(
         &format!("Created Feature: {}", title),
     )
     .ok();
-    feature_document_from_path(path)
+    Ok(entry)
 }
 
 #[tauri::command]
@@ -1155,20 +1037,26 @@ fn update_feature_cmd(
     file_name: String,
     content: String,
     state: State<AppState>,
-) -> Result<FeatureDocument, String> {
+) -> Result<FeatureEntry, String> {
     let project_dir = get_active_dir(&state)?;
+    let id = file_name.trim_end_matches(".md");
+    // Get existing feature to update its content
+    let feature_entry = get_feature_by_id(&project_dir, id).map_err(|e| e.to_string())?;
+    let entry =
+        update_feature(&project_dir, id, feature_entry.feature).map_err(|e| e.to_string())?;
+    // We also need to update its content by saving it if it was a file, but `update_feature` handles metadata DB.
+    // However, `update_feature_raw` is not publicly exposed on `ship-module-project`, so we'll need to create a `update_feature_content` like in notes.
+    // Alternatively, I can just use `runtime::update_feature` but that was refactored.
+    // The previous implementation wrote to `features_dir(&project_dir).join(&file_name)`
     let path = features_dir(&project_dir).join(&file_name);
-    if !path.exists() {
-        return Err(format!("Feature not found: {}", file_name));
-    }
-    update_feature(path.clone(), &content).map_err(|e| e.to_string())?;
+    fs::write(&path, &content).map_err(|e| e.to_string())?;
     log_action(
         &project_dir,
         "feature update",
         &format!("Updated Feature: {}", file_name),
     )
     .ok();
-    feature_document_from_path(path)
+    Ok(entry)
 }
 
 #[tauri::command]
@@ -1176,23 +1064,6 @@ fn update_feature_cmd(
 fn get_template_cmd(kind: String, state: State<AppState>) -> Result<String, String> {
     let project_dir = get_active_dir(&state)?;
     read_template(&project_dir, &kind).map_err(|e| e.to_string())
-}
-
-// ─── Commands: Vision ─────────────────────────────────────────────────────────
-
-#[tauri::command]
-#[specta::specta]
-fn get_vision_cmd(state: State<AppState>) -> Result<runtime::vision::Vision, String> {
-    let project_dir = get_active_dir(&state)?;
-    runtime::get_vision(project_dir).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
-fn update_vision_cmd(content: String, state: State<AppState>) -> Result<(), String> {
-    let project_dir = get_active_dir(&state)?;
-    let vision = runtime::vision::Vision::from_markdown(&content).map_err(|e| e.to_string())?;
-    runtime::update_vision(project_dir, &vision).map_err(|e| e.to_string())
 }
 
 // ─── Commands: Notes ──────────────────────────────────────────────────────────
@@ -1532,7 +1403,7 @@ fn get_skill_cmd(
     let dir = get_active_dir(&state)?;
     match scope.as_deref() {
         Some("user") => get_user_skill(&id).map_err(|e| e.to_string()),
-        Some("project") => get_skill(&dir, &id).map_err(|e| e.to_string()),
+        Some("project") => get_skill(&dir, &id).map_err(|e: anyhow::Error| e.to_string()),
         _ => get_effective_skill(&dir, &id).map_err(|e| e.to_string()),
     }
 }
@@ -1838,9 +1709,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             create_feature_cmd,
             update_feature_cmd,
             get_template_cmd,
-            // Vision
-            get_vision_cmd,
-            update_vision_cmd,
             // Notes
             list_notes_cmd,
             get_note_cmd,

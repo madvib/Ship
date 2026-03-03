@@ -8,12 +8,11 @@
 /// Run all including planned: cargo test --test branch_config -- --include-ignored
 mod helpers;
 
+use crate::helpers::create_feature;
 use helpers::TestProject;
+use runtime::agent_config::FeatureAgentConfig;
 use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
-use runtime::{
-    FeatureAgentConfig, FeatureMcpRef, FeatureSkillRef, create_feature, create_issue, create_skill,
-    get_feature,
-};
+use runtime::{create_issue, create_skill};
 use ship_module_git::on_post_checkout;
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,10 +34,30 @@ fn stdio_server(id: &str) -> McpServerConfig {
     }
 }
 
+fn get_feature_id(path: &Path) -> String {
+    let content = std::fs::read_to_string(path).unwrap();
+    for line in content.lines() {
+        if line.starts_with("id = ") {
+            return line.split('"').nth(1).unwrap().to_string();
+        }
+    }
+    panic!("No ID found in {:?}", path);
+}
+
 fn set_feature_agent(path: &Path, agent: FeatureAgentConfig) {
-    let mut feature = get_feature(path.to_path_buf()).unwrap();
-    feature.metadata.agent = Some(agent);
-    std::fs::write(path, feature.to_markdown().unwrap()).unwrap();
+    let ship_dir = path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let id = get_feature_id(path);
+    let mut entry = ship_module_project::get_feature_by_id(ship_dir, &id).unwrap();
+    entry.feature.metadata.agent = Some(agent);
+    ship_module_project::update_feature(ship_dir, &id, entry.feature).unwrap();
 }
 
 // ─── Happy path ──────────────────────────────────────────────────────────────
@@ -107,15 +126,13 @@ fn claude_md_inlines_skill_content() {
     )
     .unwrap();
     set_feature_agent(
-        &feat,
+        &feat.1,
         FeatureAgentConfig {
             providers: vec![],
             model: None,
             max_cost_per_session: None,
             mcp_servers: vec![],
-            skills: vec![FeatureSkillRef {
-                id: "conventions".to_string(),
-            }],
+            skills: vec!["conventions".to_string()],
         },
     );
 
@@ -142,14 +159,12 @@ fn mcp_json_contains_only_feature_declared_servers() {
     )
     .unwrap();
     set_feature_agent(
-        &feat,
+        &feat.1,
         FeatureAgentConfig {
             providers: vec![],
             model: None,
             max_cost_per_session: None,
-            mcp_servers: vec![FeatureMcpRef {
-                id: "github".to_string(),
-            }],
+            mcp_servers: vec!["github".to_string()],
             skills: vec![],
         },
     );
@@ -259,14 +274,12 @@ fn switching_to_main_removes_ship_managed_mcp_servers() {
     )
     .unwrap();
     set_feature_agent(
-        &feat,
+        &feat.1,
         FeatureAgentConfig {
             providers: vec![],
             model: None,
             max_cost_per_session: None,
-            mcp_servers: vec![FeatureMcpRef {
-                id: "github".to_string(),
-            }],
+            mcp_servers: vec!["github".to_string()],
             skills: vec![],
         },
     );
@@ -475,16 +488,16 @@ fn feature_start_creates_branch_and_generates_config() {
     p.initial_commit().unwrap();
 
     let feat = create_feature(p.ship_dir.clone(), "Auth Flow", "Body", None, None, None).unwrap();
-    let feat_file = feat.file_name().unwrap().to_str().unwrap().to_string();
+    let id = feat.0.clone();
 
     // feature has no branch yet
-    let f = get_feature(feat.clone()).unwrap();
+    let f = ship_module_project::get_feature_by_id(&p.ship_dir, &id).unwrap();
     assert!(
-        f.metadata.branch.is_none(),
+        f.feature.metadata.branch.is_none(),
         "branch should be unset before start"
     );
 
-    let out = p.cli_output(&["feature", "start", &feat_file]).unwrap();
+    let out = p.cli_output(&["feature", "start", &id]).unwrap();
     assert!(
         out.status.success(),
         "ship feature start failed:\n{}",
@@ -492,10 +505,10 @@ fn feature_start_creates_branch_and_generates_config() {
     );
 
     // branch written into frontmatter
-    let feat_path = runtime::find_feature_path(&p.ship_dir, &feat_file).unwrap();
-    let f = get_feature(feat_path).unwrap();
+    let id = feat.0.clone();
+    let f = ship_module_project::get_feature_by_id(&p.ship_dir, &id).unwrap();
     assert!(
-        f.metadata.branch.is_some(),
+        f.feature.metadata.branch.is_some(),
         "branch should be set after start"
     );
 
@@ -520,11 +533,11 @@ fn feature_switch_checks_out_branch_and_syncs_config() {
         Some("feature/auth"),
     )
     .unwrap();
-    let feat_file = feat.file_name().unwrap().to_str().unwrap().to_string();
+    let id = feat.0.clone();
     p.checkout_new("feature/auth").unwrap();
     p.checkout("main").unwrap();
 
-    let out = p.cli_output(&["feature", "switch", &feat_file]).unwrap();
+    let out = p.cli_output(&["feature", "switch", &id]).unwrap();
     assert!(out.status.success());
     p.assert_root_file("CLAUDE.md");
     p.assert_root_file_contains("CLAUDE.md", "Auth Flow");

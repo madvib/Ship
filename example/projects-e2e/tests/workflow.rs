@@ -57,10 +57,10 @@ fn vision_doc_lives_in_project_namespace() {
 fn core_loop_paths_resolve_correctly() {
     let p = TestProject::new().unwrap();
 
-    let release = runtime::create_release(p.ship_dir.clone(), "v0.1.0-alpha", "").unwrap();
+    let release = crate::helpers::create_release(p.ship_dir.clone(), "v0.1.0-alpha", "").unwrap();
     assert!(release.starts_with(releases_dir(&p.ship_dir)));
 
-    let feature = runtime::create_feature(
+    let feature = crate::helpers::create_feature(
         p.ship_dir.clone(),
         "Auth Redesign",
         "",
@@ -69,7 +69,7 @@ fn core_loop_paths_resolve_correctly() {
         None,
     )
     .unwrap();
-    assert!(feature.starts_with(features_dir(&p.ship_dir)));
+    assert!(feature.1.starts_with(features_dir(&p.ship_dir)));
 
     let spec = runtime::create_spec(p.ship_dir.clone(), "Auth Spec", "", "draft").unwrap();
     assert!(spec.starts_with(specs_dir(&p.ship_dir)));
@@ -144,7 +144,8 @@ fn gitignore_uses_namespace_paths() {
 /// Events track creates in both workflow/ and project/ namespaces.
 #[test]
 fn events_track_both_namespaces() {
-    use runtime::{create_feature, create_release, latest_event_seq, list_events_since};
+    use crate::helpers::{create_feature, create_release};
+    use runtime::{latest_event_seq, list_events_since};
 
     let p = TestProject::new().unwrap();
     let seq0 = latest_event_seq(&p.ship_dir).unwrap();

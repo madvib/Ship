@@ -4,7 +4,6 @@ pub mod catalog;
 pub mod config;
 pub mod demo;
 pub mod events;
-pub mod feature;
 pub mod fs_util;
 pub mod issue;
 pub mod log;
@@ -13,12 +12,10 @@ pub mod permissions;
 pub mod plugin;
 pub mod project;
 pub mod prompt;
-pub mod release;
 pub mod rule;
 pub mod skill;
 pub mod spec;
 pub mod state_db;
-pub mod vision;
 pub mod workspace;
 
 pub use agent_config::{AgentConfig, resolve_agent_config};
@@ -40,11 +37,6 @@ pub use events::{
     EVENTS_FILE_NAME, EventAction, EventEntity, EventRecord, append_event, ensure_event_log,
     event_log_path, ingest_external_events, latest_event_seq, list_events_since, read_events,
     sync_event_snapshot,
-};
-pub use feature::{
-    Feature, FeatureAgentConfig, FeatureEntry, FeatureMcpRef, FeatureMetadata, FeatureSkillRef,
-    FeatureStatus, create_feature, feature_done, feature_start, find_feature_path, get_feature,
-    get_feature_raw, list_features, update_feature,
 };
 pub use issue::{
     Issue, IssueEntry, IssueLink, IssueMetadata, IssuePriority, add_link, append_note,
@@ -70,10 +62,6 @@ pub use project::{
     set_active_project_global, unregister_project, write_template,
 };
 pub use prompt::{Prompt, create_prompt, delete_prompt, get_prompt, list_prompts, update_prompt};
-pub use release::{
-    Release, ReleaseEntry, ReleaseMetadata, ReleaseStatus, create_release, find_release_path,
-    get_release, get_release_raw, list_releases, update_release,
-};
 pub use rule::{Rule, create_rule, delete_rule, get_rule, list_rules, update_rule};
 pub use skill::{
     Skill, SkillSource, create_skill, create_user_skill, delete_skill, delete_user_skill,
@@ -88,7 +76,6 @@ pub use state_db::{
     DatabaseMigrationReport, ensure_global_database, ensure_project_database, get_branch_doc,
     get_managed_state_db, set_branch_doc, set_managed_state_db, upsert_workspace_db,
 };
-pub use vision::{Vision, get_vision, update_vision};
 pub use workspace::{Workspace, get_workspace, upsert_workspace};
 
 pub fn gen_nanoid() -> String {
@@ -398,173 +385,6 @@ mod tests {
         Ok(())
     }
 
-    // ── Release tests ───────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_create_release() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let path = create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
-        assert!(path.exists());
-        assert!(path.starts_with(project::upcoming_releases_dir(&project_dir)));
-        let content = fs::read_to_string(&path)?;
-        assert!(content.starts_with("+++\n"));
-        assert!(content.contains("version = \"v0.1.0-alpha\""));
-        assert!(content.contains("status = \"planned\""));
-        assert!(content.contains("supported = false"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_create_release_empty_version_rejected() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let result = create_release(project_dir, "", "");
-        assert!(result.is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_and_update_release() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let path = create_release(project_dir, "v0.2.0-alpha", "initial")?;
-        let initial = get_release(path.clone())?;
-        assert!(!initial.metadata.id.is_empty());
-        assert_eq!(initial.metadata.version, "v0.2.0-alpha");
-        update_release(path.clone(), "updated")?;
-        let updated = get_release(path)?;
-        assert_eq!(updated.body, "updated");
-        assert!(updated.metadata.updated >= initial.metadata.updated);
-        Ok(())
-    }
-
-    #[test]
-    fn test_list_releases() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
-        create_release(project_dir.clone(), "v0.2.0-alpha", "")?;
-        let releases = list_releases(project_dir)?;
-        assert_eq!(releases.len(), 2);
-        let versions: Vec<&str> = releases.iter().map(|r| r.version.as_str()).collect();
-        assert!(versions.contains(&"v0.1.0-alpha"));
-        assert!(versions.contains(&"v0.2.0-alpha"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_find_release_path_supports_upcoming_and_legacy_locations() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-
-        // New layout: upcoming/
-        let upcoming = create_release(project_dir.clone(), "v0.3.0-alpha", "")?;
-        let upcoming_name = upcoming.file_name().unwrap().to_string_lossy().to_string();
-        let resolved_upcoming = find_release_path(&project_dir, &upcoming_name)?;
-        assert_eq!(resolved_upcoming, upcoming);
-
-        // Legacy layout: top-level project/releases/
-        let legacy_path = project::releases_dir(&project_dir).join("v0-0-9-alpha.md");
-        fs::write(
-            &legacy_path,
-            "+++\nid = \"\"\nversion = \"v0.0.9-alpha\"\nstatus = \"shipped\"\ncreated = \"2026-01-01T00:00:00Z\"\nupdated = \"2026-01-01T00:00:00Z\"\nfeature_ids = []\nadr_ids = []\ntags = []\n+++\n\nlegacy\n",
-        )?;
-        let resolved_legacy = find_release_path(&project_dir, "v0-0-9-alpha.md")?;
-        assert_eq!(resolved_legacy, legacy_path);
-        Ok(())
-    }
-
-    #[test]
-    fn test_release_collision_gets_suffix() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let p1 = create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
-        let p2 = create_release(project_dir.clone(), "v0.1.0-alpha", "")?;
-        assert_ne!(p1, p2);
-        assert!(p1.exists());
-        assert!(p2.exists());
-        Ok(())
-    }
-
-    // ── Feature tests ───────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_create_feature() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let path = create_feature(
-            project_dir,
-            "Agent Config",
-            "",
-            Some("v0.1.0-alpha.md"),
-            Some("agent-config.md"),
-            None,
-        )?;
-        assert!(path.exists());
-        let feature = get_feature(path.clone())?;
-        assert_eq!(feature.metadata.title, "Agent Config");
-        assert!(path.to_string_lossy().contains("/planned/"));
-        assert_eq!(
-            feature.metadata.release_id,
-            Some("v0.1.0-alpha.md".to_string())
-        );
-        assert_eq!(
-            feature.metadata.spec_id,
-            Some("agent-config.md".to_string())
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_create_feature_empty_title_rejected() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let result = create_feature(project_dir, "", "", None, None, None);
-        assert!(result.is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_and_update_feature() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let path = create_feature(project_dir, "UI Agent Panel", "initial", None, None, None)?;
-        let initial = get_feature(path.clone())?;
-        assert!(!initial.metadata.id.is_empty());
-        update_feature(path.clone(), "updated")?;
-        let updated = get_feature(path)?;
-        assert_eq!(updated.body, "updated");
-        assert!(updated.metadata.updated >= initial.metadata.updated);
-        Ok(())
-    }
-
-    #[test]
-    fn test_list_features() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        create_feature(project_dir.clone(), "Feature One", "", None, None, None)?;
-        create_feature(project_dir.clone(), "Feature Two", "", None, None, None)?;
-        let features = list_features(project_dir, None)?;
-        assert_eq!(features.len(), 2);
-        let titles: Vec<&str> = features.iter().map(|f| f.title.as_str()).collect();
-        assert!(titles.contains(&"Feature One"));
-        assert!(titles.contains(&"Feature Two"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_feature_collision_gets_suffix() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let p1 = create_feature(project_dir.clone(), "Ship Agents", "", None, None, None)?;
-        let p2 = create_feature(project_dir.clone(), "Ship Agents!", "", None, None, None)?;
-        assert_ne!(p1, p2);
-        assert!(p1.exists());
-        assert!(p2.exists());
-        Ok(())
-    }
-
     // ── Config tests ────────────────────────────────────────────────────────────
 
     #[test]
@@ -817,15 +637,8 @@ mod tests {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
         let seq0 = latest_event_seq(&ship_path)?;
-        create_release(ship_path.clone(), "v0.1.0-alpha", "")?;
-        create_feature(
-            ship_path.clone(),
-            "Event Stream Feature",
-            "",
-            None,
-            None,
-            None,
-        )?;
+        let _path1 = create_issue(ship_path.clone(), "Event Stream Issue 1", "Desc", "backlog")?;
+        let _path2 = create_issue(ship_path.clone(), "Event Stream Issue 2", "Desc", "backlog")?;
         let events = list_events_since(&ship_path, seq0, None)?;
         assert!(events.len() >= 2);
         assert!(events.iter().all(|e| e.seq > seq0));
@@ -870,11 +683,7 @@ mod tests {
     fn test_init_demo_project_seeds_alpha_primitives() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let ship_path = init_core_demo(tmp.path().to_path_buf())?;
-        let releases = list_releases(ship_path.clone())?;
-        let features = list_features(ship_path.clone(), None)?;
         let specs = list_specs(ship_path)?;
-        assert!(!releases.is_empty());
-        assert!(!features.is_empty());
         assert!(!specs.is_empty()); // vision.md moved to project/ namespace
         Ok(())
     }

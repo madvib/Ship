@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "Jd7ztt92"
 title = "Native AI tool config locations for alpha — no generated/ dir or symlinks"
 date = "2026-02-28"

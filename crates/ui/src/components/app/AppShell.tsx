@@ -2,12 +2,11 @@ import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useUpdateChecker } from '@/lib/hooks/useUpdateChecker';
 import Sidebar from '@/components/app/Sidebar';
 import AgentModeControl from '@/features/agents/AgentModeControl';
+import { PageChromeProvider } from '@/components/app/PageFrame';
 import IssueDetail from '@/features/planning/IssueDetail';
 import NewIssueModal from '@/features/planning/NewIssueModal';
 import ProjectOnboarding from '@/features/planning/ProjectOnboarding';
 import SpecDetail from '@/features/planning/SpecDetail';
-import ReleaseDetail from '@/features/planning/ReleaseDetail';
-import FeatureDetail from '@/features/planning/FeatureDetail';
 import { SearchModal } from '@/components/app/SearchModal';
 import { Button } from '@/components/ui/button';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
@@ -19,6 +18,7 @@ import {
   AGENTS_RULES_ROUTE,
   AGENTS_ROUTE,
   AGENTS_SKILLS_ROUTE,
+  FEATURES_ROUTE,
   NOTES_ROUTE,
   ROUTE_LABELS,
   SETTINGS_ROUTE,
@@ -82,7 +82,7 @@ export default function App() {
     return (
       <main className="main-content">
         {workspace.error && (
-          <div className="mx-auto mt-6 w-full max-w-6xl rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <div className="mx-auto mt-3 w-full max-w-[min(86vw,1560px)] rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             {workspace.error}
           </div>
         )}
@@ -124,69 +124,73 @@ export default function App() {
         onNewProject={workspace.handleNewProject}
         onSelectProject={handleSelectProject}
         onOpenGlobalNotes={openGlobalNotes}
+        agentControl={
+          !workspace.noProject ? (
+            <AgentModeControl
+              modes={workspace.modes}
+              activeModeId={workspace.activeModeId}
+              aiProvider={workspace.aiProvider}
+              aiModel={workspace.aiModel}
+              switchingMode={workspace.switchingMode}
+              onSetMode={workspace.handleSetActiveMode}
+              onOpenAgents={() => navigateTo(AGENTS_PROVIDERS_ROUTE)}
+            />
+          ) : null
+        }
       />
 
       <main className="main-content">
         {workspace.error && (
-          <div className="mx-auto mt-4 flex w-full max-w-6xl items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <div className="mx-auto mt-2 flex w-full max-w-[min(86vw,1560px)] items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <span>{workspace.error}</span>
             <Button variant="ghost" size="icon-sm" onClick={() => workspace.setError(null)}>
               ✕
             </Button>
           </div>
         )}
-
-        {(!workspace.noProject || routePath === PROJECTS_ROUTE) && (
-          <div className="mx-auto mt-4 w-full max-w-6xl px-5 md:px-6">
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card/35 px-3 py-2">
-              <nav className="text-muted-foreground flex items-center gap-1 text-xs">
-                {routePath === PROJECTS_ROUTE ? (
-                  <span className="text-foreground">Projects</span>
-                ) : (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => navigateTo(PROJECTS_ROUTE)}
-                    >
-                      Projects
-                    </Button>
-                    <span>/</span>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => navigateTo(OVERVIEW_ROUTE)}
-                    >
-                      {workspace.activeProject?.name ?? 'Project'}
-                    </Button>
-                    {routePath !== OVERVIEW_ROUTE && (
-                      <>
-                        <span>/</span>
-                        <span className="text-foreground">{ROUTE_LABELS[routePath]}</span>
-                      </>
-                    )}
-                  </>
-                )}
-              </nav>
-
-              {!workspace.noProject && (
-                <AgentModeControl
-                  modes={workspace.modes}
-                  activeModeId={workspace.activeModeId}
-                  aiProvider={workspace.aiProvider}
-                  aiModel={workspace.aiModel}
-                  switchingMode={workspace.switchingMode}
-                  onSetMode={workspace.handleSetActiveMode}
-                  onOpenAgents={() => navigateTo(AGENTS_PROVIDERS_ROUTE)}
-                />
-              )}
-            </div>
-          </div>
-        )}
-
-        <Outlet />
+        <PageChromeProvider
+          value={
+            !workspace.noProject || routePath === PROJECTS_ROUTE
+              ? {
+                  breadcrumb: (
+                    <nav className="text-muted-foreground flex items-center gap-1 text-xs">
+                      {routePath === PROJECTS_ROUTE ? (
+                        <span className="text-foreground">Projects</span>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="h-6 px-1.5 text-xs"
+                            onClick={() => navigateTo(PROJECTS_ROUTE)}
+                          >
+                            Projects
+                          </Button>
+                          <span>/</span>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="h-6 px-1.5 text-xs"
+                            onClick={() => navigateTo(OVERVIEW_ROUTE)}
+                          >
+                            {workspace.activeProject?.name ?? 'Project'}
+                          </Button>
+                          {routePath !== OVERVIEW_ROUTE && (
+                            <>
+                              <span>/</span>
+                              <span className="text-foreground">{ROUTE_LABELS[routePath]}</span>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </nav>
+                  ),
+                }
+              : null
+          }
+        >
+          <Outlet />
+        </PageChromeProvider>
       </main>
 
       {workspace.selectedIssue && (
@@ -221,49 +225,11 @@ export default function App() {
           onClose={() => workspace.setSelectedSpec(null)}
           onSelectFeature={(f) => {
             workspace.setSelectedSpec(null);
-            workspace.handleSelectFeature(f);
+            void navigate({ to: FEATURES_ROUTE });
+            void workspace.handleSelectFeature(f);
           }}
           onSave={workspace.handleSaveSpec}
           onDelete={workspace.handleDeleteSpec}
-          mcpEnabled={workspace.mcpEnabled}
-        />
-      )}
-      {workspace.selectedRelease && (
-        <ReleaseDetail
-          release={workspace.selectedRelease}
-          features={workspace.features}
-          onClose={() => workspace.setSelectedRelease(null)}
-          onSelectFeature={(f) => {
-            workspace.setSelectedRelease(null);
-            workspace.handleSelectFeature(f);
-          }}
-          onSave={workspace.handleSaveRelease}
-          mcpEnabled={workspace.mcpEnabled}
-        />
-      )}
-      {workspace.selectedFeature && (
-        <FeatureDetail
-          feature={workspace.selectedFeature}
-          releaseSuggestions={workspace.releases.map((entry) => entry.file_name)}
-          specSuggestions={workspace.specs.map((entry) => entry.file_name)}
-          adrSuggestions={workspace.adrs.map((entry) => entry.file_name)}
-          tagSuggestions={workspace.tagSuggestions}
-          onClose={() => workspace.setSelectedFeature(null)}
-          onSelectRelease={(name) => {
-            const rel = workspace.releases.find((r) => r.file_name === name);
-            if (rel) {
-              workspace.setSelectedFeature(null);
-              workspace.handleSelectRelease(rel);
-            }
-          }}
-          onSelectSpec={(name) => {
-            const spec = workspace.specs.find((s) => s.file_name === name);
-            if (spec) {
-              workspace.setSelectedFeature(null);
-              workspace.handleSelectSpec(spec);
-            }
-          }}
-          onSave={workspace.handleSaveFeature}
           mcpEnabled={workspace.mcpEnabled}
         />
       )}

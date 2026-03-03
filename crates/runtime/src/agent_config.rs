@@ -1,5 +1,18 @@
 use crate::config::{McpServerConfig, get_config};
-use crate::feature::FeatureAgentConfig;
+#[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
+pub struct FeatureAgentConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_cost_per_session: Option<f64>,
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+}
+
 use crate::permissions::{Permissions, get_permissions};
 use crate::rule::{Rule, list_rules};
 use crate::skill::{Skill, list_effective_skills};
@@ -108,7 +121,7 @@ pub fn resolve_agent_config(
     // Feature filter: if feature specifies server IDs, retain only those.
     if let Some(fa) = feature_agent {
         if !fa.mcp_servers.is_empty() {
-            let ids: Vec<&str> = fa.mcp_servers.iter().map(|r| r.id.as_str()).collect();
+            let ids: Vec<&str> = fa.mcp_servers.iter().map(|r| r.as_str()).collect();
             mcp_servers.retain(|s| ids.contains(&s.id.as_str()));
         }
     }
@@ -117,7 +130,7 @@ pub fn resolve_agent_config(
     let all_skills = list_effective_skills(ship_dir)?;
     let skills = if let Some(fa) = feature_agent {
         if !fa.skills.is_empty() {
-            let ids: Vec<&str> = fa.skills.iter().map(|r| r.id.as_str()).collect();
+            let ids: Vec<&str> = fa.skills.iter().map(|r| r.as_str()).collect();
             all_skills
                 .into_iter()
                 .filter(|s| ids.contains(&s.id.as_str()))

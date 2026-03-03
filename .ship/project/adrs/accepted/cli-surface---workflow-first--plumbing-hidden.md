@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "uTyTs349"
 title = "CLI surface — workflow-first, plumbing hidden"
 date = "2026-03-01"

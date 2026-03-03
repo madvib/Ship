@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react';
+import { useState, type ComponentType, type ReactNode } from 'react';
 import {
   Bot,
   ChevronDown,
@@ -64,6 +64,7 @@ interface SidebarProps {
   onNewProject: () => void;
   onSelectProject: (project: Project) => void;
   onOpenGlobalNotes: () => void;
+  agentControl?: ReactNode;
 }
 
 type NavItem = {
@@ -118,6 +119,7 @@ export default function Sidebar({
   onNewProject,
   onSelectProject,
   onOpenGlobalNotes,
+  agentControl,
 }: SidebarProps) {
   const [projectOpen, setProjectOpen] = useState(true);
   const [workflowOpen, setWorkflowOpen] = useState(true);
@@ -255,7 +257,7 @@ export default function Sidebar({
         </DropdownMenu>
 
         {!collapsed && (
-          <div className="min-w-0 flex-1 ml-1">
+          <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-bold tracking-tight text-foreground/90">
               {activeProject?.name?.trim() || 'Shipwright'}
             </p>
@@ -274,6 +276,12 @@ export default function Sidebar({
           </Button>
         </div>
       </header>
+
+      {!collapsed && agentControl && (
+        <div className="w-full">
+          {agentControl}
+        </div>
+      )}
 
       <Separator className="w-full" />
 

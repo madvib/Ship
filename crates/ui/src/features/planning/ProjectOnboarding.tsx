@@ -157,7 +157,7 @@ export default function ProjectOnboarding({
         <div className="relative flex items-start justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className="bg-primary/10 border-primary/30 flex size-14 items-center justify-center rounded-xl border md:size-16">
-              <img src="/logo.svg" alt="Ship" className="size-11 object-contain md:size-12" />
+              <span className="text-primary text-lg font-black tracking-tight md:text-xl">SW</span>
             </div>
             <div className="space-y-2">
               <p className="text-muted-foreground text-xs font-medium uppercase tracking-widest">Shipwright</p>

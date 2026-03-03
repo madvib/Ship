@@ -171,7 +171,6 @@ export default function ProjectOverview({
     <PageFrame>
       <PageHeader
         title={<span title={project.path}>{project.name}</span>}
-        description="Project overview and workflow status."
         actions={
           <Button variant="outline" title={project.path} onClick={() => onNavigate(PROJECTS_ROUTE)}>
             <Folders className="size-4" />

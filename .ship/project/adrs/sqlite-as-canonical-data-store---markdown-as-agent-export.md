@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "B9H6aSsQ"
 title = "SQLite as canonical data store — markdown as agent export"
 date = "2026-03-02"

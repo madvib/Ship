@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "eZKy7Tym"
 title = "Dynamic Workspace Agent Context"
 created = "2026-02-28T15:56:07Z"

@@ -436,3 +436,25 @@ fn ship_bin_path() -> String {
     }
     dir.join("ship").to_string_lossy().to_string()
 }
+
+// ── Migration Primitives Shims ───────────────────────────────────────────────
+// These shims preserve the old `runtime` interface (returning PathBuf) for tests
+// without needing to rewrite dozens of existing E2E assertions.
+
+pub fn create_feature(
+    ship_dir: PathBuf,
+    title: &str,
+    body: &str,
+    release_id: Option<&str>,
+    spec_id: Option<&str>,
+    branch: Option<&str>,
+) -> Result<(String, PathBuf)> {
+    let entry =
+        ship_module_project::create_feature(&ship_dir, title, body, release_id, spec_id, branch)?;
+    Ok((entry.id, PathBuf::from(entry.path)))
+}
+
+pub fn create_release(ship_dir: PathBuf, version: &str, notes: &str) -> Result<PathBuf> {
+    let entry = ship_module_project::create_release(&ship_dir, version, notes)?;
+    Ok(PathBuf::from(entry.path))
+}

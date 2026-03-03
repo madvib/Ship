@@ -17,7 +17,7 @@ import {
     CommandItem,
     CommandList,
 } from '@/components/ui/command';
-import { ADRS_ROUTE, NOTES_ROUTE } from '@/lib/constants/routes';
+import { ADRS_ROUTE, FEATURES_ROUTE, NOTES_ROUTE, RELEASES_ROUTE } from '@/lib/constants/routes';
 
 export function SearchModal() {
     const [open, setOpen] = React.useState(false);
@@ -30,12 +30,12 @@ export function SearchModal() {
         issues,
         releases,
         handleSelectNote,
+        handleSelectFeature,
+        handleSelectRelease,
         setNotesScope,
         setSelectedSpec,
-        setSelectedFeature,
         setSelectedAdr,
         setSelectedIssue,
-        setSelectedRelease,
     } = useWorkspace();
 
     React.useEffect(() => {
@@ -88,7 +88,8 @@ export function SearchModal() {
                                 key={`feature-${feature.file_name}`}
                                 onSelect={() =>
                                     runCommand(() => {
-                                        setSelectedFeature(feature as any);
+                                        void navigate({ to: FEATURES_ROUTE });
+                                        void handleSelectFeature(feature);
                                     })
                                 }
                             >
@@ -161,7 +162,8 @@ export function SearchModal() {
                                 key={`release-${release.file_name}`}
                                 onSelect={() =>
                                     runCommand(() => {
-                                        setSelectedRelease(release as any);
+                                        void navigate({ to: RELEASES_ROUTE });
+                                        void handleSelectRelease(release);
                                     })
                                 }
                             >

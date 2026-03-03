@@ -10,8 +10,9 @@
 /// Run ignored: cargo test --test git_workflow -p e2e -- --include-ignored
 mod helpers;
 
+use crate::helpers::create_feature;
 use helpers::{EXISTING_JS_PROJECT, EXISTING_RUST_PROJECT, TestProject};
-use runtime::{create_feature, create_skill};
+use runtime::create_skill;
 use ship_module_git::{
     GENERATED_GITIGNORE_ENTRIES, install_hooks, on_post_checkout, write_root_gitignore,
 };

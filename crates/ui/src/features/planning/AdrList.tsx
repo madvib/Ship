@@ -351,7 +351,6 @@ export default function AdrList({
     <PageFrame width="wide">
       <PageHeader
         title="Architecture Decision Suite"
-        description="Read-first decision intelligence with full-screen create and edit modes."
         actions={
           <div className="flex items-center gap-2">
             <TemplateEditorButton kind="adr" />
@@ -376,42 +375,34 @@ export default function AdrList({
           }
         />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {showReadPane && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Card size="sm">
-                <CardHeader className="pb-2">
-                  <CardDescription>Total ADRs</CardDescription>
-                  <CardTitle className="text-xl">{adrs.length}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card size="sm">
-                <CardHeader className="pb-2">
-                  <CardDescription>Accepted</CardDescription>
-                  <CardTitle className="text-xl text-status-green">{stats.accepted}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card size="sm">
-                <CardHeader className="pb-2">
-                  <CardDescription>In Proposal</CardDescription>
-                  <CardTitle className="text-xl text-status-blue">{stats.proposed}</CardTitle>
-                </CardHeader>
-              </Card>
-              <Card size="sm">
-                <CardHeader className="pb-2">
-                  <CardDescription>Coverage</CardDescription>
-                  <CardTitle className="text-sm font-semibold">
-                    {stats.linkedToSpec} specs · {stats.withLineage} lineage links
-                  </CardTitle>
-                </CardHeader>
-              </Card>
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/45 px-2.5 py-2">
+              <Badge variant="outline" className="h-6 px-2 text-[10px] uppercase tracking-wider">
+                Decision Health
+              </Badge>
+              <Badge variant="secondary" className="h-6 px-2.5 text-xs font-medium">
+                {adrs.length} total
+              </Badge>
+              <Badge variant="secondary" className="h-6 px-2.5 text-xs font-medium text-status-green">
+                {stats.accepted} accepted
+              </Badge>
+              <Badge variant="secondary" className="h-6 px-2.5 text-xs font-medium text-status-blue">
+                {stats.proposed} proposed
+              </Badge>
+              <Badge variant="secondary" className="h-6 px-2.5 text-xs font-medium">
+                {stats.linkedToSpec} linked specs
+              </Badge>
+              <Badge variant="secondary" className="h-6 px-2.5 text-xs font-medium">
+                {stats.withLineage} lineage links
+              </Badge>
             </div>
           )}
 
           <div
             className={cn(
               'grid min-h-0 gap-4',
-              showReadPane && 'lg:grid-cols-[360px_minmax(0,1fr)] lg:h-[calc(100vh-19rem)]'
+              showReadPane && 'lg:grid-cols-[360px_minmax(0,1fr)] lg:h-[calc(100vh-15.5rem)]'
             )}
           >
             {showReadPane && (

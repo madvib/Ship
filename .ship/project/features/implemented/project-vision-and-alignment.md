@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "PapezM4g"
 title = "Project Vision and Alignment"
 created = "2026-02-28T15:56:07Z"

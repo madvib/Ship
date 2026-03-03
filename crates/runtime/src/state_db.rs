@@ -111,12 +111,65 @@ CREATE TABLE IF NOT EXISTS note (
 CREATE INDEX IF NOT EXISTS note_scope_idx ON note(scope);
 "#;
 
+const PROJECT_SCHEMA_FEATURES_RELEASES: &str = r#"
+CREATE TABLE IF NOT EXISTS feature (
+  id              TEXT PRIMARY KEY,
+  title           TEXT NOT NULL,
+  description     TEXT,
+  status          TEXT NOT NULL DEFAULT 'planned',
+  release_id      TEXT,
+  spec_id         TEXT,
+  branch          TEXT,
+  agent_json      TEXT,
+  tags_json       TEXT NOT NULL DEFAULT '[]',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS feature_status_idx ON feature(status);
+CREATE INDEX IF NOT EXISTS feature_release_idx ON feature(release_id);
+
+CREATE TABLE IF NOT EXISTS feature_todo (
+  id              TEXT PRIMARY KEY,
+  feature_id      TEXT NOT NULL REFERENCES feature(id) ON DELETE CASCADE,
+  text            TEXT NOT NULL,
+  completed       INTEGER NOT NULL DEFAULT 0,
+  ord             INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS feature_criterion (
+  id              TEXT PRIMARY KEY,
+  feature_id      TEXT NOT NULL REFERENCES feature(id) ON DELETE CASCADE,
+  text            TEXT NOT NULL,
+  met             INTEGER NOT NULL DEFAULT 0,
+  ord             INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS release (
+  id              TEXT PRIMARY KEY,
+  version         TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'planned',
+  target_date     TEXT,
+  supported       INTEGER,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS release_status_idx ON release(status);
+
+CREATE TABLE IF NOT EXISTS release_breaking_change (
+  id              TEXT PRIMARY KEY,
+  release_id      TEXT NOT NULL REFERENCES release(id) ON DELETE CASCADE,
+  text            TEXT NOT NULL,
+  ord             INTEGER NOT NULL DEFAULT 0
+);
+"#;
+
 const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_project_schema", PROJECT_SCHEMA_V1),
     ("0002_operational_state", PROJECT_SCHEMA_OPERATIONAL),
     ("0003_workspace", PROJECT_SCHEMA_WORKSPACE),
     ("0004_adrs", PROJECT_SCHEMA_ADRS),
     ("0005_notes", PROJECT_SCHEMA_NOTES),
+    ("0006_features_releases", PROJECT_SCHEMA_FEATURES_RELEASES),
 ];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_global_schema", GLOBAL_SCHEMA_V1),

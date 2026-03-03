@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "xMHxyPGF"
 title = "TOML as universal config and frontmatter format"
 date = "2026-02-28"

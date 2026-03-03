@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "ydmqCLwp"
 title = "Workspace model — types and lifecycle"
 status = "planned"

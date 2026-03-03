@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, anyhow};
 use runtime::{
-    Feature, IssueEntry, Rule, Skill, agent_config::resolve_agent_config, agent_export,
-    get_effective_config, get_feature, get_spec, list_issues_full,
+    IssueEntry, Rule, Skill, agent_config::resolve_agent_config, agent_export,
+    get_effective_config, get_spec, list_issues_full,
 };
+use ship_module_project::{Feature, FeatureEntry, list_features};
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -42,7 +43,6 @@ pub const GENERATED_GITIGNORE_ENTRIES: &[&str] = &[
     ".gemini/",
     ".codex/",
 ];
-
 
 pub fn install_hooks(git_dir: &Path) -> Result<()> {
     if !git_dir.exists() {
@@ -121,15 +121,15 @@ pub fn write_root_gitignore(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn find_feature_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<PathBuf>> {
+pub fn find_feature_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<FeatureEntry>> {
     if branch.trim().is_empty() {
         return Ok(None);
     }
 
-    let features = runtime::list_features(ship_dir.to_path_buf(), None)?;
+    let features = list_features(ship_dir)?;
     for feat in features {
-        if feat.branch.as_deref() == Some(branch) {
-            return Ok(Some(PathBuf::from(feat.path)));
+        if feat.feature.metadata.branch.as_deref() == Some(branch) {
+            return Ok(Some(feat));
         }
     }
 
@@ -138,7 +138,7 @@ pub fn find_feature_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<P
 
 /// Which document is associated with the checked-out branch.
 pub enum BranchDocument {
-    Feature(PathBuf),
+    Feature(FeatureEntry),
     Spec(PathBuf),
 }
 
@@ -174,13 +174,11 @@ fn find_spec_for_branch(ship_dir: &Path, branch: &str) -> Result<Option<PathBuf>
     Ok(None)
 }
 
-fn find_feature_by_uuid(ship_dir: &Path, uuid: &str) -> Option<PathBuf> {
-    if let Ok(features) = runtime::list_features(ship_dir.to_path_buf(), None) {
+fn find_feature_by_uuid(ship_dir: &Path, uuid: &str) -> Option<FeatureEntry> {
+    if let Ok(features) = list_features(ship_dir) {
         for feat in features {
-            if let Ok(f) = get_feature(PathBuf::from(&feat.path)) {
-                if f.metadata.id == uuid {
-                    return Some(PathBuf::from(feat.path));
-                }
+            if feat.feature.metadata.id == uuid {
+                return Some(feat);
             }
         }
     }
@@ -254,10 +252,9 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
     open_issues.retain(|issue| issue.status != "done");
 
     match doc {
-        BranchDocument::Feature(feature_path) => {
-            let feature = get_feature(feature_path)?;
-            let agent_cfg =
-                resolve_agent_config(ship_dir, feature.metadata.agent.as_ref())?;
+        BranchDocument::Feature(entry) => {
+            let feature = entry.feature;
+            let agent_cfg = resolve_agent_config(ship_dir, feature.metadata.agent.as_ref())?;
 
             let mcp_server_ids: Vec<String> =
                 agent_cfg.mcp_servers.iter().map(|s| s.id.clone()).collect();
@@ -269,12 +266,8 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
                 .filter(|a| !a.mcp_servers.is_empty())
                 .map(|_| mcp_server_ids.as_slice());
 
-            let context = build_feature_context(
-                &feature,
-                &open_issues,
-                &agent_cfg.skills,
-                &agent_cfg.rules,
-            );
+            let context =
+                build_feature_context(&feature, &open_issues, &agent_cfg.skills, &agent_cfg.rules);
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
@@ -298,12 +291,8 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
             let spec = get_spec(spec_path)?;
             let agent_cfg = resolve_agent_config(ship_dir, None)?;
 
-            let context = build_spec_context(
-                &spec,
-                &open_issues,
-                &agent_cfg.skills,
-                &agent_cfg.rules,
-            );
+            let context =
+                build_spec_context(&spec, &open_issues, &agent_cfg.skills, &agent_cfg.rules);
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
@@ -347,7 +336,11 @@ pub fn build_feature_context(
     append_rules_section(&mut c, rules);
 
     let branch = feature.metadata.branch.as_deref().unwrap_or("unassigned");
-    let fid = if feature.metadata.id.is_empty() { "unknown" } else { &feature.metadata.id };
+    let fid = if feature.metadata.id.is_empty() {
+        "unknown"
+    } else {
+        &feature.metadata.id
+    };
     c.push_str(&format!("---\n_Branch: {} | Feature: {}_\n", branch, fid));
     c
 }
@@ -376,7 +369,11 @@ pub fn build_spec_context(
     append_rules_section(&mut c, rules);
 
     let branch = spec.metadata.branch.as_deref().unwrap_or("unassigned");
-    let sid = if spec.metadata.id.is_empty() { "unknown" } else { &spec.metadata.id };
+    let sid = if spec.metadata.id.is_empty() {
+        "unknown"
+    } else {
+        &spec.metadata.id
+    };
     c.push_str(&format!("---\n_Branch: {} | Spec: {}_\n", branch, sid));
     c
 }
@@ -387,7 +384,11 @@ fn append_issues_section(c: &mut String, open_issues: &[IssueEntry]) {
         c.push_str("_No open issues._\n\n");
     } else {
         let mut ordered: Vec<&IssueEntry> = open_issues.iter().collect();
-        ordered.sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.file_name.cmp(&b.file_name)));
+        ordered.sort_by(|a, b| {
+            a.status
+                .cmp(&b.status)
+                .then_with(|| a.file_name.cmp(&b.file_name))
+        });
         for issue in ordered {
             c.push_str(&format!(
                 "- [ ] {} (`{}/{}`)\n",
@@ -418,9 +419,7 @@ fn append_rules_section(c: &mut String, rules: &[Rule]) {
     c.push_str("## Rules\n\n");
     for rule in rules {
         // Derive a display name from the filename (strip .md, replace dashes with spaces)
-        let name = rule.file_name
-            .trim_end_matches(".md")
-            .replace('-', " ");
+        let name = rule.file_name.trim_end_matches(".md").replace('-', " ");
         c.push_str(&format!("### {}\n\n", name));
         c.push_str(rule.content.trim());
         c.push_str("\n\n");
@@ -438,7 +437,6 @@ pub fn generate_claude_md(
     let content = build_feature_context(feature, open_issues, skills, rules);
     agent_export::write_context(project_root, "claude", &content)
 }
-
 
 fn ensure_required_mcp_servers(project_root: &Path, required_ids: &[String]) -> Result<()> {
     if required_ids.is_empty() {
@@ -467,7 +465,8 @@ fn ensure_required_mcp_servers(project_root: &Path, required_ids: &[String]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runtime::{create_feature, get_feature, init_project};
+    use runtime::init_project;
+    use ship_module_project::create_feature;
     use tempfile::tempdir;
 
     #[test]
@@ -559,17 +558,10 @@ mod tests {
     fn find_feature_for_branch_returns_matching_feature() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = init_project(tmp.path().to_path_buf())?;
-        let feature_path = create_feature(
-            ship_dir.clone(),
-            "Auth",
-            "body",
-            None,
-            None,
-            Some("feature/auth"),
-        )?;
+        let entry = create_feature(&ship_dir, "Auth", "body", None, None, Some("feature/auth"))?;
 
         let found = find_feature_for_branch(&ship_dir, "feature/auth")?;
-        assert_eq!(found, Some(feature_path));
+        assert_eq!(found.map(|f| f.id), Some(entry.id));
         Ok(())
     }
 
@@ -577,15 +569,15 @@ mod tests {
     fn generate_claude_md_writes_expected_sections() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = init_project(tmp.path().to_path_buf())?;
-        let feature_path = create_feature(
-            ship_dir.clone(),
+        let entry = create_feature(
+            &ship_dir,
             "Feature Title",
             "Feature body",
             None,
             None,
             Some("feature/title"),
         )?;
-        let feature = get_feature(feature_path)?;
+        let feature = entry.feature;
 
         generate_claude_md(tmp.path(), &feature, &[], &[], &[])?;
         let content = fs::read_to_string(tmp.path().join("CLAUDE.md"))?;

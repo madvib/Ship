@@ -4180,6 +4180,7 @@ dependencies = [
  "anyhow",
  "runtime",
  "serde_json",
+ "ship-module-project",
  "tempfile",
 ]
 

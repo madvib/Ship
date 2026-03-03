@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "X4RTGz6L"
 title = "Per-provider agent config export architecture"
 date = "2026-03-01"

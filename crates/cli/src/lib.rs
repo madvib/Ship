@@ -1,25 +1,25 @@
+#![allow(dead_code)]
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use runtime::{
-    FeatureStatus, McpServerConfig, McpServerType, add_mcp_server, add_mode, add_status,
-    autodetect_providers, backfill_issue_ids, create_feature, create_issue, create_release,
-    create_skill, create_spec, create_user_skill, delete_skill, delete_user_skill,
-    disable_provider, enable_provider, feature_done, feature_start, find_release_path,
-    get_active_mode, get_config, get_effective_skill, get_feature, get_feature_raw, get_git_config,
-    get_global_dir, get_issue, get_project_dir, get_project_statuses, get_release_raw, get_skill,
-    get_spec_raw, get_user_skill, ingest_external_events, init_project, is_category_committed,
-    list_effective_skills, list_events_since, list_features, list_issues, list_mcp_servers,
-    list_models, list_providers, list_releases, list_skills, list_specs, list_user_skills,
+    McpServerConfig, McpServerType, add_mcp_server, add_mode, add_status, autodetect_providers,
+    backfill_issue_ids, create_issue, create_skill, create_spec, create_user_skill, delete_skill,
+    delete_user_skill, disable_provider, enable_provider, get_active_mode, get_config,
+    get_effective_skill, get_git_config, get_global_dir, get_issue, get_project_dir,
+    get_project_statuses, get_skill, get_spec_raw, get_user_skill, ingest_external_events,
+    init_project, is_category_committed, list_effective_skills, list_events_since, list_issues,
+    list_mcp_servers, list_models, list_providers, list_skills, list_specs, list_user_skills,
     log_action, migrate_global_state, migrate_json_config_file, migrate_project_state,
     migrate_yaml_issues, move_issue, remove_mcp_server, remove_mode, remove_status,
-    set_active_mode, set_category_committed, update_feature, update_release, update_skill,
-    update_user_skill,
+    set_active_mode, set_category_committed, update_skill, update_user_skill,
 };
 use ship_module_git::{install_hooks, on_post_checkout, write_root_gitignore};
 use ship_module_project::{
-    ADR, AdrStatus, NoteScope, create_adr, create_note, find_adr_path, get_note_by_id,
-    import_adrs_from_files, import_notes_from_files, init_demo_project, list_adrs, list_notes,
-    move_adr, update_note_content,
+    ADR, AdrStatus, FeatureStatus, NoteScope, create_adr, create_feature, create_note,
+    create_release, feature_done, feature_start, find_adr_path, get_feature_by_id, get_note_by_id,
+    get_release_by_id, import_adrs_from_files, import_features_from_files, import_notes_from_files,
+    import_releases_from_files, init_demo_project, list_adrs, list_features, list_notes,
+    list_releases, move_adr, update_feature, update_note_content, update_release,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -466,9 +466,13 @@ pub enum ReleaseCommands {
     /// List release documents
     List,
     /// Print a release document's markdown content
-    Get { file_name: String },
+    Get {
+        /// Release version or filename
+        file_name: String,
+    },
     /// Replace release markdown content
     Update {
+        /// Release version or filename
         file_name: String,
         /// Full replacement content
         #[arg(short, long)]
@@ -484,12 +488,12 @@ pub enum FeatureCommands {
         /// Optional initial content (defaults to scaffold)
         #[arg(short, long)]
         content: Option<String>,
-        /// Link this feature to a release filename
+        /// Link this feature to a release ID
         #[arg(long)]
-        release: Option<String>,
-        /// Link this feature to a spec filename
+        release_id: Option<String>,
+        /// Link this feature to a spec ID
         #[arg(long)]
-        spec: Option<String>,
+        spec_id: Option<String>,
         /// Link this feature to a git branch name
         #[arg(long)]
         branch: Option<String>,
@@ -501,26 +505,31 @@ pub enum FeatureCommands {
         status: Option<String>,
     },
     /// Print a feature document's markdown content
-    Get { file_name: String },
+    Get {
+        /// Feature ID (e.g. my-feature)
+        id: String,
+    },
     /// Replace feature markdown content
     Update {
-        file_name: String,
+        /// Feature ID
+        id: String,
         /// Full replacement content
         #[arg(short, long)]
         content: String,
     },
-    /// Mark a feature as in-progress and link it to a branch
+    /// Mark a feature as in-progress
     Start {
-        file_name: String,
-        /// Git branch name to link (creates the branch if absent).
-        /// Defaults to `feature/<file-name-without-.md>` when omitted.
-        #[arg(long)]
+        /// Feature ID
+        id: String,
+        /// Branch name to create/checkout (defaults to feature/{id})
+        #[arg(short, long)]
         branch: Option<String>,
     },
-    /// Check out the branch linked to a feature and regenerate agent config
-    Switch { file_name: String },
     /// Mark a feature as implemented (done)
-    Done { file_name: String },
+    Done {
+        /// Feature ID
+        id: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -907,11 +916,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
         }
         Some(Commands::Release { action }) => {
             let project_dir = get_project_dir_cli()?;
+            ensure_imported(&project_dir)?;
             match action {
                 ReleaseCommands::Create { version, content } => {
                     let body = content.unwrap_or_default();
-                    let path = create_release(project_dir.clone(), &version, &body)?;
-                    println!("Release created: {}", path.display());
+                    let entry = create_release(&project_dir, &version, &body)?;
+                    println!("Release created: {}", entry.path);
                     log_action(
                         &project_dir,
                         "release create",
@@ -919,8 +929,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     )?;
                 }
                 ReleaseCommands::List => {
-                    let mut releases = list_releases(project_dir)?;
-                    releases.sort_by(|a, b| b.updated.cmp(&a.updated));
+                    let releases = list_releases(&project_dir)?;
                     if releases.is_empty() {
                         println!("No releases found.");
                     } else {
@@ -933,13 +942,18 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     }
                 }
                 ReleaseCommands::Get { file_name } => {
-                    let path = find_release_path(&project_dir, &file_name)?;
-                    let content = get_release_raw(path)?;
-                    println!("{}", content);
+                    let version = file_name.trim_end_matches(".md");
+                    if let Ok(entry) = get_release_by_id(&project_dir, version) {
+                        println!("{}", entry.release.to_markdown()?);
+                    } else {
+                        println!("Release not found: {}", file_name);
+                    }
                 }
                 ReleaseCommands::Update { file_name, content } => {
-                    let path = find_release_path(&project_dir, &file_name)?;
-                    update_release(path, &content)?;
+                    let version = file_name.trim_end_matches(".md");
+                    let mut entry = get_release_by_id(&project_dir, version)?;
+                    entry.release.body = content;
+                    update_release(&project_dir, version, entry.release)?;
                     println!("Updated release: {}", file_name);
                     log_action(
                         &project_dir,
@@ -951,133 +965,118 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
         }
         Some(Commands::Feature { action }) => {
             let project_dir = get_project_dir_cli()?;
+            ensure_imported(&project_dir)?;
             match action {
                 FeatureCommands::Create {
                     title,
                     content,
-                    release,
-                    spec,
+                    release_id,
+                    spec_id,
                     branch,
                 } => {
                     let body = content.unwrap_or_default();
-                    let path = create_feature(
-                        project_dir.clone(),
+                    let entry = create_feature(
+                        &project_dir,
                         &title,
                         &body,
-                        release.as_deref(),
-                        spec.as_deref(),
+                        release_id.as_deref(),
+                        spec_id.as_deref(),
                         branch.as_deref(),
                     )?;
-                    println!("Feature created: {}", path.display());
+                    println!("Feature created: {}", entry.path);
                     log_action(
                         &project_dir,
                         "feature create",
-                        &format!("Created feature: {}", title),
+                        &format!("Created feature: {} ({})", title, entry.id),
                     )?;
                 }
                 FeatureCommands::List { status } => {
-                    let status_filter = match status.as_deref() {
-                        Some("planned") => Some(FeatureStatus::Planned),
-                        Some("in-progress") => Some(FeatureStatus::InProgress),
-                        Some("implemented") => Some(FeatureStatus::Implemented),
-                        Some("deprecated") => Some(FeatureStatus::Deprecated),
-                        Some(other) => anyhow::bail!(
-                            "Unknown status: {}. Use: planned, in-progress, implemented, deprecated",
-                            other
-                        ),
-                        None => None,
+                    let features = list_features(&project_dir)?;
+                    let filtered: Vec<_> = if let Some(s) = status {
+                        let target_status = s.parse::<FeatureStatus>().unwrap_or_default();
+                        features
+                            .into_iter()
+                            .filter(|f| f.status == target_status)
+                            .collect()
+                    } else {
+                        features
                     };
-                    let mut features = list_features(project_dir, status_filter)?;
-                    features.sort_by(|a, b| b.updated.cmp(&a.updated));
-                    if features.is_empty() {
+
+                    if filtered.is_empty() {
                         println!("No features found.");
                     } else {
-                        for feature in features {
-                            let release = feature.release_id.unwrap_or_else(|| "unassigned".into());
+                        for entry in filtered {
                             println!(
-                                "[{}] {} ({}) release={}",
-                                feature.status, feature.title, feature.file_name, release
+                                "[{}] {} ({}) id={}",
+                                entry.status,
+                                entry.feature.metadata.title,
+                                entry.file_name,
+                                entry.id
                             );
                         }
                     }
                 }
-                FeatureCommands::Get { file_name } => {
-                    let path = runtime::find_feature_path(&project_dir, &file_name)?;
-                    let content = get_feature_raw(path)?;
-                    println!("{}", content);
+                FeatureCommands::Get { id } => {
+                    let entry = get_feature_by_id(&project_dir, &id)?;
+                    println!("{}", entry.feature.to_markdown()?);
                 }
-                FeatureCommands::Update { file_name, content } => {
-                    let path = runtime::find_feature_path(&project_dir, &file_name)?;
-                    update_feature(path, &content)?;
-                    println!("Updated feature: {}", file_name);
-                    log_action(
-                        &project_dir,
-                        "feature update",
-                        &format!("Updated feature: {}", file_name),
-                    )?;
+                FeatureCommands::Update { id, content } => {
+                    let mut entry = get_feature_by_id(&project_dir, &id)?;
+                    entry.feature.body = content;
+                    update_feature(&project_dir, &id, entry.feature)?;
+                    println!("Updated feature: {}", id);
                 }
-                FeatureCommands::Start { file_name, branch } => {
-                    // Derive branch name from file name when not explicitly provided.
-                    let branch = branch.unwrap_or_else(|| {
-                        let base = file_name.trim_end_matches(".md");
+                FeatureCommands::Start { id, branch } => {
+                    let mut entry = get_feature_by_id(&project_dir, &id)?;
+                    let branch_name = branch.unwrap_or_else(|| {
+                        let base =
+                            runtime::project::sanitize_file_name(&entry.feature.metadata.title);
                         format!("feature/{}", base)
                     });
+
                     // Create the branch if it doesn't exist
-                    let branch_exists = ProcessCommand::new("git")
-                        .args(["rev-parse", "--verify", &branch])
+                    let branch_exists = std::process::Command::new("git")
+                        .args(["rev-parse", "--verify", &branch_name])
+                        .current_dir(&project_dir)
                         .output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
+
                     if !branch_exists {
-                        let result = ProcessCommand::new("git")
-                            .args(["checkout", "-b", &branch])
+                        let result = std::process::Command::new("git")
+                            .args(["checkout", "-b", &branch_name])
+                            .current_dir(&project_dir)
                             .status()?;
                         if !result.success() {
-                            anyhow::bail!("Failed to create branch: {}", branch);
+                            anyhow::bail!("Failed to create branch: {}", branch_name);
+                        }
+                    } else {
+                        let result = std::process::Command::new("git")
+                            .args(["checkout", &branch_name])
+                            .current_dir(&project_dir)
+                            .status()?;
+                        if !result.success() {
+                            anyhow::bail!("Failed to checkout branch: {}", branch_name);
                         }
                     }
-                    feature_start(project_dir.clone(), &file_name, &branch)?;
-                    // Generate agent config for the new branch
-                    let project_root = project_dir
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| project_dir.clone());
-                    let _ = on_post_checkout(&project_dir, &branch, &project_root);
-                    println!("Feature started: {} on branch {}", file_name, branch);
+
+                    entry.feature.metadata.branch = Some(branch_name);
+                    update_feature(&project_dir, &id, entry.feature)?;
+                    feature_start(&project_dir, &id)?;
+                    println!("Feature started: {}", id);
                     log_action(
                         &project_dir,
                         "feature start",
-                        &format!("Started feature: {} branch={}", file_name, branch),
+                        &format!("Started feature: {}", id),
                     )?;
                 }
-                FeatureCommands::Switch { file_name } => {
-                    let path = runtime::find_feature_path(&project_dir, &file_name)?;
-                    let feature = get_feature(path)?;
-                    let branch = feature.metadata.branch.ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Feature has no linked branch — run 'ship feature start' first"
-                        )
-                    })?;
-                    let result = ProcessCommand::new("git")
-                        .args(["checkout", &branch])
-                        .status()?;
-                    if !result.success() {
-                        anyhow::bail!("Failed to checkout branch: {}", branch);
-                    }
-                    let project_root = project_dir
-                        .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| project_dir.clone());
-                    let _ = on_post_checkout(&project_dir, &branch, &project_root);
-                    println!("Switched to feature: {} on branch {}", file_name, branch);
-                }
-                FeatureCommands::Done { file_name } => {
-                    feature_done(project_dir.clone(), &file_name)?;
-                    println!("Feature done: {}", file_name);
+                FeatureCommands::Done { id } => {
+                    feature_done(&project_dir, &id)?;
+                    println!("Feature marked as implemented: {}", id);
                     log_action(
                         &project_dir,
                         "feature done",
-                        &format!("Marked feature implemented: {}", file_name),
+                        &format!("Completed feature: {}", id),
                     )?;
                 }
             }
@@ -1717,6 +1716,16 @@ fn ensure_imported(project_dir: &Path) -> Result<()> {
                 "[ship] Imported {} global notes from files to SQLite",
                 count
             );
+        }
+    }
+    if let Ok(count) = import_features_from_files(project_dir) {
+        if count > 0 {
+            println!("[ship] Imported {} features from files to SQLite", count);
+        }
+    }
+    if let Ok(count) = import_releases_from_files(project_dir) {
+        if count > 0 {
+            println!("[ship] Imported {} releases from files to SQLite", count);
         }
     }
     Ok(())

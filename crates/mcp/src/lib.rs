@@ -15,21 +15,22 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 use runtime::{
-    add_status, autodetect_providers, create_feature, create_issue, create_release, create_skill,
-    create_spec, create_user_skill, delete_issue, delete_skill, delete_user_skill,
-    disable_provider, enable_provider, find_release_path, get_active_project_global, get_config,
-    get_effective_skill, get_feature_raw, get_issue, get_project_dir, get_project_name,
-    get_project_statuses, get_release_raw, get_spec_raw, list_effective_skills, list_events_since,
-    list_features, list_issues_full, list_models, list_providers, list_registered_projects,
-    list_releases, list_specs, log_action, log_action_by, move_issue, read_log, remove_status,
-    set_active_project_global, set_category_committed, update_feature, update_release,
-    update_skill, update_spec, update_user_skill,
+    add_status, autodetect_providers, create_issue, create_skill, create_spec, create_user_skill,
+    delete_issue, delete_skill, delete_user_skill, disable_provider, enable_provider,
+    get_active_project_global, get_config, get_effective_skill, get_issue, get_project_dir,
+    get_project_name, get_project_statuses, list_effective_skills, list_events_since,
+    list_issues_full, list_models, list_providers, list_registered_projects, list_specs,
+    log_action, log_action_by, move_issue, read_log, remove_status, set_active_project_global,
+    set_category_committed, update_skill, update_spec, update_user_skill,
 };
 use serde::Deserialize;
 use ship_module_git::{install_hooks, on_post_checkout};
 use ship_module_project::{
-    NoteScope, create_adr, create_note, get_adr_by_id, get_note_by_id, import_adrs_from_files,
-    import_notes_from_files, list_adrs, list_notes, update_note_content,
+    NoteScope, create_adr, create_feature, create_note, create_release, get_adr_by_id,
+    get_feature_by_id, get_note_by_id, get_release_by_id, import_adrs_from_files,
+    import_features_from_files, import_notes_from_files, import_releases_from_files, list_adrs,
+    list_features, list_notes, list_releases, update_feature_content, update_note_content,
+    update_release_content,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -314,14 +315,14 @@ pub struct CreateReleaseRequest {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetReleaseRequest {
-    /// Release filename (e.g. "v0-1-0-alpha.md")
-    pub file_name: String,
+    /// Release version/id (e.g. "v0.1.0-alpha")
+    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateReleaseRequest {
-    /// Release filename (e.g. "v0-1-0-alpha.md")
-    pub file_name: String,
+    /// Release version/id (e.g. "v0.1.0-alpha")
+    pub id: String,
     /// Full replacement content
     pub content: String,
 }
@@ -332,26 +333,32 @@ pub struct CreateFeatureRequest {
     pub title: String,
     /// Initial markdown content (optional — defaults to a scaffold)
     pub content: Option<String>,
-    /// Linked release filename (optional)
-    pub release: Option<String>,
-    /// Linked spec filename (optional)
-    pub spec: Option<String>,
+    /// Linked release ID (optional)
+    pub release_id: Option<String>,
+    /// Linked spec ID (optional)
+    pub spec_id: Option<String>,
     /// Linked git branch name (optional)
     pub branch: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GetFeatureRequest {
-    /// Feature filename (e.g. "agent-mode-ui.md")
-    pub file_name: String,
+    /// Feature ID (e.g. "agent-mode-ui")
+    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct UpdateFeatureRequest {
-    /// Feature filename (e.g. "agent-mode-ui.md")
-    pub file_name: String,
+    /// Feature ID
+    pub id: String,
     /// Full replacement content
     pub content: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct FeatureIdRequest {
+    /// Feature ID
+    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -407,6 +414,8 @@ impl ShipServer {
         let _ = import_adrs_from_files(project_dir);
         let _ = import_notes_from_files(NoteScope::Project, Some(project_dir));
         let _ = import_notes_from_files(NoteScope::User, None);
+        let _ = import_features_from_files(project_dir);
+        let _ = import_releases_from_files(project_dir);
     }
 
     async fn get_effective_project_dir(&self) -> Result<PathBuf, String> {
@@ -490,8 +499,8 @@ impl ShipServer {
         let statuses: Vec<String> = config.statuses.iter().map(|s| s.id.clone()).collect();
 
         let issues = list_issues_full(project_dir.clone()).unwrap_or_default();
-        let releases = list_releases(project_dir.clone()).unwrap_or_default();
-        let features = list_features(project_dir.clone(), None).unwrap_or_default();
+        let releases = list_releases(&project_dir).unwrap_or_default();
+        let features = list_features(&project_dir).unwrap_or_default();
         let specs = list_specs(project_dir.clone()).unwrap_or_default();
         let adrs = list_adrs(&project_dir).unwrap_or_default();
 
@@ -541,10 +550,7 @@ impl ShipServer {
             out.push_str("No releases.\n");
         } else {
             for r in &releases {
-                out.push_str(&format!(
-                    "- [{}] {} ({})\n",
-                    r.status, r.version, r.file_name
-                ));
+                out.push_str(&format!("- [{}] {} ({})\n", r.status, r.version, r.id));
             }
         }
 
@@ -554,7 +560,10 @@ impl ShipServer {
             out.push_str("No features.\n");
         } else {
             for f in &features {
-                out.push_str(&format!("- [{}] {} ({})\n", f.status, f.title, f.file_name));
+                out.push_str(&format!(
+                    "- [{}] {} ({})\n",
+                    f.status, f.feature.metadata.title, f.id
+                ));
             }
         }
 
@@ -576,7 +585,7 @@ impl ShipServer {
             for a in &adrs {
                 out.push_str(&format!(
                     "- [{}] {} ({})\n",
-                    a.status, a.adr.metadata.title, a.file_name
+                    a.status, a.adr.metadata.title, a.id
                 ));
             }
         }
@@ -986,15 +995,30 @@ impl ShipServer {
             Err(e) => return e,
         };
         let content = req.content.as_deref().unwrap_or("");
-        match create_release(project_dir.clone(), &req.version, content) {
-            Ok(file) => {
-                let fname = file
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                log_action_by(&project_dir, "agent", "release create", fname).ok();
-                format!("Created release: {}", fname)
+        match create_release(&project_dir, &req.version, content) {
+            Ok(release) => {
+                log_action_by(&project_dir, "agent", "release create", &release.id).ok();
+                format!(
+                    "Created release: {} ({})",
+                    release.release.metadata.version, release.id
+                )
             }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Get a release's details
+    #[tool(description = "Get the details and content of a release by ID")]
+    async fn get_release(&self, Parameters(req): Parameters<GetReleaseRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        match get_release_by_id(&project_dir, &req.id) {
+            Ok(release) => match serde_json::to_string_pretty(&release) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing release: {}", e),
+            },
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1006,14 +1030,13 @@ impl ShipServer {
             Ok(d) => d,
             Err(e) => return e,
         };
-        let path = match find_release_path(&project_dir, &req.file_name) {
-            Ok(path) => path,
-            Err(err) => return format!("Error: {}", err),
-        };
-        match update_release(path, &req.content) {
-            Ok(_) => {
-                log_action_by(&project_dir, "agent", "release update", &req.file_name).ok();
-                format!("Updated release: {}", req.file_name)
+        match update_release_content(&project_dir, &req.id, &req.content) {
+            Ok(release) => {
+                log_action_by(&project_dir, "agent", "release update", &req.id).ok();
+                format!(
+                    "Updated release: {} ({})",
+                    release.release.metadata.version, req.id
+                )
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -1030,21 +1053,36 @@ impl ShipServer {
         };
         let content = req.content.as_deref().unwrap_or("");
         match create_feature(
-            project_dir.clone(),
+            &project_dir,
             &req.title,
             content,
-            req.release.as_deref(),
-            req.spec.as_deref(),
+            req.release_id.as_deref(),
+            req.spec_id.as_deref(),
             req.branch.as_deref(),
         ) {
-            Ok(file) => {
-                let fname = file
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown");
-                log_action_by(&project_dir, "agent", "feature create", fname).ok();
-                format!("Created feature: {}", fname)
+            Ok(feature) => {
+                log_action_by(&project_dir, "agent", "feature create", &feature.id).ok();
+                format!(
+                    "Created feature: {} ({})",
+                    feature.feature.metadata.title, feature.id
+                )
             }
+            Err(e) => format!("Error: {}", e),
+        }
+    }
+
+    /// Get a feature's details
+    #[tool(description = "Get the details and content of a feature by ID")]
+    async fn get_feature(&self, Parameters(req): Parameters<GetFeatureRequest>) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+        match get_feature_by_id(&project_dir, &req.id) {
+            Ok(feature) => match serde_json::to_string_pretty(&feature) {
+                Ok(json) => json,
+                Err(e) => format!("Error serializing feature: {}", e),
+            },
             Err(e) => format!("Error: {}", e),
         }
     }
@@ -1056,11 +1094,13 @@ impl ShipServer {
             Ok(d) => d,
             Err(e) => return e,
         };
-        let path = runtime::project::features_dir(&project_dir).join(&req.file_name);
-        match update_feature(path, &req.content) {
-            Ok(_) => {
-                log_action_by(&project_dir, "agent", "feature update", &req.file_name).ok();
-                format!("Updated feature: {}", req.file_name)
+        match update_feature_content(&project_dir, &req.id, &req.content) {
+            Ok(feature) => {
+                log_action_by(&project_dir, "agent", "feature update", &req.id).ok();
+                format!(
+                    "Updated feature: {} ({})",
+                    feature.feature.metadata.title, req.id
+                )
             }
             Err(e) => format!("Error: {}", e),
         }
@@ -1630,24 +1670,28 @@ impl ShipServer {
         }
         // ship://features
         if uri == "ship://features" {
-            let entries = list_features(dir.clone(), None).ok()?;
+            let entries = list_features(&dir).ok()?;
             if entries.is_empty() {
                 return Some("No features found.".to_string());
             }
             let mut out = String::from("Features:\n");
             for f in &entries {
-                out.push_str(&format!("- [{}] {} ({})\n", f.status, f.title, f.file_name));
+                out.push_str(&format!(
+                    "- [{}] {} ({})\n",
+                    f.status, f.feature.metadata.title, f.id
+                ));
             }
             return Some(out);
         }
-        // ship://features/{file}
-        if let Some(file) = uri.strip_prefix("ship://features/") {
-            let path = runtime::project::features_dir(dir).join(file);
-            return get_feature_raw(path).ok();
+        // ship://features/{id}
+        if let Some(id) = uri.strip_prefix("ship://features/") {
+            return get_feature_by_id(&dir, id)
+                .ok()
+                .and_then(|e| e.feature.to_markdown().ok());
         }
         // ship://releases
         if uri == "ship://releases" {
-            let entries = list_releases(dir.clone()).ok()?;
+            let entries = list_releases(&dir).ok()?;
             if entries.is_empty() {
                 return Some("No releases found.".to_string());
             }
@@ -1655,15 +1699,16 @@ impl ShipServer {
             for r in &entries {
                 out.push_str(&format!(
                     "- [{}] {} ({})\n",
-                    r.status, r.version, r.file_name
+                    r.status, r.release.metadata.version, r.id
                 ));
             }
             return Some(out);
         }
-        // ship://releases/{file}
-        if let Some(file) = uri.strip_prefix("ship://releases/") {
-            let path = find_release_path(dir, file).ok()?;
-            return get_release_raw(path).ok();
+        // ship://releases/{id}
+        if let Some(id) = uri.strip_prefix("ship://releases/") {
+            return get_release_by_id(&dir, id)
+                .ok()
+                .and_then(|e| e.release.to_markdown().ok());
         }
         // ship://specs
         if uri == "ship://specs" {
@@ -1680,7 +1725,7 @@ impl ShipServer {
         // ship://specs/{file}
         if let Some(file) = uri.strip_prefix("ship://specs/") {
             let path = runtime::project::specs_dir(dir).join(file);
-            return get_spec_raw(path).ok();
+            return std::fs::read_to_string(path).ok();
         }
         // ship://adrs
         if uri == "ship://adrs" {
@@ -1946,13 +1991,10 @@ pub async fn run_server() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runtime::{
-        EventAction, EventEntity, get_feature, init_project, list_events_since, list_features,
-        list_releases,
-    };
+    use runtime::{EventAction, EventEntity, init_project, list_events_since};
     use tempfile::tempdir;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn mcp_release_feature_flow_emits_events() {
         let tmp = tempdir().expect("tempdir");
         let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
@@ -1972,16 +2014,16 @@ mod tests {
             release_result
         );
 
-        let releases = list_releases(project_dir.clone()).expect("list releases");
+        let releases = list_releases(&project_dir).expect("list releases");
         assert_eq!(releases.len(), 1);
-        let release_file = releases[0].file_name.clone();
+        let release_id = releases[0].id.clone();
 
         let feature_result = server
             .create_feature(Parameters(CreateFeatureRequest {
                 title: "Filesystem Routing Migration".to_string(),
                 content: None,
-                release: Some(release_file),
-                spec: None,
+                release_id: Some(release_id),
+                spec_id: None,
                 branch: Some("feature/fs-routing".to_string()),
             }))
             .await;
@@ -1991,12 +2033,11 @@ mod tests {
             feature_result
         );
 
-        let features = list_features(project_dir.clone(), None).expect("list features");
+        let features = list_features(&project_dir).expect("list features");
         assert_eq!(features.len(), 1);
-        let feature =
-            get_feature(std::path::PathBuf::from(&features[0].path)).expect("get feature");
+        let feature_entry = get_feature_by_id(&project_dir, &features[0].id).expect("get feature");
         assert_eq!(
-            feature.metadata.branch.as_deref(),
+            feature_entry.feature.metadata.branch.as_deref(),
             Some("feature/fs-routing")
         );
 
@@ -2017,7 +2058,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn mcp_git_feature_sync_writes_context_files() {
         let tmp = tempdir().expect("tempdir");
         let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
@@ -2029,8 +2070,8 @@ mod tests {
             .create_feature(Parameters(CreateFeatureRequest {
                 title: "Auth flow".to_string(),
                 content: Some("Ship auth.".to_string()),
-                release: None,
-                spec: None,
+                release_id: None,
+                spec_id: None,
                 branch: Some("feature/auth".to_string()),
             }))
             .await;

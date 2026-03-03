@@ -1,39 +1,89 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, PackagePlus, Plus } from 'lucide-react';
-import { FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry } from '@/bindings';
+import { PackagePlus, Plus } from 'lucide-react';
+import {
+  FeatureInfo as FeatureEntry,
+  ReleaseDocument,
+  ReleaseInfo as ReleaseEntry,
+} from '@/bindings';
 import DetailSheet from './DetailSheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/empty-state';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import TemplateEditorButton from './TemplateEditorButton';
 import ReleaseMetadataPanel from '@/components/editor/ReleaseMetadataPanel';
 import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
+import {
+  featureStatusFallbackReadiness,
+  FeatureChecklistMetrics,
+} from '@/features/planning/hub/utils/featureMetrics';
+import ReleaseHubStats from '@/features/planning/releases-hub/components/ReleaseHubStats';
+import ReleaseHubToolbar from '@/features/planning/releases-hub/components/ReleaseHubToolbar';
+import ReleaseHubRow from '@/features/planning/releases-hub/components/ReleaseHubRow';
+import { useFeatureChecklistMetrics } from '@/features/planning/hub/hooks/useFeatureChecklistMetrics';
+import ReleaseDetail from './ReleaseDetail';
+import HubSectionHeader from '@/features/planning/hub/components/HubSectionHeader';
 
 interface ReleasesPageProps {
   releases: ReleaseEntry[];
   features: FeatureEntry[];
+  selectedRelease: ReleaseDocument | null;
+  onCloseReleaseDetail: () => void;
   onSelectRelease: (entry: ReleaseEntry) => void;
+  onSelectFeatureFromRelease: (feature: FeatureEntry) => void;
+  onSaveRelease: (fileName: string, content: string) => Promise<void> | void;
   onCreateRelease: (version: string, content: string) => Promise<void>;
+  mcpEnabled?: boolean;
 }
 
-type ReleaseSort = 'newest' | 'oldest' | 'status';
+type ReleaseSort = 'newest' | 'oldest' | 'status' | 'progress';
 const RELEASE_SORT_OPTIONS: Array<{ value: ReleaseSort; label: string }> = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'status', label: 'Status' },
+  { value: 'progress', label: 'Progress' },
 ];
+
+type ReleaseView = 'all' | 'blocking' | 'ready';
+
+const RELEASE_STATUS_ORDER: Record<string, number> = {
+  planned: 0,
+  active: 1,
+  shipped: 2,
+  archived: 3,
+};
+
+interface ReleaseFeatureReadiness {
+  feature: FeatureEntry;
+  metrics?: FeatureChecklistMetrics;
+  readiness: number;
+  blocking: boolean;
+}
+
+interface ReleaseReadinessSummary {
+  release: ReleaseEntry;
+  linked: ReleaseFeatureReadiness[];
+  progressPercent: number;
+  blockers: number;
+  todosDone: number;
+  todosTotal: number;
+  acceptanceDone: number;
+  acceptanceTotal: number;
+  ready: boolean;
+}
 
 export default function ReleasesPage({
   releases,
   features,
+  selectedRelease,
+  onCloseReleaseDetail,
   onSelectRelease,
+  onSelectFeatureFromRelease,
+  onSaveRelease,
   onCreateRelease,
+  mcpEnabled = true,
 }: ReleasesPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [content, setContent] = useState('');
@@ -41,6 +91,8 @@ export default function ReleasesPage({
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<ReleaseSort>('newest');
   const [search, setSearch] = useState('');
+  const [viewFilter, setViewFilter] = useState<ReleaseView>('all');
+  const { metricsByFile: featureMetricsByFile, loading: metricsLoading } = useFeatureChecklistMetrics(features);
 
   const createInitialReleaseDocument = () => {
     return `+++
@@ -62,19 +114,80 @@ tags = []
 
 - [ ]
 
+## Breaking Changes
+
+- [ ] None
+
 ## Notes
 `;
   };
 
-  const featureCountsByRelease = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const feature of features) {
-      const key = feature.release?.trim();
-      if (!key) continue;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+  const releaseSummaries = useMemo(() => {
+    const summaries = new Map<string, ReleaseReadinessSummary>();
+    for (const release of releases) {
+      const linked = features
+        .filter((feature) => feature.release_id === release.file_name || feature.release_id === release.version)
+        .map((feature) => {
+          const metrics = featureMetricsByFile[feature.file_name];
+          const readiness = metrics?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
+          const blocking =
+            metrics?.blocking ?? (feature.status !== 'implemented' && feature.status !== 'deprecated');
+          return { feature, metrics, readiness, blocking };
+        });
+
+      const blockers = linked.filter((entry) => entry.blocking).length;
+      const todosDone = linked.reduce((sum, entry) => sum + (entry.metrics?.todos.done ?? 0), 0);
+      const todosTotal = linked.reduce((sum, entry) => sum + (entry.metrics?.todos.total ?? 0), 0);
+      const acceptanceDone = linked.reduce((sum, entry) => sum + (entry.metrics?.acceptance.done ?? 0), 0);
+      const acceptanceTotal = linked.reduce((sum, entry) => sum + (entry.metrics?.acceptance.total ?? 0), 0);
+
+      const statusWeightedProgress =
+        linked.length > 0
+          ? Math.round(
+              linked.reduce((sum, entry) => sum + entry.readiness, 0) / linked.length
+            )
+          : 0;
+      const progressPercent =
+        todosTotal > 0 ? Math.round((todosDone / todosTotal) * 100) : statusWeightedProgress;
+      const ready = linked.length > 0 && blockers === 0 && progressPercent >= 90;
+
+      summaries.set(release.file_name, {
+        release,
+        linked,
+        progressPercent,
+        blockers,
+        todosDone,
+        todosTotal,
+        acceptanceDone,
+        acceptanceTotal,
+        ready,
+      });
     }
-    return counts;
-  }, [features]);
+    return summaries;
+  }, [featureMetricsByFile, features, releases]);
+
+  const dashboard = useMemo(() => {
+    const active = releases.find((release) => release.status === 'active') ?? null;
+    const shippedCount = releases.filter((release) => release.status === 'shipped').length;
+    const linkedFeatureCount = features.filter((feature) => feature.release_id).length;
+    const activeBlockers = active
+      ? releaseSummaries.get(active.file_name)?.blockers ?? 0
+      : Array.from(releaseSummaries.values()).reduce((sum, summary) => sum + summary.blockers, 0);
+
+    const progressValues = Array.from(releaseSummaries.values()).map((summary) => summary.progressPercent);
+    const avgProgress =
+      progressValues.length === 0
+        ? 0
+        : Math.round(progressValues.reduce((sum, value) => sum + value, 0) / progressValues.length);
+
+    return {
+      active,
+      shippedCount,
+      linkedFeatureCount,
+      activeBlockers,
+      avgProgress,
+    };
+  }, [features, releaseSummaries, releases]);
 
   const sortedReleases = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -86,19 +199,33 @@ tags = []
         release.file_name.toLowerCase().includes(needle)
       );
     });
-    next.sort((a, b) => {
+
+    const viewFiltered = next.filter((release) => {
+      const summary = releaseSummaries.get(release.file_name);
+      if (!summary) return viewFilter === 'all';
+      if (viewFilter === 'blocking') return summary.blockers > 0;
+      if (viewFilter === 'ready') return summary.ready;
+      return true;
+    });
+
+    viewFiltered.sort((a, b) => {
       switch (sortBy) {
         case 'oldest':
           return new Date(a.updated).getTime() - new Date(b.updated).getTime();
         case 'status':
-          return a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+          return (RELEASE_STATUS_ORDER[a.status] ?? 99) - (RELEASE_STATUS_ORDER[b.status] ?? 99);
+        case 'progress': {
+          const progressA = releaseSummaries.get(a.file_name)?.progressPercent ?? 0;
+          const progressB = releaseSummaries.get(b.file_name)?.progressPercent ?? 0;
+          return progressB - progressA;
+        }
         case 'newest':
         default:
           return new Date(b.updated).getTime() - new Date(a.updated).getTime();
       }
     });
-    return next;
-  }, [releases, search, sortBy]);
+    return viewFiltered;
+  }, [releaseSummaries, releases, search, sortBy, viewFilter]);
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -144,11 +271,25 @@ tags = []
     setContent(createInitialReleaseDocument());
   }, [createOpen]);
 
+  if (selectedRelease) {
+    return (
+      <PageFrame width="wide">
+        <ReleaseDetail
+          release={selectedRelease}
+          features={features}
+          onClose={onCloseReleaseDetail}
+          onSelectFeature={onSelectFeatureFromRelease}
+          onSave={onSaveRelease}
+          mcpEnabled={mcpEnabled}
+        />
+      </PageFrame>
+    );
+  }
+
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <PageHeader
         title="Releases"
-        description="Anchor feature delivery in named milestones."
         actions={
           <div className="flex items-center gap-2">
             <TemplateEditorButton kind="release" />
@@ -158,6 +299,15 @@ tags = []
             </Button>
           </div>
         }
+      />
+
+      <ReleaseHubStats
+        activeRelease={dashboard.active}
+        activeBlockers={dashboard.activeBlockers}
+        shippedCount={dashboard.shippedCount}
+        totalReleases={releases.length}
+        linkedFeatureCount={dashboard.linkedFeatureCount}
+        avgProgress={dashboard.avgProgress}
       />
 
       {releases.length === 0 ? (
@@ -175,60 +325,55 @@ tags = []
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <CardTitle className="text-sm">Release Timeline</CardTitle>
-                <CardDescription>
-                  {releases.length} release{releases.length !== 1 ? 's' : ''} in this project
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search releases"
-                  className="h-8 w-[220px]"
-                />
-                <Select value={sortBy} onValueChange={(value) => setSortBy(value as ReleaseSort)}>
-                  <SelectTrigger size="sm" className="w-[180px]">
-                    <SelectValue>
-                      {RELEASE_SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RELEASE_SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            <HubSectionHeader
+              title="Release Hub"
+              description={
+                <>
+                  {releases.length} release{releases.length !== 1 ? 's' : ''} with live feature readiness
+                  {metricsLoading ? ' · syncing metrics…' : ''}
+                </>
+              }
+              controls={
+              <ReleaseHubToolbar
+                search={search}
+                onSearchChange={setSearch}
+                viewFilter={viewFilter}
+                onViewFilterChange={setViewFilter}
+                sortBy={sortBy}
+                sortOptions={RELEASE_SORT_OPTIONS}
+                onSortByChange={(value) => setSortBy(value as ReleaseSort)}
+              />
+              }
+            />
           </CardHeader>
-          <CardContent className="space-y-2">
-            {sortedReleases.map((release) => (
-              <div
-                key={release.path}
-                className="hover:bg-muted/40 grid gap-2 rounded-md border p-3 transition-colors md:grid-cols-[1fr_auto] md:items-center"
-                title={release.path}
-              >
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-sm font-medium">{release.version}</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{release.status}</Badge>
-                    <Badge variant="secondary">
-                      {featureCountsByRelease.get(release.file_name) ?? 0} feature
-                      {(featureCountsByRelease.get(release.file_name) ?? 0) === 1 ? '' : 's'}
-                    </Badge>
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => onSelectRelease(release)}>
-                  Open
-                  <ArrowRight className="size-3.5" />
-                </Button>
+          <CardContent className="space-y-3">
+            {sortedReleases.length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground italic">
+                No releases match the current search or filters.
               </div>
-            ))}
+            )}
+
+            {sortedReleases.map((release) => {
+              const summary = releaseSummaries.get(release.file_name);
+              const linked = summary?.linked ?? [];
+              const progress = summary?.progressPercent ?? 0;
+              const blockers = summary?.blockers ?? 0;
+
+              return (
+                <ReleaseHubRow
+                  key={release.path}
+                  release={release}
+                  linked={linked}
+                  progress={progress}
+                  blockers={blockers}
+                  todosDone={summary?.todosDone ?? 0}
+                  todosTotal={summary?.todosTotal ?? 0}
+                  acceptanceDone={summary?.acceptanceDone ?? 0}
+                  acceptanceTotal={summary?.acceptanceTotal ?? 0}
+                  onOpen={onSelectRelease}
+                />
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -284,6 +429,7 @@ tags = []
               placeholder="# Release Goal"
               rows={22}
               defaultMode="doc"
+              mcpEnabled={mcpEnabled}
             />
           </form>
         </DetailSheet>

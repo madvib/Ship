@@ -1,10 +1,9 @@
 mod helpers;
+use crate::helpers::create_feature;
 use helpers::TestProject;
+use runtime::agent_config::FeatureAgentConfig;
 use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
-use runtime::{
-    FeatureAgentConfig, FeatureMcpRef, FeatureSkillRef, create_feature, create_issue, create_skill,
-    get_feature,
-};
+use runtime::{create_issue, create_skill};
 use ship_module_git::on_post_checkout;
 use std::collections::HashMap;
 use std::path::Path;
@@ -24,10 +23,30 @@ fn make_stdio_server(id: &str) -> McpServerConfig {
     }
 }
 
+fn get_feature_id(path: &Path) -> String {
+    let content = std::fs::read_to_string(path).unwrap();
+    for line in content.lines() {
+        if line.starts_with("id = ") {
+            return line.split('"').nth(1).unwrap().to_string();
+        }
+    }
+    panic!("No ID found in {:?}", path);
+}
+
 fn set_feature_agent(path: &Path, agent: FeatureAgentConfig) {
-    let mut feature = get_feature(path.to_path_buf()).unwrap();
-    feature.metadata.agent = Some(agent);
-    std::fs::write(path, feature.to_markdown().unwrap()).unwrap();
+    let ship_dir = path
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let id = get_feature_id(path);
+    let mut entry = ship_module_project::get_feature_by_id(ship_dir, &id).unwrap();
+    entry.feature.metadata.agent = Some(agent);
+    ship_module_project::update_feature(ship_dir, &id, entry.feature).unwrap();
 }
 
 #[test]
@@ -125,14 +144,12 @@ fn claude_md_includes_skill_body() {
     )
     .unwrap();
     set_feature_agent(
-        &feature_path,
+        &feature_path.1,
         FeatureAgentConfig {
             model: None,
             max_cost_per_session: None,
             mcp_servers: vec![],
-            skills: vec![FeatureSkillRef {
-                id: "nextjs-conventions".to_string(),
-            }],
+            skills: vec!["nextjs-conventions".to_string()],
             providers: vec![],
         },
     );
@@ -160,13 +177,11 @@ fn mcp_json_written_on_checkout() {
     )
     .unwrap();
     set_feature_agent(
-        &feature_path,
+        &feature_path.1,
         FeatureAgentConfig {
             model: None,
             max_cost_per_session: None,
-            mcp_servers: vec![FeatureMcpRef {
-                id: "github".to_string(),
-            }],
+            mcp_servers: vec!["github".to_string()],
             skills: vec![],
             providers: vec![],
         },

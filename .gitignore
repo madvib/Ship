@@ -63,6 +63,9 @@ dist/
 # Added by cargo
 /target
 
+# Team Coordination
+TEAM.md
+
 
 .claude
 .gemini

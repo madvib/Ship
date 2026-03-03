@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "WetzhDnY"
 title = "Crate restructure — logic to runtime, plugins to modules"
 date = "2026-02-28"

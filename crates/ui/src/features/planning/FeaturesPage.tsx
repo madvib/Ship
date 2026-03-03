@@ -1,56 +1,93 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Flag, Plus, Search } from 'lucide-react';
-import { AdrEntry, FeatureInfo as FeatureEntry, ReleaseInfo as ReleaseEntry, SpecInfo as SpecEntry } from '@/bindings';
+import { Flag, Plus } from 'lucide-react';
+import {
+  AdrEntry,
+  FeatureDocument,
+  FeatureInfo as FeatureEntry,
+  ReleaseInfo as ReleaseEntry,
+  SpecInfo as SpecEntry,
+} from '@/bindings';
 import DetailSheet from './DetailSheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import TemplateEditorButton from './TemplateEditorButton';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { StatusFilter } from '@/components/app/StatusFilter';
 import MarkdownEditor from '@/components/editor';
 import FeatureMetadataPanel from '@/components/editor/FeatureMetadataPanel';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
-import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
-import { FrontmatterDelimiter } from '@/components/editor/frontmatter';
+import {
+  readFrontmatterStringField,
+  splitFrontmatterDocument,
+  FrontmatterDelimiter,
+} from '@/components/editor/frontmatter';
+import {
+  featureStatusFallbackReadiness,
+  formatStatusLabel,
+} from '@/features/planning/hub/utils/featureMetrics';
+import FeatureHubStats from '@/features/planning/features-hub/components/FeatureHubStats';
+import FeatureHubToolbar from '@/features/planning/features-hub/components/FeatureHubToolbar';
+import FeatureHubRow from '@/features/planning/features-hub/components/FeatureHubRow';
+import { useFeatureChecklistMetrics } from '@/features/planning/hub/hooks/useFeatureChecklistMetrics';
+import FeatureDetail from './FeatureDetail';
+import HubSectionHeader from '@/features/planning/hub/components/HubSectionHeader';
 
 interface FeaturesPageProps {
   features: FeatureEntry[];
   releases: ReleaseEntry[];
   specs: SpecEntry[];
   adrs: AdrEntry[];
+  selectedFeature: FeatureDocument | null;
+  onCloseFeatureDetail: () => void;
   onSelectFeature: (entry: FeatureEntry) => void;
+  onSelectReleaseFromFeature: (fileName: string) => void;
+  onSelectSpecFromFeature: (fileName: string) => void;
+  onSaveFeature: (fileName: string, content: string) => Promise<void> | void;
   onCreateFeature: (
     title: string,
     content: string,
     release?: string | null,
     spec?: string | null
   ) => Promise<void>;
+  tagSuggestions?: string[];
+  mcpEnabled?: boolean;
 }
 
-type FeatureSort = 'newest' | 'oldest' | 'status';
+type FeatureSort = 'newest' | 'oldest' | 'status' | 'readiness';
 const FEATURE_SORT_OPTIONS: Array<{ value: FeatureSort; label: string }> = [
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first' },
   { value: 'status', label: 'Status' },
+  { value: 'readiness', label: 'Readiness' },
 ];
+
+type FeatureView = 'all' | 'blocking' | 'ready';
+
+const STATUS_ORDER: Record<string, number> = {
+  planned: 0,
+  'in-progress': 1,
+  implemented: 2,
+  deprecated: 3,
+};
 
 export default function FeaturesPage({
   features,
   releases,
   specs,
   adrs,
+  selectedFeature,
+  onCloseFeatureDetail,
   onSelectFeature,
+  onSelectReleaseFromFeature,
+  onSelectSpecFromFeature,
+  onSaveFeature,
   onCreateFeature,
+  tagSuggestions = [],
+  mcpEnabled = true,
 }: FeaturesPageProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [content, setContent] = useState('');
@@ -59,17 +96,45 @@ export default function FeaturesPage({
   const [sortBy, setSortBy] = useState<FeatureSort>('newest');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set());
+  const [viewFilter, setViewFilter] = useState<FeatureView>('all');
+  const { metricsByFile: featureMetricsByFile, loading: metricsLoading } = useFeatureChecklistMetrics(features);
+
+  const statusOptions = useMemo(() => {
+    const fallback = ['planned', 'in-progress', 'implemented', 'deprecated'];
+    const available = Array.from(new Set([...fallback, ...features.map((feature) => feature.status)]));
+    available.sort((a, b) => {
+      const rankA = STATUS_ORDER[a] ?? 99;
+      const rankB = STATUS_ORDER[b] ?? 99;
+      if (rankA !== rankB) return rankA - rankB;
+      return a.localeCompare(b);
+    });
+
+    return available.map((value) => ({
+      value,
+      label: formatStatusLabel(value),
+    }));
+  }, [features]);
 
   const sortedFeatures = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
     const filtered = features.filter((feature) => {
+      const metric = featureMetricsByFile[feature.file_name];
+      const readiness = metric?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
+      const blocking =
+        metric?.blocking ?? (feature.status !== 'implemented' && feature.status !== 'deprecated');
+      const ready = !blocking && readiness >= 90;
+
       const matchesSearch =
         feature.title.toLowerCase().includes(needle) ||
-        feature.file_name.toLowerCase().includes(needle);
-
+        feature.file_name.toLowerCase().includes(needle) ||
+        (feature.release_id ?? '').toLowerCase().includes(needle) ||
+        (feature.spec_id ?? '').toLowerCase().includes(needle);
       const matchesStatus = selectedStatuses.size === 0 || selectedStatuses.has(feature.status);
+      const matchesView =
+        viewFilter === 'all' ||
+        (viewFilter === 'blocking' ? blocking : ready);
 
-      return matchesSearch && matchesStatus;
+      return matchesSearch && matchesStatus && matchesView;
     });
 
     filtered.sort((a, b) => {
@@ -77,21 +142,71 @@ export default function FeaturesPage({
         case 'oldest':
           return new Date(a.updated).getTime() - new Date(b.updated).getTime();
         case 'status':
-          return a.status.localeCompare(b.status, undefined, { sensitivity: 'base' });
+          return (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99);
+        case 'readiness': {
+          const readinessA = featureMetricsByFile[a.file_name]?.readinessPercent ?? featureStatusFallbackReadiness(a.status);
+          const readinessB = featureMetricsByFile[b.file_name]?.readinessPercent ?? featureStatusFallbackReadiness(b.status);
+          return readinessB - readinessA;
+        }
         case 'newest':
         default:
           return new Date(b.updated).getTime() - new Date(a.updated).getTime();
       }
     });
+
     return filtered;
-  }, [features, searchQuery, selectedStatuses, sortBy]);
+  }, [featureMetricsByFile, features, searchQuery, selectedStatuses, sortBy, viewFilter]);
+
+  const metrics = useMemo(() => {
+    if (features.length === 0) {
+      return {
+        total: 0,
+        implemented: 0,
+        blocking: 0,
+        unlinked: 0,
+        avgReadiness: 0,
+      };
+    }
+
+    let implemented = 0;
+    let blocking = 0;
+    let unlinked = 0;
+    let readinessTotal = 0;
+
+    for (const feature of features) {
+      if (feature.status === 'implemented') {
+        implemented += 1;
+      }
+      if (!feature.release_id) {
+        unlinked += 1;
+      }
+
+      const metric = featureMetricsByFile[feature.file_name];
+      const readiness = metric?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
+      readinessTotal += readiness;
+
+      const isBlocking =
+        metric?.blocking ?? (feature.status !== 'implemented' && feature.status !== 'deprecated');
+      if (isBlocking) {
+        blocking += 1;
+      }
+    }
+
+    return {
+      total: features.length,
+      implemented,
+      blocking,
+      unlinked,
+      avgReadiness: Math.round(readinessTotal / features.length),
+    };
+  }, [featureMetricsByFile, features]);
 
   const createInitialFeatureDocument = () => {
     return `+++
 title = ""
-status = "active"
+status = "planned"
 release_id = ""
-spec = ""
+spec_id = ""
 adrs = []
 tags = []
 +++
@@ -119,15 +234,21 @@ tags = []
       setError('Title is required.');
       return;
     }
-    const release = readFrontmatterStringField(parsed.frontmatter, 'release_id').trim();
-    const spec = readFrontmatterStringField(parsed.frontmatter, 'spec').trim();
+
+    const release =
+      readFrontmatterStringField(parsed.frontmatter, 'release_id').trim() ||
+      readFrontmatterStringField(parsed.frontmatter, 'release').trim();
+    const spec =
+      readFrontmatterStringField(parsed.frontmatter, 'spec_id').trim() ||
+      readFrontmatterStringField(parsed.frontmatter, 'spec').trim();
+
     try {
       setCreating(true);
       await onCreateFeature(
         cleanTitle,
         content,
-        release.trim() ? release.trim() : null,
-        spec.trim() ? spec.trim() : null
+        release ? release : null,
+        spec ? spec : null
       );
       setCreateOpen(false);
       setContent(createInitialFeatureDocument());
@@ -163,11 +284,29 @@ tags = []
     setContent(createInitialFeatureDocument());
   }, [createOpen]);
 
+  if (selectedFeature) {
+    return (
+      <PageFrame width="wide">
+        <FeatureDetail
+          feature={selectedFeature}
+          releaseSuggestions={releases.map((entry) => entry.file_name)}
+          specSuggestions={specs.map((entry) => entry.file_name)}
+          adrSuggestions={adrs.map((entry) => entry.file_name)}
+          tagSuggestions={tagSuggestions}
+          mcpEnabled={mcpEnabled}
+          onClose={onCloseFeatureDetail}
+          onSelectRelease={onSelectReleaseFromFeature}
+          onSelectSpec={onSelectSpecFromFeature}
+          onSave={onSaveFeature}
+        />
+      </PageFrame>
+    );
+  }
+
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <PageHeader
         title="Features"
-        description="Plan customer-visible slices and bind them to releases/specs."
         actions={
           <div className="flex items-center gap-2">
             <TemplateEditorButton kind="feature" />
@@ -178,6 +317,8 @@ tags = []
           </div>
         }
       />
+
+      <FeatureHubStats metrics={metrics} />
 
       {features.length === 0 ? (
         <EmptyState
@@ -194,73 +335,60 @@ tags = []
       ) : (
         <Card size="sm">
           <CardHeader className="pb-2">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle className="text-sm">Feature Inventory</CardTitle>
-                <CardDescription>
-                  {features.length} feature{features.length !== 1 ? 's' : ''} in this project
-                </CardDescription>
-              </div>
-              <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-                <div className="relative min-w-[180px] flex-1 max-w-[280px]">
-                  <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
-                  <Input
-                    placeholder="Search features..."
-                    className="pl-9 h-8"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                </div>
-                <StatusFilter
-                  label="Status"
-                  options={[
-                    { value: 'active', label: 'Active' },
-                    { value: 'paused', label: 'Paused' },
-                    { value: 'complete', label: 'Complete' },
-                    { value: 'archived', label: 'Archived' },
-                  ]}
-                  selectedValues={selectedStatuses}
-                  onSelect={setSelectedStatuses}
+            <HubSectionHeader
+              title="Feature Hub"
+              description={
+                <>
+                  {features.length} feature{features.length !== 1 ? 's' : ''} with live checklist signals
+                  {metricsLoading ? ' · syncing metrics…' : ''}
+                </>
+              }
+              controls={
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <FeatureHubToolbar
+                  searchQuery={searchQuery}
+                  onSearchQueryChange={setSearchQuery}
+                  viewFilter={viewFilter}
+                  onViewFilterChange={setViewFilter}
+                  statusOptions={statusOptions}
+                  selectedStatuses={selectedStatuses}
+                  onSelectedStatusesChange={setSelectedStatuses}
+                  sortBy={sortBy}
+                  sortOptions={FEATURE_SORT_OPTIONS}
+                  onSortByChange={(value) => setSortBy(value as FeatureSort)}
                 />
-                <Select value={sortBy} onValueChange={(value) => setSortBy(value as FeatureSort)}>
-                  <SelectTrigger size="sm" className="w-[150px]">
-                    <SelectValue>
-                      {FEATURE_SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FEATURE_SORT_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
               </div>
-            </div>
+              }
+            />
           </CardHeader>
-          <CardContent className="space-y-1.5">
+          <CardContent className="space-y-2">
             {sortedFeatures.length === 0 && (
-              <div className="py-8 text-center text-sm text-muted-foreground italic">No features match the current filter.</div>
+              <div className="py-8 text-center text-sm text-muted-foreground italic">
+                No features match the current search or filters.
+              </div>
             )}
-            {sortedFeatures.map((feature) => (
-              <button
-                key={feature.path}
-                type="button"
-                className="hover:bg-muted/40 grid w-full gap-2 rounded-md border p-3 text-left transition-colors md:grid-cols-[1fr_auto] md:items-center"
-                title={feature.path}
-                onClick={() => onSelectFeature(feature)}
-              >
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate text-sm font-medium">{feature.title}</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">{feature.status}</Badge>
-                    {feature.release_id && <Badge variant="secondary">{feature.release_id}</Badge>}
-                  </div>
-                </div>
-                <ArrowRight className="size-4 text-muted-foreground/50 hidden md:block" />
-              </button>
-            ))}
+
+            {sortedFeatures.map((feature) => {
+              const linkedRelease = releases.find((release) => release.file_name === feature.release_id);
+              const linkedSpec = specs.find((spec) => spec.file_name === feature.spec_id);
+              const metric = featureMetricsByFile[feature.file_name];
+              const readiness = metric?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
+              const isBlocking =
+                metric?.blocking ?? (feature.status !== 'implemented' && feature.status !== 'deprecated');
+
+              return (
+                <FeatureHubRow
+                  key={feature.path}
+                  feature={feature}
+                  release={linkedRelease ?? null}
+                  spec={linkedSpec ?? null}
+                  metrics={metric}
+                  readiness={readiness}
+                  isBlocking={isBlocking}
+                  onSelect={onSelectFeature}
+                />
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -308,17 +436,18 @@ tags = []
                   frontmatter={frontmatter}
                   delimiter={delimiter}
                   defaultTitle=""
-                  defaultStatus="active"
+                  defaultStatus="planned"
                   releaseSuggestions={releases.map((entry: ReleaseEntry) => entry.file_name)}
                   specSuggestions={specs.map((entry: SpecEntry) => entry.file_name)}
                   adrSuggestions={adrs.map((entry: AdrEntry) => entry.file_name)}
-                  tagSuggestions={[]}
+                  tagSuggestions={tagSuggestions}
                   onChange={onChange}
                 />
               )}
               placeholder="# Why this feature"
               rows={22}
               defaultMode="doc"
+              mcpEnabled={mcpEnabled}
             />
           </form>
         </DetailSheet>

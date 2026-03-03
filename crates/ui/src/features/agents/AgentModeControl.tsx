@@ -59,22 +59,15 @@ export default function AgentModeControl({
   const modelShort = formatModelShort(aiModel);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-primary/25 bg-gradient-to-r from-primary/10 via-card/80 to-card/50 shadow-sm">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_40%,rgba(255,255,255,0.08),transparent_55%)]" />
-      <div className="relative flex items-center gap-1 px-2 py-1">
-        {/* Logo */}
-        <div className="bg-primary/15 border-primary/30 flex size-6 shrink-0 items-center justify-center rounded-md border">
-          <img src="/logo.svg" alt="Shipwright" className="size-4 object-contain" />
-        </div>
-
-        {/* Combined dropdown — mode + provider/model */}
+    <div className="rounded-md border bg-card/70">
+      <div className="flex items-center gap-1 px-1 py-1">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
               <Button
                 variant="ghost"
                 size="xs"
-                className="h-7 gap-1.5 px-2 text-xs font-medium hover:bg-primary/10"
+                className="h-7 gap-1.5 px-2 text-xs font-medium"
               />
             }
           >

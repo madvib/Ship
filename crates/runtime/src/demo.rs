@@ -1,4 +1,4 @@
-use crate::{create_feature, create_issue, create_release, create_spec, init_project, log_action};
+use crate::{create_issue, create_spec, init_project, log_action};
 use anyhow::Result;
 use std::path::PathBuf;
 
@@ -50,19 +50,6 @@ pub fn init_core_demo(base_dir: PathBuf) -> Result<PathBuf> {
         }
     }
 
-    // Sample release
-    let release_version = "v0.1.0-alpha";
-    let release_slug = crate::sanitize_file_name(release_version);
-    let release_file =
-        crate::project::releases_dir(&project_dir).join(format!("{}.md", release_slug));
-    if !release_file.exists() {
-        create_release(
-            project_dir.clone(),
-            release_version,
-            "## Goal\n\nShip alpha with core runtime, MCP, CLI, and UI agent configuration.\n\n## Scope\n\n- [x] Runtime + MCP bridge\n- [x] CLI + project primitives\n- [ ] Agent module UX polish\n\n## Included Features\n\n- [ ] Unified agent config panel\n- [ ] Feature delivery flow\n\n## Notes\n\nFocus on architecture confidence and test coverage.\n",
-        )?;
-    }
-
     // Sample specs
     let spec_title = "Agent Configuration and Modes";
     let spec_slug = crate::sanitize_file_name(spec_title);
@@ -74,34 +61,6 @@ pub fn init_core_demo(base_dir: PathBuf) -> Result<PathBuf> {
             "## Overview\n\nDefine a unified agent config layer for provider/model, prompts, context, rules, skills, MCP servers, and modes.\n\n## Goals\n\n- One global and project-scoped config model\n- Pass-through generation via claude/codex/gemini CLIs\n- Clear mode semantics tied to workflow policy\n\n## Non-Goals\n\n- Full workflow customization engine in alpha\n\n## Approach\n\nBuild release/feature/spec primitives and wire them through CLI, MCP, and UI.\n\n## Open Questions\n\n- How to best express mode overrides per checked-out feature?\n",
             "active",
         )?;
-    }
-
-    // Sample features
-    let features = vec![
-        (
-            "Unified Agent Configuration UI",
-            "v0-1-0-alpha.md",
-            "agent-configuration-and-modes.md",
-        ),
-        (
-            "Project Workflow Primitives",
-            "v0-1-0-alpha.md",
-            "agent-configuration-and-modes.md",
-        ),
-    ];
-    for (title, release, spec) in features {
-        let slug = crate::sanitize_file_name(title);
-        let path = crate::project::features_dir(&project_dir).join(format!("{}.md", slug));
-        if !path.exists() {
-            create_feature(
-                project_dir.clone(),
-                title,
-                "",
-                Some(release),
-                Some(spec),
-                None,
-            )?;
-        }
     }
 
     // Seed log with a few entries

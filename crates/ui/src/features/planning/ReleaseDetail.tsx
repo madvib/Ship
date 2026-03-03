@@ -1,10 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FeatureInfo, ReleaseDocument } from '@/bindings';
-import { Target, ExternalLink } from 'lucide-react';
-import DetailSheet from './DetailSheet';
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Edit3,
+  ExternalLink,
+  FileClock,
+  Save,
+  Target,
+  X,
+} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import MarkdownEditor from '@/components/editor';
 import ReleaseMetadataPanel from '@/components/editor/ReleaseMetadataPanel';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import { featureStatusFallbackReadiness, formatStatusLabel } from '@/features/planning/hub/utils/featureMetrics';
+import { cn } from '@/lib/utils';
 
 interface ReleaseDetailProps {
   release: ReleaseDocument;
@@ -13,6 +29,35 @@ interface ReleaseDetailProps {
   onClose: () => void;
   onSelectFeature: (feature: FeatureInfo) => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
+}
+
+function normalizeReleaseStatus(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function featureTileClasses(status: string) {
+  switch (status) {
+    case 'implemented':
+      return {
+        tile: 'border-emerald-500/35 bg-emerald-500/5',
+        progress: 'bg-emerald-500',
+      };
+    case 'in-progress':
+      return {
+        tile: 'border-sky-500/35 bg-sky-500/5',
+        progress: 'bg-sky-500',
+      };
+    case 'planned':
+      return {
+        tile: 'border-amber-500/35 bg-amber-500/5',
+        progress: 'bg-amber-500',
+      };
+    default:
+      return {
+        tile: 'border-muted-foreground/25 bg-muted/20',
+        progress: 'bg-primary',
+      };
+  }
 }
 
 export default function ReleaseDetail({
@@ -26,11 +71,15 @@ export default function ReleaseDetail({
   const [content, setContent] = useState(release.content);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [showAllLinkedFeatures, setShowAllLinkedFeatures] = useState(false);
 
   useEffect(() => {
     setContent(release.content);
     setDirty(false);
     setSaving(false);
+    setEditing(false);
+    setShowAllLinkedFeatures(false);
   }, [release]);
 
   const saveRelease = useCallback(async () => {
@@ -39,118 +88,277 @@ export default function ReleaseDetail({
     try {
       await onSave(release.file_name, content);
       setDirty(false);
+      setEditing(false);
     } finally {
       setSaving(false);
     }
   }, [content, dirty, onSave, release.file_name, saving]);
 
+  const cancelEditing = useCallback(() => {
+    setContent(release.content);
+    setDirty(false);
+    setEditing(false);
+  }, [release.content]);
+
+  const linkedFeatures = useMemo(
+    () =>
+      features.filter(
+        (feature) => feature.release_id === release.file_name || feature.release_id === release.version
+      ),
+    [features, release.file_name, release.version]
+  );
+
+  const linkedStatusSummary = useMemo(() => {
+    const implemented = linkedFeatures.filter((entry) => entry.status === 'implemented').length;
+    const inProgress = linkedFeatures.filter((entry) => entry.status === 'in-progress').length;
+    const planned = linkedFeatures.filter((entry) => entry.status === 'planned').length;
+    const averageReadiness =
+      linkedFeatures.length === 0
+        ? 0
+        : Math.round(
+            linkedFeatures.reduce(
+              (sum, entry) => sum + featureStatusFallbackReadiness(entry.status),
+              0
+            ) / linkedFeatures.length
+          );
+    return {
+      implemented,
+      inProgress,
+      planned,
+      averageReadiness,
+    };
+  }, [linkedFeatures]);
+
+  const visibleLinkedFeatures = useMemo(
+    () => (showAllLinkedFeatures ? linkedFeatures : linkedFeatures.slice(0, 8)),
+    [linkedFeatures, showAllLinkedFeatures]
+  );
+
+  const hiddenLinkedFeatureCount = Math.max(linkedFeatures.length - 8, 0);
+
+  const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && editing) {
         event.preventDefault();
-        onClose();
+        cancelEditing();
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && editing) {
         event.preventDefault();
         void saveRelease();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, saveRelease]);
+  }, [cancelEditing, editing, saveRelease]);
 
   return (
-    <DetailSheet
-      label="Release"
-      title={<h2 className="text-xl font-semibold tracking-tight">{release.version}</h2>}
-      meta={
-        <p className="text-muted-foreground text-xs">
-          {release.file_name} · {release.status}
-        </p>
-      }
-      onClose={onClose}
-      className="max-w-[1800px]"
-      bodyScrollable={false}
-      bodyClassName="overflow-hidden p-0"
-      footerClassName="px-3 py-2 md:px-4 md:py-2.5"
-      footer={
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-      }
-    >
-      <div className="h-full min-h-0 p-2">
-        <MarkdownEditor
-          label={undefined}
-          toolbarStart={
-            <Button size="xs" className="h-7 px-2 text-xs" onClick={() => void saveRelease()} disabled={!dirty || saving}>
-              {saving ? 'Saving…' : 'Save Release'}
-            </Button>
-          }
-          value={content}
-          onChange={(next) => {
-            setContent(next);
-            setDirty(true);
-          }}
-          frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
-            <ReleaseMetadataPanel
-              frontmatter={frontmatter}
-              delimiter={delimiter}
-              defaultVersion={release.version}
-              defaultStatus={release.status}
-              onChange={onChange}
-            />
-          )}
-          mcpEnabled={mcpEnabled}
-          showStats={false}
-          fillHeight
-          rows={18}
-          defaultMode="doc"
-        />
-      </div>
-
-      {/* Associated Features Section */}
-      <div className="border-t bg-muted/20 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
-            <Target className="size-4 text-primary" />
-            Planned Features
-          </h3>
-          <span className="text-muted-foreground text-xs uppercase tracking-wider">
-            {features.filter(f => f.release_id === release.file_name).length} Features
-          </span>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {features
-            .filter((f) => f.release_id === release.file_name)
-            .map((feature) => (
-              <button
-                key={feature.file_name}
-                onClick={() => onSelectFeature(feature)}
-                className="group flex flex-col items-start gap-1 rounded-md border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-accent/50"
-              >
-                <div className="flex w-full items-start justify-between gap-2">
-                  <span className="truncate text-sm font-medium">{feature.title}</span>
-                  <ExternalLink className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="capitalize">{feature.status}</span>
-                </div>
-              </button>
-            ))}
-          {features.filter((f) => f.release_id === release.file_name).length === 0 && (
-            <div className="col-span-full py-6 text-center">
-              <p className="text-muted-foreground text-sm">No features linked to this release yet.</p>
-              <p className="text-muted-foreground text-xs mt-1">
-                Edit a feature to associate it with {release.version}.
-              </p>
+    <div className="space-y-3">
+      <Card size="sm" className="border-primary/20">
+        <CardContent className="space-y-2 py-3">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onClose}>
+                <ArrowLeft className="size-4" />
+                Back To Hub
+              </Button>
             </div>
-          )}
+
+            <h2 className="truncate px-2 text-center text-xl font-semibold tracking-tight">
+              {release.version}
+            </h2>
+
+            <div className="flex min-w-0 justify-end gap-2">
+              {editing && (
+                <>
+                  <Button variant="outline" size="sm" onClick={cancelEditing} disabled={saving}>
+                    <X className="size-4" />
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={() => void saveRelease()} disabled={!dirty || saving}>
+                    <Save className="size-4" />
+                    {saving ? 'Saving…' : 'Save'}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Badge variant="outline">{normalizeReleaseStatus(release.status)}</Badge>
+            <Badge variant="secondary">{linkedFeatures.length} linked features</Badge>
+          </div>
+        </CardContent>
+      </Card>
+
+      {editing ? (
+        <Card size="sm" className="flex min-h-[calc(100vh-15.5rem)] flex-col">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Release Editor</CardTitle>
+            <CardDescription>Editing {release.file_name}</CardDescription>
+          </CardHeader>
+          <CardContent className="min-h-0 flex-1 overflow-hidden p-2 md:p-3">
+            <MarkdownEditor
+              toolbarStart={
+                <span className="text-muted-foreground text-xs">
+                  {dirty ? 'Unsaved changes' : 'Saved'}
+                </span>
+              }
+              value={content}
+              onChange={(next) => {
+                setContent(next);
+                setDirty(true);
+              }}
+              frontmatterPanel={({ frontmatter, delimiter, onChange }) => (
+                <ReleaseMetadataPanel
+                  frontmatter={frontmatter}
+                  delimiter={delimiter}
+                  defaultVersion={release.version}
+                  defaultStatus={release.status}
+                  onChange={onChange}
+                />
+              )}
+              mcpEnabled={mcpEnabled}
+              fillHeight
+              rows={24}
+              defaultMode="edit"
+              showStats={false}
+            />
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          <Card size="sm" className="flex min-h-[calc(100vh-20rem)] flex-col">
+            <CardHeader className="border-b pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm">Release Document</CardTitle>
+                  <CardDescription>
+                    Read-first view. Use Edit Full Screen when you need to update markdown or metadata.
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="border-primary/30 text-primary/80 hover:text-primary"
+                  onClick={() => setEditing(true)}
+                  title="Edit Full Screen"
+                  aria-label="Edit Full Screen"
+                >
+                  <Edit3 className="size-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="min-h-0 flex-1 overflow-auto p-3">
+              <article className="ship-markdown-preview rounded-md border bg-background px-4 py-3">
+                {documentModel.body.trim() ? (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{documentModel.body}</ReactMarkdown>
+                ) : (
+                  <p className="text-muted-foreground text-sm italic">No body content yet.</p>
+                )}
+              </article>
+            </CardContent>
+          </Card>
+
+          <div className="grid min-h-0 gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
+            <Card size="sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Release Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-xs">
+                <p className="text-muted-foreground inline-flex items-center gap-1.5">
+                  <Target className="size-3.5 text-primary" />
+                  {linkedFeatures.length} linked features
+                </p>
+                <p className="text-muted-foreground inline-flex items-center gap-1.5">
+                  <CheckCircle2 className="size-3.5 text-emerald-500" />
+                  {linkedStatusSummary.implemented} implemented
+                </p>
+                <p className="text-muted-foreground inline-flex items-center gap-1.5">
+                  <FileClock className="size-3.5 text-amber-500" />
+                  {linkedStatusSummary.inProgress} in progress · {linkedStatusSummary.planned} planned
+                </p>
+                <p className="text-muted-foreground">
+                  Avg readiness: {linkedStatusSummary.averageReadiness}%
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card size="sm" className="flex min-h-[260px] flex-col">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Planned Features</CardTitle>
+                <CardDescription className="text-xs">
+                  Features mapped to this release
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="min-h-0 flex-1 space-y-2 overflow-auto">
+                {linkedFeatures.length > 0 ? (
+                  <>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {visibleLinkedFeatures.map((feature) => {
+                        const readiness = featureStatusFallbackReadiness(feature.status);
+                        const tone = featureTileClasses(feature.status);
+
+                        return (
+                          <button
+                            key={feature.file_name}
+                            type="button"
+                            onClick={() => onSelectFeature(feature)}
+                            className={cn(
+                              'hover:bg-muted/40 w-full rounded-md border px-2.5 py-2 text-left text-xs transition-colors',
+                              tone.tile
+                            )}
+                            title={feature.file_name}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">{feature.title}</p>
+                                <p className="text-muted-foreground text-[11px]">
+                                  {feature.file_name}
+                                </p>
+                              </div>
+                              <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" />
+                            </div>
+
+                            <div className="mt-2 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                                  {formatStatusLabel(feature.status)}
+                                </Badge>
+                                <span className="text-muted-foreground text-[11px]">{readiness}%</span>
+                              </div>
+                              <Progress value={readiness} indicatorClassName={tone.progress} />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {hiddenLinkedFeatureCount > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-1 h-7 w-full text-xs"
+                        onClick={() => setShowAllLinkedFeatures((current) => !current)}
+                      >
+                        {showAllLinkedFeatures
+                          ? 'Show less'
+                          : `Show ${hiddenLinkedFeatureCount} more`}
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted-foreground py-8 text-center text-xs italic">
+                    No features linked to this release yet.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      </div>
-    </DetailSheet>
+      )}
+    </div>
   );
 }

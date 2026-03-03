@@ -1,4 +1,5 @@
 +++
+# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "KRYQsL3P"
 title = "File vs SQLite boundary"
 date = "2026-02-28"
