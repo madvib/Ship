@@ -159,12 +159,12 @@ pub enum GitCommands {
     Status,
     /// Include a category in git commits
     Include {
-        /// One of: issues, releases, features, specs, adrs, notes, agents, events.ndjson, ship.toml, templates
+        /// One of: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
         category: String,
     },
     /// Exclude a category from git commits (adds to .ship/.gitignore)
     Exclude {
-        /// One of: issues, releases, features, specs, adrs, notes, agents, events.ndjson, ship.toml, templates
+        /// One of: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
         category: String,
     },
     /// Install git hooks for feature-aware checkout
@@ -603,6 +603,12 @@ pub enum EventCommands {
     },
     /// Scan tracked files and emit events for external filesystem changes
     Ingest,
+    /// Export events from SQLite to NDJSON
+    Export {
+        /// Destination path (defaults to .ship/events.ndjson)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1366,6 +1372,17 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         }
                     }
                 }
+                EventCommands::Export { output } => {
+                    let output_path =
+                        output.unwrap_or_else(|| project_dir.join(runtime::EVENTS_FILE_NAME));
+                    let exported = runtime::export_events_ndjson(&project_dir, &output_path)?;
+                    println!(
+                        "Exported {} event{} to {}",
+                        exported,
+                        if exported == 1 { "" } else { "s" },
+                        output_path.display()
+                    );
+                }
             }
         }
         Some(Commands::Projects { action }) => match action {
@@ -1407,7 +1424,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         "specs",
                         "notes",
                         "agents",
-                        "events.ndjson",
                         "ship.toml",
                         "templates",
                     ];

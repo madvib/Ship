@@ -33,8 +33,8 @@ pub use config::{
 
 pub use events::{
     EVENTS_FILE_NAME, EventAction, EventEntity, EventRecord, append_event, ensure_event_log,
-    event_log_path, ingest_external_events, latest_event_seq, list_events_since, read_events,
-    sync_event_snapshot,
+    event_log_path, export_events_ndjson, ingest_external_events, latest_event_seq,
+    list_events_since, read_events, sync_event_snapshot,
 };
 pub use log::{LogEntry, log_action, log_action_by, read_log, read_log_entries};
 pub use migration::{
@@ -120,10 +120,10 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         set_category_committed(&project_dir, "issues", true)?;
-        set_category_committed(&project_dir, "events.ndjson", false)?;
+        set_category_committed(&project_dir, "notes", false)?;
         let git = get_git_config(&project_dir)?;
         assert!(is_category_committed(&git, "issues"));
-        assert!(!is_category_committed(&git, "events.ndjson"));
+        assert!(!is_category_committed(&git, "notes"));
         Ok(())
     }
 
@@ -156,9 +156,8 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
-        // Default config: issues/events stay local; features/specs/adrs/releases committed.
+        // Default config keeps issues local and commits delivery artifacts.
         assert!(gitignore.contains("workflow/issues"));
-        assert!(gitignore.contains("events.ndjson"));
         assert!(gitignore.contains("generated/"));
         // DB is now at ~/.ship/state/<slug>/ship.db — not inside .ship/
         assert!(!gitignore.contains("ship.db"));
@@ -247,7 +246,7 @@ mod tests {
         assert!(ship_path.join("workflow/README.md").is_file());
         assert!(ship_path.join("agents/modes/planning.toml").is_file());
         assert!(ship_path.join("agents/modes/execution.toml").is_file());
-        assert!(ship_path.join("events.ndjson").is_file());
+        assert!(!ship_path.join("events.ndjson").is_file());
         assert!(ship_path.join("ship.toml").is_file());
         // default skill seeded
         assert!(
@@ -335,6 +334,7 @@ mod tests {
     fn test_event_stream_since() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
+        assert!(!ship_path.join("events.ndjson").exists());
         let seq0 = latest_event_seq(&ship_path)?;
         append_event(
             &ship_path,
@@ -356,6 +356,26 @@ mod tests {
         assert!(events.len() >= 2);
         assert!(events.iter().all(|e| e.seq > seq0));
         assert!(events.windows(2).all(|w| w[0].seq < w[1].seq));
+        Ok(())
+    }
+
+    #[test]
+    fn test_event_export_on_demand() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = init_project(tmp.path().to_path_buf())?;
+        append_event(
+            &ship_path,
+            "ship",
+            EventEntity::Project,
+            EventAction::Log,
+            "export",
+            Some("ndjson".to_string()),
+        )?;
+        let export_path = ship_path.join("generated").join("events-export.ndjson");
+        let count = export_events_ndjson(&ship_path, &export_path)?;
+        assert!(count >= 1);
+        let content = fs::read_to_string(&export_path)?;
+        assert!(content.contains("\"action\":\"log\""));
         Ok(())
     }
 

@@ -784,7 +784,7 @@ fn start_project_watcher(
         let adrs_dir = adrs_dir(&ship_root);
         let features_dir = features_dir(&ship_root);
         let releases_dir = releases_dir(&ship_root);
-        let events_file = ship_root.join("events.ndjson");
+        let events_db = runtime::state_db::project_db_path(&ship_root).ok();
         let config_file = ship_root.join(runtime::config::PRIMARY_CONFIG_FILE);
 
         let mut last_issues = issues_signature(&issues_dir);
@@ -792,7 +792,7 @@ fn start_project_watcher(
         let mut last_adrs = issues_signature(&adrs_dir);
         let mut last_features = issues_signature(&features_dir);
         let mut last_releases = issues_signature(&releases_dir);
-        let mut last_events = file_signature(&events_file);
+        let mut last_events = events_db.as_ref().and_then(|path| file_signature(path));
         let mut last_config = file_signature(&config_file);
 
         loop {
@@ -853,11 +853,15 @@ fn start_project_watcher(
                 }
             }
 
-            let next_events = file_signature(&events_file);
-            if next_events != last_events {
-                let _ = ShipEvent::EventsChanged.emit(&app_handle);
-                let _ = ShipEvent::LogChanged.emit(&app_handle);
-                last_events = next_events;
+            if let Some(events_db) = events_db.as_ref() {
+                let next_events = file_signature(events_db);
+                if next_events != last_events {
+                    let _ = ShipEvent::IssuesChanged.emit(&app_handle);
+                    let _ = ShipEvent::SpecsChanged.emit(&app_handle);
+                    let _ = ShipEvent::EventsChanged.emit(&app_handle);
+                    let _ = ShipEvent::LogChanged.emit(&app_handle);
+                    last_events = next_events;
+                }
             }
         }
     });

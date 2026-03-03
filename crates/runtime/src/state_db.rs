@@ -186,6 +186,7 @@ const PROJECT_SCHEMA_ISSUES_SPECS: &str = r#"
 CREATE TABLE IF NOT EXISTS issue (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
+  description     TEXT NOT NULL DEFAULT '',
   status          TEXT NOT NULL DEFAULT 'backlog',
   assignee        TEXT,
   priority        TEXT,
@@ -202,6 +203,7 @@ CREATE INDEX IF NOT EXISTS issue_status_idx ON issue(status);
 CREATE TABLE IF NOT EXISTS spec (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
+  body            TEXT NOT NULL DEFAULT '',
   status          TEXT NOT NULL DEFAULT 'draft',
   author          TEXT,
   branch          TEXT,
@@ -222,6 +224,19 @@ CREATE TABLE IF NOT EXISTS migration_meta (
 );
 "#;
 
+const PROJECT_SCHEMA_EVENTS: &str = r#"
+CREATE TABLE IF NOT EXISTS event_log (
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp   TEXT NOT NULL,
+  actor       TEXT NOT NULL,
+  entity      TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  subject     TEXT NOT NULL,
+  details     TEXT
+);
+CREATE INDEX IF NOT EXISTS event_log_timestamp_idx ON event_log(timestamp);
+"#;
+
 const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_project_schema", PROJECT_SCHEMA_V1),
     ("0002_operational_state", PROJECT_SCHEMA_OPERATIONAL),
@@ -232,6 +247,7 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0007_workspace_lifecycle", PROJECT_SCHEMA_WORKSPACE_V2),
     ("0008_issues_specs", PROJECT_SCHEMA_ISSUES_SPECS),
     ("0009_migration_meta", SCHEMA_MIGRATION_META),
+    ("0010_event_log", PROJECT_SCHEMA_EVENTS),
 ];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_global_schema", GLOBAL_SCHEMA_V1),
@@ -303,7 +319,9 @@ pub struct WorkspaceUpsert<'a> {
 /// across sessions and safe to store alongside the global DB.
 pub fn project_db_path(ship_dir: &Path) -> Result<PathBuf> {
     let slug = project_slug(ship_dir)?;
-    Ok(ship_global_dir()?.join("state").join(slug).join("ship.db"))
+    let global_dir = ship_global_dir()?;
+    ensure_global_dir_outside_project(ship_dir, &global_dir)?;
+    Ok(global_dir.join("state").join(slug).join("ship.db"))
 }
 
 pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationReport> {
@@ -642,6 +660,27 @@ fn ship_global_dir() -> Result<PathBuf> {
     crate::project::get_global_dir()
 }
 
+fn ensure_global_dir_outside_project(ship_dir: &Path, global_dir: &Path) -> Result<()> {
+    let project_root = ship_dir.parent().unwrap_or(ship_dir);
+    let normalize =
+        |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+
+    let ship_dir_norm = normalize(ship_dir);
+    let project_root_norm = normalize(project_root);
+    let global_dir_norm = normalize(global_dir);
+
+    if global_dir_norm.starts_with(&ship_dir_norm)
+        || global_dir_norm.starts_with(&project_root_norm)
+    {
+        return Err(anyhow!(
+            "Resolved global state directory {} is inside project {}. Refusing to write project state locally; expected ~/.ship (or another external absolute path).",
+            global_dir_norm.display(),
+            project_root_norm.display()
+        ));
+    }
+    Ok(())
+}
+
 /// Derives a filesystem-safe slug from the project root path.
 /// `/home/alice/dev/my-app` → `home-alice-dev-my-app`
 fn project_slug(ship_dir: &Path) -> Result<String> {
@@ -961,6 +1000,18 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
         "supported",
         "ALTER TABLE release ADD COLUMN supported INTEGER",
     )?;
+    ensure_column(
+        connection,
+        "issue",
+        "description",
+        "ALTER TABLE issue ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "spec",
+        "body",
+        "ALTER TABLE spec ADD COLUMN body TEXT NOT NULL DEFAULT ''",
+    )?;
 
     let added_branch_link_type = ensure_column(
         connection,
@@ -1266,6 +1317,60 @@ mod tests {
     }
 
     #[test]
+    fn compat_adds_issue_description_and_spec_body_columns() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("issue-spec-compat.db");
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        block_on(async {
+            sqlx::query(
+                "CREATE TABLE issue (
+                   id TEXT PRIMARY KEY,
+                   title TEXT NOT NULL,
+                   status TEXT NOT NULL DEFAULT 'backlog',
+                   assignee TEXT,
+                   priority TEXT,
+                   release_id TEXT,
+                   feature_id TEXT,
+                   spec_id TEXT,
+                   tags_json TEXT NOT NULL DEFAULT '[]',
+                   links_json TEXT NOT NULL DEFAULT '[]',
+                   created_at TEXT NOT NULL,
+                   updated_at TEXT NOT NULL
+                 )",
+            )
+            .execute(&mut conn)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "CREATE TABLE spec (
+                   id TEXT PRIMARY KEY,
+                   title TEXT NOT NULL,
+                   status TEXT NOT NULL DEFAULT 'draft',
+                   author TEXT,
+                   branch TEXT,
+                   feature_id TEXT,
+                   release_id TEXT,
+                   tags_json TEXT NOT NULL DEFAULT '[]',
+                   created_at TEXT NOT NULL,
+                   updated_at TEXT NOT NULL
+                 )",
+            )
+            .execute(&mut conn)
+            .await
+        })?;
+
+        ensure_project_schema_compat(&mut conn)?;
+
+        assert!(column_exists(&mut conn, "issue", "description")?);
+        assert!(column_exists(&mut conn, "spec", "body")?);
+        Ok(())
+    }
+
+    #[test]
     fn migration_meta_project_roundtrip() -> Result<()> {
         let tmp = tempdir()?;
         let db_path = tmp.path().join("migration-meta.db");
@@ -1288,6 +1393,33 @@ mod tests {
         assert_eq!(cleared, 2);
         assert!(!migration_meta_complete(&mut conn, "feature")?);
         assert!(!migration_meta_complete(&mut conn, "release")?);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_global_state_dir_inside_project_tree() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path().join("repo");
+        let ship_dir = project_root.join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        let local_global = ship_dir.join("state");
+        std::fs::create_dir_all(&local_global)?;
+
+        let err = ensure_global_dir_outside_project(&ship_dir, &local_global).unwrap_err();
+        assert!(err.to_string().contains("inside project"));
+        Ok(())
+    }
+
+    #[test]
+    fn allows_global_state_dir_outside_project_tree() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path().join("repo");
+        let ship_dir = project_root.join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        let external_global = tmp.path().join("global-ship-dir");
+        std::fs::create_dir_all(&external_global)?;
+
+        ensure_global_dir_outside_project(&ship_dir, &external_global)?;
         Ok(())
     }
 }

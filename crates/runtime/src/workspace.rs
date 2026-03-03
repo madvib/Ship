@@ -651,11 +651,6 @@ mod tests {
         let tmp = tempdir()?;
         let ship_dir = tmp.path().join(".ship");
         std::fs::create_dir_all(&ship_dir)?;
-        let global_dir = tmp.path().join(".ship-global");
-        std::fs::create_dir_all(&global_dir)?;
-        unsafe {
-            std::env::set_var("SHIP_GLOBAL_DIR", global_dir.to_string_lossy().to_string());
-        }
         crate::state_db::ensure_project_database(&ship_dir)?;
         crate::state_db::set_branch_link(
             &ship_dir,
@@ -673,9 +668,6 @@ mod tests {
         )?;
 
         assert_eq!(workspace.feature_id.as_deref(), Some("feat-auth"));
-        unsafe {
-            std::env::remove_var("SHIP_GLOBAL_DIR");
-        }
         Ok(())
     }
 }

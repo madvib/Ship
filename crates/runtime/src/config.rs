@@ -692,7 +692,6 @@ pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
         ("adrs", "project/adrs"),
         ("notes", "project/notes"),
         ("agents", "agents"),
-        ("events.ndjson", "events.ndjson"),
         ("ship.toml", "ship.toml"),
         ("templates", "**/TEMPLATE.md"),
     ];
@@ -726,7 +725,6 @@ pub fn ensure_registered_namespaces(
         "ship.toml",
         "shipwright.toml",
         "config.toml",
-        "events.ndjson",
         "log.md",
         "templates",
         "plugins",

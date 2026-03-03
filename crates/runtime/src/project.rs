@@ -336,7 +336,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         &ship_path.join("agents/modes/execution.toml"),
         "id = \"execution\"\nname = \"Execution\"\n",
     )?;
-    write_if_missing(&ship_path.join("events.ndjson"), "")?;
+    crate::events::ensure_event_log(&ship_path)?;
     write_if_missing(
         &ship_path.join("agents/skills/task-policy/index.md"),
         "# task-policy\n\nShipwright Workflow Policy\n",

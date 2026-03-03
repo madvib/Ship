@@ -244,11 +244,9 @@ mod tests {
         )?;
         assert_eq!(entry.issue.metadata.title, "Fix login bug");
         assert_eq!(entry.status, IssueStatus::Backlog);
-
-        let path = std::path::PathBuf::from(&entry.path);
-        assert!(path.exists());
-        let content = std::fs::read_to_string(&path)?;
-        assert!(content.contains("Fix login bug"));
+        assert!(!std::path::PathBuf::from(&entry.path).exists());
+        let fetched = get_issue_by_id(&project_dir, &entry.id)?;
+        assert_eq!(fetched.issue.description, "Broken for SSO");
         Ok(())
     }
 
@@ -259,12 +257,9 @@ mod tests {
         let entry = create_spec(&project_dir, "Auth Spec", "Spec content", None, None)?;
         assert_eq!(entry.spec.metadata.title, "Auth Spec");
         assert_eq!(entry.status, SpecStatus::Draft);
-
-        let path = std::path::PathBuf::from(&entry.path);
-        assert!(path.exists());
-        let content = std::fs::read_to_string(&path)?;
-        assert!(content.contains("Auth Spec"));
-        assert!(content.contains("Spec content"));
+        assert!(!std::path::PathBuf::from(&entry.path).exists());
+        let fetched = get_spec_by_id(&project_dir, &entry.id)?;
+        assert_eq!(fetched.spec.body, "Spec content");
         Ok(())
     }
 
@@ -293,8 +288,8 @@ mod tests {
             None,
         )?;
         assert_ne!(p1.path, p2.path);
-        assert!(std::path::PathBuf::from(&p1.path).exists());
-        assert!(std::path::PathBuf::from(&p2.path).exists());
+        assert!(!std::path::PathBuf::from(&p1.path).exists());
+        assert!(!std::path::PathBuf::from(&p2.path).exists());
         Ok(())
     }
 
@@ -358,7 +353,6 @@ mod tests {
             None,
         )?;
         let moved = move_issue(&project_dir, &entry.id, IssueStatus::InProgress)?;
-        assert!(std::path::PathBuf::from(&moved.path).exists());
         assert!(moved.path.contains("in-progress"));
         assert_eq!(moved.status, IssueStatus::InProgress);
         Ok(())
@@ -378,10 +372,9 @@ mod tests {
             None,
             None,
         )?;
-        let path = std::path::PathBuf::from(&entry.path);
-        assert!(path.exists());
+        assert!(!std::path::PathBuf::from(&entry.path).exists());
         delete_issue(&project_dir, &entry.id)?;
-        assert!(!path.exists());
+        assert!(get_issue_by_id(&project_dir, &entry.id).is_err());
         Ok(())
     }
 
@@ -406,7 +399,6 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let entry = create_spec(&project_dir, "Move Spec", "content", None, None)?;
         let moved = move_spec(&project_dir, &entry.id, SpecStatus::Active)?;
-        assert!(std::path::PathBuf::from(&moved.path).exists());
         assert!(moved.path.contains("active"));
         assert_eq!(moved.status, SpecStatus::Active);
         Ok(())
@@ -417,10 +409,9 @@ mod tests {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let entry = create_spec(&project_dir, "Delete Spec", "content", None, None)?;
-        let path = std::path::PathBuf::from(&entry.path);
-        assert!(path.exists());
+        assert!(!std::path::PathBuf::from(&entry.path).exists());
         delete_spec(&project_dir, &entry.id)?;
-        assert!(!path.exists());
+        assert!(get_spec_by_id(&project_dir, &entry.id).is_err());
         Ok(())
     }
 

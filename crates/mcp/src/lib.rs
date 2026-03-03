@@ -26,13 +26,11 @@ use ship_module_git::{install_hooks, on_post_checkout};
 use ship_module_project::{
     IssueEntry, IssueStatus, NoteScope, create_adr, create_feature, create_issue, create_note,
     create_release, create_spec, delete_issue, get_adr_by_id, get_feature_by_id, get_issue_by_id,
-    get_note_by_id, get_project_name, get_release_by_id, get_spec_by_id, import_adrs_from_files,
-    import_features_from_files, import_notes_from_files, import_releases_from_files, list_adrs,
-    list_features, list_issues, list_notes, list_registered_projects, list_releases, list_specs,
-    move_issue, update_feature_content, update_issue, update_note_content, update_release_content,
-    update_spec,
+    get_note_by_id, get_project_name, get_release_by_id, get_spec_by_id, list_adrs, list_features,
+    list_issues, list_notes, list_registered_projects, list_releases, list_specs, move_issue,
+    update_feature_content, update_issue, update_note_content, update_release_content, update_spec,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
 // ─── Request Types ────────────────────────────────────────────────────────────
@@ -153,7 +151,7 @@ pub struct BrainstormRequest {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct GitIncludeRequest {
-    /// Category to change: issues, releases, features, specs, adrs, notes, agents, events.ndjson, ship.toml, templates
+    /// Category to change: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
     pub category: String,
     /// true = commit to git, false = local only (gitignored)
     pub commit: bool,
@@ -410,25 +408,14 @@ impl ShipServer {
         }
     }
 
-    fn ensure_imported(&self, project_dir: &Path) {
-        let _ = import_adrs_from_files(project_dir);
-        let _ = import_notes_from_files(NoteScope::Project, Some(project_dir));
-        let _ = import_notes_from_files(NoteScope::User, None);
-        let _ = import_features_from_files(project_dir);
-        let _ = import_releases_from_files(project_dir);
-    }
-
     async fn get_effective_project_dir(&self) -> Result<PathBuf, String> {
         let active = self.active_project.lock().await;
         if let Some(ref path) = *active {
-            let p = path.clone();
-            self.ensure_imported(&p);
-            return Ok(p);
+            return Ok(path.clone());
         }
         drop(active);
 
         if let Ok(project_dir) = get_project_dir(None) {
-            self.ensure_imported(&project_dir);
             return Ok(project_dir);
         }
 
@@ -1380,7 +1367,7 @@ impl ShipServer {
 
     /// Update git commit settings for the active project
     #[tool(
-        description = "Set whether a category (issues/releases/features/specs/adrs/notes/agents/events.ndjson/ship.toml/templates) is committed to git or kept local. Updates .ship/.gitignore automatically."
+        description = "Set whether a category (issues/releases/features/specs/adrs/notes/agents/ship.toml/templates) is committed to git or kept local. Updates .ship/.gitignore automatically."
     )]
     async fn git_config_set(&self, Parameters(req): Parameters<GitIncludeRequest>) -> String {
         let project_dir = match self.get_effective_project_dir().await {
@@ -1395,7 +1382,6 @@ impl ShipServer {
             "specs",
             "notes",
             "agents",
-            "events.ndjson",
             "ship.toml",
             "templates",
         ];

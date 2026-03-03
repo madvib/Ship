@@ -2,59 +2,19 @@ use super::types::{Issue, IssueEntry, IssueMetadata, IssuePriority, IssueStatus}
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::Row;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 
-fn find_issue_file(
-    ship_dir: &Path,
-    id: &str,
-    status: &IssueStatus,
-    title: &str,
-) -> Option<PathBuf> {
-    let base = runtime::project::sanitize_file_name(title);
-    let dir = runtime::project::issues_dir(ship_dir).join(status.to_string());
-    if !dir.exists() {
-        return None;
-    }
+fn virtual_issue_file_name(id: &str) -> String {
+    format!("{}.md", id)
+}
 
-    for suffix in &["", "-2", "-3", "-4", "-5", "-6", "-7", "-8", "-9", "-10"] {
-        let file_name = if suffix.is_empty() {
-            format!("{}.md", base)
-        } else {
-            format!("{}{}.md", base, suffix)
-        };
-        let p = dir.join(file_name);
-        if p.exists() {
-            if let Ok(content) = std::fs::read_to_string(&p) {
-                if content.contains(id) {
-                    return Some(p);
-                }
-            }
-        }
-    }
-
-    // Fallback: scan everywhere in issues/
-    let issues_dir = runtime::project::issues_dir(ship_dir);
-    for status_dir in &["backlog", "in-progress", "blocked", "done"] {
-        let dir = issues_dir.join(status_dir);
-        if !dir.exists() {
-            continue;
-        }
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_file() && p.extension().map_or(false, |e| e == "md") {
-                    if let Ok(content) = std::fs::read_to_string(&p) {
-                        if content.contains(id) {
-                            return Some(p);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    None
+fn virtual_issue_path(ship_dir: &Path, status: &IssueStatus, id: &str) -> String {
+    runtime::project::issues_dir(ship_dir)
+        .join(status.to_string())
+        .join(virtual_issue_file_name(id))
+        .to_string_lossy()
+        .to_string()
 }
 
 pub fn upsert_issue_db(ship_dir: &Path, issue: &Issue, status: &IssueStatus) -> Result<()> {
@@ -64,22 +24,24 @@ pub fn upsert_issue_db(ship_dir: &Path, issue: &Issue, status: &IssueStatus) -> 
     runtime::state_db::block_on(async {
         sqlx::query(
             "INSERT INTO issue
-               (id, title, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (id, title, description, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-               title      = excluded.title,
-               status     = excluded.status,
-               assignee   = excluded.assignee,
-               priority   = excluded.priority,
-               release_id = excluded.release_id,
-               feature_id = excluded.feature_id,
-               spec_id    = excluded.spec_id,
-               tags_json  = excluded.tags_json,
-               links_json = excluded.links_json,
-               updated_at = excluded.updated_at",
+               title       = excluded.title,
+               description = excluded.description,
+               status      = excluded.status,
+               assignee    = excluded.assignee,
+               priority    = excluded.priority,
+               release_id  = excluded.release_id,
+               feature_id  = excluded.feature_id,
+               spec_id     = excluded.spec_id,
+               tags_json   = excluded.tags_json,
+               links_json  = excluded.links_json,
+               updated_at  = excluded.updated_at",
         )
         .bind(&issue.metadata.id)
         .bind(&issue.metadata.title)
+        .bind(&issue.description)
         .bind(status.to_string())
         .bind(&issue.metadata.assignee)
         .bind(issue.metadata.priority.as_ref().map(|p| p.to_string()))
@@ -101,7 +63,7 @@ pub fn get_issue_db(ship_dir: &Path, id: &str) -> Result<Option<IssueEntry>> {
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let row_opt = sqlx::query(
-            "SELECT id, title, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at
+            "SELECT id, title, description, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at
              FROM issue WHERE id = ?",
         )
         .bind(id)
@@ -111,16 +73,17 @@ pub fn get_issue_db(ship_dir: &Path, id: &str) -> Result<Option<IssueEntry>> {
         if let Some(r) = row_opt {
             let id: String = r.get(0);
             let title: String = r.get(1);
-            let status_str: String = r.get(2);
-            let assignee: Option<String> = r.get(3);
-            let priority_str: Option<String> = r.get(4);
-            let release_id: Option<String> = r.get(5);
-            let feature_id: Option<String> = r.get(6);
-            let spec_id: Option<String> = r.get(7);
-            let tags_json: String = r.get(8);
-            let links_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let description: String = r.get(2);
+            let status_str: String = r.get(3);
+            let assignee: Option<String> = r.get(4);
+            let priority_str: Option<String> = r.get(5);
+            let release_id: Option<String> = r.get(6);
+            let feature_id: Option<String> = r.get(7);
+            let spec_id: Option<String> = r.get(8);
+            let tags_json: String = r.get(9);
+            let links_json: String = r.get(10);
+            let created: String = r.get(11);
+            let updated: String = r.get(12);
 
             let status = IssueStatus::from_str(&status_str).ok().unwrap_or_default();
             let priority = priority_str.and_then(|s| match s.as_str() {
@@ -132,21 +95,8 @@ pub fn get_issue_db(ship_dir: &Path, id: &str) -> Result<Option<IssueEntry>> {
             });
             let tags = serde_json::from_str(&tags_json).unwrap_or_default();
             let links = serde_json::from_str(&links_json).unwrap_or_default();
-
-            let file_path = find_issue_file(ship_dir, &id, &status, &title);
-            let mut description = String::new();
-            let mut path = String::new();
-            let mut file_name = runtime::project::sanitize_file_name(&title) + ".md";
-
-            if let Some(p) = file_path {
-                path = p.to_string_lossy().to_string();
-                file_name = p.file_name().unwrap().to_string_lossy().to_string();
-                if let Ok(content) = std::fs::read_to_string(&p) {
-                    if let Ok(issue) = Issue::from_markdown(&content) {
-                        description = issue.description;
-                    }
-                }
-            }
+            let file_name = virtual_issue_file_name(&id);
+            let path = virtual_issue_path(ship_dir, &status, &id);
 
             Ok(Some(IssueEntry {
                 id: id.clone(),
@@ -180,7 +130,7 @@ pub fn list_issues_db(ship_dir: &Path) -> Result<Vec<IssueEntry>> {
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let rows = sqlx::query(
-            "SELECT id, title, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at
+            "SELECT id, title, description, status, assignee, priority, release_id, feature_id, spec_id, tags_json, links_json, created_at, updated_at
              FROM issue ORDER BY updated_at DESC",
         )
         .fetch_all(&mut conn)
@@ -190,16 +140,17 @@ pub fn list_issues_db(ship_dir: &Path) -> Result<Vec<IssueEntry>> {
         for r in rows {
             let id: String = r.get(0);
             let title: String = r.get(1);
-            let status_str: String = r.get(2);
-            let assignee: Option<String> = r.get(3);
-            let priority_str: Option<String> = r.get(4);
-            let release_id: Option<String> = r.get(5);
-            let feature_id: Option<String> = r.get(6);
-            let spec_id: Option<String> = r.get(7);
-            let tags_json: String = r.get(8);
-            let links_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let description: String = r.get(2);
+            let status_str: String = r.get(3);
+            let assignee: Option<String> = r.get(4);
+            let priority_str: Option<String> = r.get(5);
+            let release_id: Option<String> = r.get(6);
+            let feature_id: Option<String> = r.get(7);
+            let spec_id: Option<String> = r.get(8);
+            let tags_json: String = r.get(9);
+            let links_json: String = r.get(10);
+            let created: String = r.get(11);
+            let updated: String = r.get(12);
 
             let status = IssueStatus::from_str(&status_str).ok().unwrap_or_default();
             let priority = priority_str.and_then(|s| match s.as_str() {
@@ -211,20 +162,8 @@ pub fn list_issues_db(ship_dir: &Path) -> Result<Vec<IssueEntry>> {
             });
             let tags = serde_json::from_str(&tags_json).unwrap_or_default();
             let links = serde_json::from_str(&links_json).unwrap_or_default();
-            let file_path = find_issue_file(ship_dir, &id, &status, &title);
-            let mut description = String::new();
-            let mut path = String::new();
-            let mut file_name = runtime::project::sanitize_file_name(&title) + ".md";
-
-            if let Some(p) = file_path {
-                path = p.to_string_lossy().to_string();
-                file_name = p.file_name().unwrap().to_string_lossy().to_string();
-                if let Ok(content) = std::fs::read_to_string(&p) {
-                    if let Ok(issue) = Issue::from_markdown(&content) {
-                        description = issue.description;
-                    }
-                }
-            }
+            let file_name = virtual_issue_file_name(&id);
+            let path = virtual_issue_path(ship_dir, &status, &id);
 
             entries.push(IssueEntry {
                 id: id.clone(),

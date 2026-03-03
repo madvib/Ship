@@ -52,7 +52,6 @@ const GIT_CATEGORIES = [
   'specs',
   'ship.toml',
   'templates',
-  'events.ndjson',
 ];
 const AI_PROVIDERS = [
   { id: 'claude', label: 'Claude (claude)' },
