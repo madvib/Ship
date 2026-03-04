@@ -1,6 +1,6 @@
 import { ReactNode } from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './card'
+import { Button } from './button'
 import { cn } from '@/lib/utils'
 
 interface EmptyStateProps {

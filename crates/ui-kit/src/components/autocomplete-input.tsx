@@ -6,7 +6,7 @@ import {
   ComboboxInput as UiComboboxInput,
   ComboboxItem,
   ComboboxList,
-} from '@/components/ui/combobox';
+} from './combobox';
 
 export interface AutocompleteOption {
   value: string;
