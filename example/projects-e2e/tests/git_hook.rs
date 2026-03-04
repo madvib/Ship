@@ -203,3 +203,46 @@ fn mcp_json_written_on_checkout() {
         serde_json::from_str(&std::fs::read_to_string(mcp_json).unwrap()).unwrap();
     assert!(val["mcpServers"]["github"].is_object());
 }
+
+#[test]
+fn repeated_post_checkout_is_deterministic_for_claude_md() {
+    let p = TestProject::with_git().unwrap();
+    create_feature(
+        p.ship_dir.clone(),
+        "Determinism",
+        "Stable context generation.",
+        None,
+        None,
+        Some("feature/determinism"),
+    )
+    .unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/determinism", &p.root()).unwrap();
+    let first = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/determinism", &p.root()).unwrap();
+    let second = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+
+    assert_eq!(first, second, "CLAUDE.md should be stable across reruns");
+}
+
+#[test]
+fn default_task_policy_requires_ship_tooling_in_generated_context() {
+    let p = TestProject::with_git().unwrap();
+    create_feature(
+        p.ship_dir.clone(),
+        "Policy Inclusion",
+        "Ensure policy text is present.",
+        None,
+        None,
+        Some("feature/policy"),
+    )
+    .unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/policy", &p.root()).unwrap();
+    let content = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    assert!(
+        content.contains("Use Ship As System of Record"),
+        "default task policy guidance should be included in CLAUDE.md"
+    );
+}

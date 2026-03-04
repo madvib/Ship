@@ -159,3 +159,156 @@ pub fn resolve_agent_config(
         active_mode,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AiConfig, McpServerType, ModeConfig, ProjectConfig, save_config};
+    use crate::project::init_project;
+    use crate::skill::create_skill;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    fn stdio_server(id: &str, command: &str) -> McpServerConfig {
+        McpServerConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            command: command.to_string(),
+            args: vec![],
+            env: HashMap::new(),
+            scope: "project".to_string(),
+            server_type: McpServerType::Stdio,
+            url: None,
+            disabled: false,
+            timeout_secs: None,
+        }
+    }
+
+    #[test]
+    fn resolve_agent_config_feature_overrides_providers_model_and_skill_filter() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        create_skill(&ship_dir, "__rt_alpha_skill__", "Alpha", "alpha body")?;
+        create_skill(&ship_dir, "__rt_beta_skill__", "Beta", "beta body")?;
+
+        let mut config = ProjectConfig::default();
+        config.providers = vec!["claude".to_string(), "gemini".to_string()];
+        config.ai = Some(AiConfig {
+            provider: Some("claude".to_string()),
+            model: Some("global-model".to_string()),
+            cli_path: None,
+        });
+        config.mcp_servers = vec![stdio_server("github", "github-bin")];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: Some("feature-model".to_string()),
+            max_cost_per_session: Some(4.2),
+            mcp_servers: vec!["github".to_string()],
+            skills: vec!["__rt_beta_skill__".to_string()],
+            providers: vec!["codex".to_string()],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        assert_eq!(resolved.providers, vec!["codex".to_string()]);
+        assert_eq!(resolved.model.as_deref(), Some("feature-model"));
+        assert_eq!(resolved.max_cost_per_session, Some(4.2));
+        assert_eq!(
+            resolved
+                .skills
+                .iter()
+                .map(|skill| skill.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["__rt_beta_skill__"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_agent_config_applies_mode_mcp_filter_without_feature_override() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.mcp_servers = vec![
+            stdio_server("github", "github-bin"),
+            stdio_server("linear", "linear-bin"),
+        ];
+        config.modes = vec![ModeConfig {
+            id: "planning".to_string(),
+            name: "Planning".to_string(),
+            mcp_servers: vec!["github".to_string()],
+            ..Default::default()
+        }];
+        config.active_mode = Some("planning".to_string());
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let resolved = resolve_agent_config(&ship_dir, None)?;
+        assert_eq!(resolved.mcp_servers.len(), 1);
+        assert_eq!(resolved.mcp_servers[0].id, "github");
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_agent_config_merges_mcp_toml_and_overrides_duplicate_ids() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.mcp_servers = vec![stdio_server("github", "ship-toml-command")];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let mut servers = HashMap::new();
+        servers.insert(
+            "github".to_string(),
+            McpServerConfig {
+                id: String::new(),
+                name: "github".to_string(),
+                command: "mcp-toml-command".to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                scope: "project".to_string(),
+                server_type: McpServerType::Stdio,
+                url: None,
+                disabled: false,
+                timeout_secs: None,
+            },
+        );
+        servers.insert(
+            "figma".to_string(),
+            McpServerConfig {
+                id: String::new(),
+                name: "figma".to_string(),
+                command: "figma-command".to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                scope: "project".to_string(),
+                server_type: McpServerType::Stdio,
+                url: None,
+                disabled: false,
+                timeout_secs: None,
+            },
+        );
+        let mcp_toml = toml::to_string(&crate::config::McpConfig {
+            mcp: crate::config::McpSection { servers },
+        })?;
+        std::fs::write(crate::project::mcp_config_path(&ship_dir), mcp_toml)?;
+
+        let resolved = resolve_agent_config(&ship_dir, None)?;
+        let github = resolved
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "github")
+            .expect("github server should exist");
+        let figma = resolved
+            .mcp_servers
+            .iter()
+            .find(|server| server.id == "figma")
+            .expect("figma server should exist");
+
+        assert_eq!(github.command, "mcp-toml-command");
+        assert_eq!(figma.command, "figma-command");
+        Ok(())
+    }
+}

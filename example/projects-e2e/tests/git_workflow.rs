@@ -56,8 +56,7 @@ mod new_project {
         p.assert_ship_file("agents/modes/planning.toml");
         p.assert_ship_file("agents/modes/execution.toml");
 
-        // Event log
-        p.assert_ship_file("events.ndjson");
+        // Runtime state is SQLite-first; no NDJSON event file is required on init.
     }
 
     /// Default task-policy skill is seeded on init.
