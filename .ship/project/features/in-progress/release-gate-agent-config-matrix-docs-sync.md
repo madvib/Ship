@@ -2,7 +2,7 @@
 id = "ATeRtCPJ"
 title = "Release Gate: Agent Config Matrix + Docs Sync"
 created = "2026-03-04T03:01:06.866179+00:00"
-updated = "2026-03-04T07:05:24+0000"
+updated = "2026-03-04T07:11:02+0000"
 tags = []
 +++
 
@@ -16,7 +16,10 @@ tags = []
 - [x] Added CLI/export boundary e2e coverage for mode hook/permission propagation:
   - `ship config export --target claude` writes mode `permissions` + `hooks` into `~/.claude/settings.json`
   - non-Claude target exports do not mutate Claude settings
+- [x] Added docs-sync regeneration coverage for skill and prompt updates:
+  - `CLAUDE.md` reflects updated skill content after repeated post-checkout regeneration
+  - `GEMINI.md` reflects updated mode prompt content after repeated export regeneration
 
 ## Next
 
-- [ ] Add docs-sync assertions for skill/prompt updates across repeated regeneration cycles.
+- [ ] Expand multi-provider docs-sync checks for Codex/agents output parity under repeated regeneration.

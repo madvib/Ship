@@ -4,6 +4,7 @@ use helpers::TestProject;
 use runtime::agent_config::FeatureAgentConfig;
 use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
 use runtime::create_skill;
+use runtime::update_skill;
 use ship_module_git::on_post_checkout;
 use std::collections::HashMap;
 use std::path::Path;
@@ -281,5 +282,63 @@ fn claude_md_reflects_rule_updates_after_regeneration() {
     assert!(
         !second.contains("Always include migration notes in release docs."),
         "stale rule content should not remain after regeneration"
+    );
+}
+
+#[test]
+fn claude_md_reflects_skill_updates_after_regeneration() {
+    let p = TestProject::with_git().unwrap();
+    let feature_path = create_feature(
+        p.ship_dir.clone(),
+        "Skill Sync",
+        "Ensure skill changes flow into generated context.",
+        None,
+        None,
+        Some("feature/skill-sync"),
+    )
+    .unwrap();
+
+    create_skill(
+        &p.ship_dir,
+        "skill-sync-test",
+        "Skill Sync Test",
+        "Always validate API contracts with baseline snapshots.",
+    )
+    .unwrap();
+    set_feature_agent(
+        &feature_path.1,
+        FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec!["skill-sync-test".to_string()],
+            providers: vec![],
+        },
+    );
+
+    on_post_checkout(&p.ship_dir, "feature/skill-sync", &p.root()).unwrap();
+    let first = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    assert!(
+        first.contains("Always validate API contracts with baseline snapshots."),
+        "initial skill content should be present in CLAUDE.md"
+    );
+
+    update_skill(
+        &p.ship_dir,
+        "skill-sync-test",
+        None,
+        Some("Always validate API contracts with schema-driven checks."),
+    )
+    .unwrap();
+    on_post_checkout(&p.ship_dir, "feature/skill-sync", &p.root()).unwrap();
+    let second = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+
+    assert!(
+        second.contains("Always validate API contracts with schema-driven checks."),
+        "updated skill content should be present after regeneration"
+    );
+    assert!(
+        !second.contains("Always validate API contracts with baseline snapshots."),
+        "stale skill content should not remain after regeneration"
     );
 }

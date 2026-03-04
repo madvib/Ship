@@ -4,6 +4,7 @@ use runtime::config::{
     HookConfig, HookTrigger, McpServerConfig, McpServerType, ModeConfig, PermissionConfig,
     ProjectConfig, save_config,
 };
+use runtime::{create_prompt, update_prompt};
 use std::collections::HashMap;
 use std::process::Output;
 
@@ -236,5 +237,54 @@ fn gemini_export_does_not_write_claude_settings_file() {
         !settings_path.exists(),
         "gemini export should not create Claude settings at {}",
         settings_path.display()
+    );
+}
+
+/// Prompt content updates should propagate to regenerated provider docs.
+#[test]
+fn gemini_export_reflects_prompt_updates_after_regeneration() {
+    let p = TestProject::new().unwrap();
+    create_prompt(
+        &p.ship_dir,
+        "release-gate-prompt",
+        "Release Gate Prompt",
+        "Always run the initial release gate checklist.",
+    )
+    .unwrap();
+
+    let mut config = ProjectConfig::default();
+    config.modes = vec![ModeConfig {
+        id: "release".to_string(),
+        name: "Release".to_string(),
+        prompt_id: Some("release-gate-prompt".to_string()),
+        ..Default::default()
+    }];
+    config.active_mode = Some("release".to_string());
+    save_config(&config, Some(p.ship_dir.clone())).unwrap();
+
+    runtime::agent_export::export_to(p.ship_dir.clone(), "gemini").unwrap();
+    let first = std::fs::read_to_string(p.root().join("GEMINI.md")).unwrap();
+    assert!(
+        first.contains("Always run the initial release gate checklist."),
+        "initial prompt content should be written to GEMINI.md"
+    );
+
+    update_prompt(
+        &p.ship_dir,
+        "release-gate-prompt",
+        None,
+        Some("Always run the updated release gate checklist."),
+    )
+    .unwrap();
+
+    runtime::agent_export::export_to(p.ship_dir.clone(), "gemini").unwrap();
+    let second = std::fs::read_to_string(p.root().join("GEMINI.md")).unwrap();
+    assert!(
+        second.contains("Always run the updated release gate checklist."),
+        "updated prompt content should be written after regeneration"
+    );
+    assert!(
+        !second.contains("Always run the initial release gate checklist."),
+        "stale prompt content should not remain after regeneration"
     );
 }
