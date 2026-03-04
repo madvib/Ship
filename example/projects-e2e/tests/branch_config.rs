@@ -594,6 +594,29 @@ fn checkout_skips_unknown_feature_provider_ids_and_exports_valid_targets() {
     p.assert_no_root_file("AGENTS.md");
 }
 
+/// If project providers are malformed/unknown, checkout should still fall back
+/// to Claude so branch context generation remains functional.
+#[test]
+fn checkout_with_invalid_project_providers_falls_back_to_claude() {
+    let p = TestProject::with_git().unwrap();
+    let mut config = ProjectConfig::default();
+    config.providers = vec!["unknown-provider".to_string()];
+    save_config(&config, Some(p.ship_dir.clone())).unwrap();
+
+    create_feature(
+        p.ship_dir.clone(),
+        "Auth Flow",
+        "Body",
+        None,
+        None,
+        Some("feature/auth"),
+    )
+    .unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
+    p.assert_root_file("CLAUDE.md");
+}
+
 // ─── Encapsulated branch creation (ship feature start) ───────────────────────
 
 /// `ship feature start <file>` creates the git branch, writes it into the feature

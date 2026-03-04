@@ -460,4 +460,18 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn resolve_agent_config_invalid_project_providers_fall_back_to_claude() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.providers = vec!["unknown-provider".to_string(), "   ".to_string()];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let resolved = resolve_agent_config(&ship_dir, None)?;
+        assert_eq!(resolved.providers, vec!["claude".to_string()]);
+        Ok(())
+    }
 }

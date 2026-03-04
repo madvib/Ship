@@ -34,7 +34,9 @@ tags = []
 - [x] Hardened feature-level provider override handling:
   - provider IDs are normalized/deduped and unknown values are filtered from resolved agent config
   - invalid feature provider overrides now fall back to project providers
+  - invalid project-level provider lists now fall back to `claude` for safe default execution
   - added regression coverage to ensure checkout skips unknown feature provider IDs and still exports valid targets
+  - added regression coverage to ensure checkout still works when project provider config is malformed
 - [x] Full `cargo test -p e2e` green with new suites included.
 - [x] Added workspace failure-path rollback coverage:
   - failed `workspace create --checkout` does not persist stale workspace rows
