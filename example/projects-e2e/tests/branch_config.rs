@@ -563,6 +563,37 @@ fn checkout_writes_gemini_config_when_declared_as_provider() {
     );
 }
 
+/// Unknown provider IDs in feature-level overrides should not break checkout as long
+/// as at least one valid provider remains after normalization.
+#[test]
+fn checkout_skips_unknown_feature_provider_ids_and_exports_valid_targets() {
+    let p = TestProject::with_git().unwrap();
+
+    let feat = create_feature(
+        p.ship_dir.clone(),
+        "Auth Flow",
+        "Body",
+        None,
+        None,
+        Some("feature/auth"),
+    )
+    .unwrap();
+    set_feature_agent(
+        &feat.1,
+        FeatureAgentConfig {
+            providers: vec!["unknown-provider".to_string(), " CLAUDE ".to_string()],
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec![],
+        },
+    );
+
+    on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
+    p.assert_root_file("CLAUDE.md");
+    p.assert_no_root_file("AGENTS.md");
+}
+
 // ─── Encapsulated branch creation (ship feature start) ───────────────────────
 
 /// `ship feature start <file>` creates the git branch, writes it into the feature

@@ -627,10 +627,22 @@ pub fn sync_active_mode(project_dir: &Path) -> Result<Vec<String>> {
         })
         .unwrap_or_default();
 
+    let mut seen = std::collections::HashSet::new();
     let mut synced = Vec::new();
-    for target in &targets {
-        export_to(project_dir.to_path_buf(), target)?;
-        synced.push(target.clone());
+    for target in targets {
+        let normalized = target.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !seen.insert(normalized.clone()) {
+            continue;
+        }
+        if get_provider(&normalized).is_none() {
+            eprintln!(
+                "[ship] warning: skipping unknown target agent '{}'",
+                target
+            );
+            continue;
+        }
+        export_to(project_dir.to_path_buf(), &normalized)?;
+        synced.push(normalized);
     }
     Ok(synced)
 }
@@ -1418,6 +1430,53 @@ mod tests {
             .iter()
             .any(|hook| hook.id == "unused-mode-hook"));
         assert!(payload.servers.iter().any(|server| server.id == "github"));
+    }
+
+    #[test]
+    fn sync_active_mode_defaults_to_claude_when_targets_empty() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.modes = vec![ModeConfig {
+            id: "focus".to_string(),
+            name: "Focus".to_string(),
+            target_agents: vec![],
+            ..Default::default()
+        }];
+        config.active_mode = Some("focus".to_string());
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let synced = sync_active_mode(&project_dir).unwrap();
+        assert_eq!(synced, vec!["claude".to_string()]);
+        assert!(tmp.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn sync_active_mode_normalizes_targets_and_skips_unknown_values() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.modes = vec![ModeConfig {
+            id: "focus".to_string(),
+            name: "Focus".to_string(),
+            target_agents: vec![
+                " codex ".to_string(),
+                "unknown-agent".to_string(),
+                "CLAUDE".to_string(),
+                "claude".to_string(),
+                "".to_string(),
+            ],
+            ..Default::default()
+        }];
+        config.active_mode = Some("focus".to_string());
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let synced = sync_active_mode(&project_dir).unwrap();
+        assert_eq!(
+            synced,
+            vec!["codex".to_string(), "claude".to_string()],
+            "targets should be normalized, deduped, and unknown providers skipped"
+        );
+        assert!(tmp.path().join(".codex").join("config.toml").exists());
+        assert!(tmp.path().join(".mcp.json").exists());
     }
 
     // ── Registry ───────────────────────────────────────────────────────────────

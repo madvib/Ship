@@ -26,6 +26,15 @@ tags = []
   - pre-commit hook blocks staging `AGENTS.md` and `.agents/` outputs
   - added e2e parity check that Codex-generated files stay ignored
   - added pre-commit regression coverage for both `AGENTS.md` and `.agents/` staging attempts
+- [x] Hardened active-mode export target handling:
+  - `sync_active_mode` now normalizes and dedupes `target_agents`
+  - unknown `target_agents` are skipped with a warning instead of aborting mode sync
+  - `set_active_mode` now logs sync failures instead of silently swallowing them
+  - added runtime coverage for default empty-target behavior and unknown-target skip behavior
+- [x] Hardened feature-level provider override handling:
+  - provider IDs are normalized/deduped and unknown values are filtered from resolved agent config
+  - invalid feature provider overrides now fall back to project providers
+  - added regression coverage to ensure checkout skips unknown feature provider IDs and still exports valid targets
 - [x] Full `cargo test -p e2e` green with new suites included.
 - [x] Added workspace failure-path rollback coverage:
   - failed `workspace create --checkout` does not persist stale workspace rows

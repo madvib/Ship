@@ -19,6 +19,7 @@ use crate::skill::{Skill, list_effective_skills};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashSet;
 use std::path::Path;
 
 // ─── Resolved config ──────────────────────────────────────────────────────────
@@ -53,6 +54,27 @@ pub struct AgentConfig {
     pub active_mode: Option<String>,
 }
 
+fn normalize_provider_ids(ids: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for raw in ids {
+        let id = raw.trim().to_ascii_lowercase();
+        if id.is_empty() {
+            continue;
+        }
+        // Keep provider IDs aligned with registered provider descriptors.
+        if !matches!(id.as_str(), "claude" | "gemini" | "codex") {
+            continue;
+        }
+        if seen.insert(id.clone()) {
+            normalized.push(id);
+        }
+    }
+
+    normalized
+}
+
 // ─── Resolution ───────────────────────────────────────────────────────────────
 
 /// Resolve the effective [`AgentConfig`] for the current project state.
@@ -70,10 +92,20 @@ pub fn resolve_agent_config(
     let config = get_config(Some(ship_dir.to_path_buf()))?;
 
     // ── Providers ─────────────────────────────────────────────────────────────
-    let providers = feature_agent
+    let feature_override_providers = feature_agent
         .filter(|fa| !fa.providers.is_empty())
-        .map(|fa| fa.providers.clone())
-        .unwrap_or_else(|| config.providers.clone());
+        .map(|fa| normalize_provider_ids(&fa.providers))
+        .unwrap_or_default();
+    let providers = if !feature_override_providers.is_empty() {
+        feature_override_providers
+    } else {
+        let project_providers = normalize_provider_ids(&config.providers);
+        if project_providers.is_empty() {
+            vec!["claude".to_string()]
+        } else {
+            project_providers
+        }
+    };
 
     // ── Active mode ───────────────────────────────────────────────────────────
     let active_mode = config.active_mode.clone();
@@ -370,6 +402,62 @@ mod tests {
             vec!["claude".to_string(), "gemini".to_string()]
         );
         assert_eq!(resolved.model.as_deref(), Some("feature-model"));
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_agent_config_feature_providers_are_normalized_and_unknown_filtered() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.providers = vec!["gemini".to_string()];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            providers: vec![
+                " codex ".to_string(),
+                "unknown-provider".to_string(),
+                "CLAUDE".to_string(),
+                "claude".to_string(),
+            ],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        assert_eq!(
+            resolved.providers,
+            vec!["codex".to_string(), "claude".to_string()]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_agent_config_invalid_feature_provider_override_falls_back_to_project() -> Result<()>
+    {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.providers = vec!["gemini".to_string(), "claude".to_string()];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            providers: vec!["unknown-provider".to_string()],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        assert_eq!(
+            resolved.providers,
+            vec!["gemini".to_string(), "claude".to_string()]
+        );
         Ok(())
     }
 }
