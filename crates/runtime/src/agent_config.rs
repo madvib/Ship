@@ -258,6 +258,36 @@ mod tests {
     }
 
     #[test]
+    fn resolve_agent_config_feature_skill_filter_ignores_missing_ids() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        create_skill(&ship_dir, "__rt_only_skill__", "Only", "only body")?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec![
+                "__rt_missing_skill__".to_string(),
+                "__rt_only_skill__".to_string(),
+            ],
+            providers: vec![],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        assert_eq!(
+            resolved
+                .skills
+                .iter()
+                .map(|skill| skill.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["__rt_only_skill__"]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn resolve_agent_config_applies_mode_mcp_filter_without_feature_override() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = init_project(tmp.path().to_path_buf())?;
@@ -373,7 +403,11 @@ mod tests {
         };
 
         let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
-        let ids: Vec<&str> = resolved.mcp_servers.iter().map(|server| server.id.as_str()).collect();
+        let ids: Vec<&str> = resolved
+            .mcp_servers
+            .iter()
+            .map(|server| server.id.as_str())
+            .collect();
         assert_eq!(ids, vec!["linear"]);
         Ok(())
     }

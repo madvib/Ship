@@ -635,10 +635,7 @@ pub fn sync_active_mode(project_dir: &Path) -> Result<Vec<String>> {
             continue;
         }
         if get_provider(&normalized).is_none() {
-            eprintln!(
-                "[ship] warning: skipping unknown target agent '{}'",
-                target
-            );
+            eprintln!("[ship] warning: skipping unknown target agent '{}'", target);
             continue;
         }
         export_to(project_dir.to_path_buf(), &normalized)?;
@@ -1286,6 +1283,7 @@ mod tests {
         ProjectConfig, save_config,
     };
     use crate::project::init_project;
+    use crate::skill::{create_skill, delete_skill};
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -1332,8 +1330,10 @@ mod tests {
 
     #[test]
     fn build_payload_active_mode_filters_servers_and_applies_mode_hooks_permissions() {
-        let (_tmp, project_dir) =
-            project_with_servers(vec![make_stdio_server("allowed"), make_stdio_server("blocked")]);
+        let (_tmp, project_dir) = project_with_servers(vec![
+            make_stdio_server("allowed"),
+            make_stdio_server("blocked"),
+        ]);
         let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
         config.hooks = vec![HookConfig {
             id: "project-global-hook".to_string(),
@@ -1421,14 +1421,18 @@ mod tests {
         assert_eq!(payload.active_mode_id, None);
         assert!(payload.permissions.allow.is_empty());
         assert!(payload.permissions.deny.is_empty());
-        assert!(payload
-            .hooks
-            .iter()
-            .any(|hook| hook.id == "project-global-hook-only"));
-        assert!(!payload
-            .hooks
-            .iter()
-            .any(|hook| hook.id == "unused-mode-hook"));
+        assert!(
+            payload
+                .hooks
+                .iter()
+                .any(|hook| hook.id == "project-global-hook-only")
+        );
+        assert!(
+            !payload
+                .hooks
+                .iter()
+                .any(|hook| hook.id == "unused-mode-hook")
+        );
         assert!(payload.servers.iter().any(|server| server.id == "github"));
     }
 
@@ -1724,6 +1728,48 @@ mod tests {
         )
         .unwrap();
         assert!(val["mcp_servers"]["ship"].is_table());
+    }
+
+    #[test]
+    fn codex_export_prunes_stale_managed_skill_dirs() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        create_skill(&project_dir, "__rt_live_skill__", "Live", "live body").unwrap();
+        create_skill(&project_dir, "__rt_stale_skill__", "Stale", "stale body").unwrap();
+
+        export_to(project_dir.clone(), "codex").unwrap();
+        let skills_dir = tmp.path().join(".agents").join("skills");
+        let live_skill_dir = skills_dir.join("__rt_live_skill__");
+        let stale_skill_dir = skills_dir.join("__rt_stale_skill__");
+        assert!(live_skill_dir.join("SKILL.md").exists());
+        assert!(stale_skill_dir.join("SKILL.md").exists());
+
+        delete_skill(&project_dir, "__rt_stale_skill__").unwrap();
+        export_to(project_dir, "codex").unwrap();
+
+        assert!(live_skill_dir.join("SKILL.md").exists());
+        assert!(
+            !stale_skill_dir.exists(),
+            "stale managed skill directory should be pruned on export"
+        );
+    }
+
+    #[test]
+    fn codex_export_preserves_unmanaged_skill_dirs() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        let unmanaged_dir = tmp
+            .path()
+            .join(".agents")
+            .join("skills")
+            .join("__rt_unmanaged_skill__");
+        std::fs::create_dir_all(&unmanaged_dir).unwrap();
+        let unmanaged_file = unmanaged_dir.join("SKILL.md");
+        std::fs::write(&unmanaged_file, "manual skill content").unwrap();
+
+        export_to(project_dir, "codex").unwrap();
+
+        assert!(unmanaged_dir.exists());
+        let content = std::fs::read_to_string(&unmanaged_file).unwrap();
+        assert_eq!(content, "manual skill content");
     }
 
     // ── Import ─────────────────────────────────────────────────────────────────

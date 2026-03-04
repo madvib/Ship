@@ -338,11 +338,7 @@ fn codex_export_reflects_prompt_updates_after_regeneration() {
     );
 }
 
-fn assert_deleted_skill_is_pruned_for_target(
-    target: &str,
-    skill_dir_prefix: &str,
-    skill_id: &str,
-) {
+fn assert_deleted_skill_is_pruned_for_target(target: &str, skill_dir_prefix: &str, skill_id: &str) {
     let p = TestProject::new().unwrap();
     create_skill(
         &p.ship_dir,

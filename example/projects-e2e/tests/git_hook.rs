@@ -262,7 +262,11 @@ fn claude_md_reflects_rule_updates_after_regeneration() {
     .unwrap();
 
     let custom_rule = p.ship_dir.join("agents/rules/999-test-rule-sync.md");
-    std::fs::write(&custom_rule, "Always include migration notes in release docs.").unwrap();
+    std::fs::write(
+        &custom_rule,
+        "Always include migration notes in release docs.",
+    )
+    .unwrap();
 
     on_post_checkout(&p.ship_dir, "feature/rule-sync", &p.root()).unwrap();
     let first = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();

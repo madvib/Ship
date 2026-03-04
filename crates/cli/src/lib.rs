@@ -986,11 +986,25 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 }
                 ReleaseCommands::Get { file_name } => {
                     let version = file_name.trim_end_matches(".md");
-                    if let Ok(entry) = get_release_by_id(&project_dir, version) {
-                        println!("{}", entry.release.to_markdown()?);
-                    } else {
-                        println!("Release not found: {}", file_name);
-                    }
+                    let entry = get_release_by_id(&project_dir, version)
+                        .map_err(|_| anyhow::anyhow!("Release not found: {}", file_name))?;
+                    let release_path = {
+                        let primary =
+                            runtime::project::releases_dir(&project_dir).join(&entry.file_name);
+                        if primary.exists() {
+                            primary
+                        } else {
+                            let legacy = runtime::project::upcoming_releases_dir(&project_dir)
+                                .join(&entry.file_name);
+                            if legacy.exists() {
+                                legacy
+                            } else {
+                                anyhow::bail!("Release file not found: {}", entry.file_name);
+                            }
+                        }
+                    };
+                    let content = std::fs::read_to_string(release_path)?;
+                    println!("{}", content);
                 }
                 ReleaseCommands::Update { file_name, content } => {
                     let version = file_name.trim_end_matches(".md");

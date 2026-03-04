@@ -653,7 +653,10 @@ fn feature_start_creates_branch_and_generates_config() {
 
     // feature start must at minimum persist branch linkage
     // (runtime config generation is validated in dedicated checkout/workspace tests)
-    assert!(f.feature.metadata.branch.is_some(), "branch should remain linked after start");
+    assert!(
+        f.feature.metadata.branch.is_some(),
+        "branch should remain linked after start"
+    );
 }
 
 /// `ship workspace switch <branch>` checks out the branch and regenerates config.
@@ -675,7 +678,9 @@ fn feature_switch_checks_out_branch_and_syncs_config() {
     p.checkout_new("feature/auth").unwrap();
     p.checkout("main").unwrap();
 
-    let out = p.cli_output(&["workspace", "switch", "feature/auth"]).unwrap();
+    let out = p
+        .cli_output(&["workspace", "switch", "feature/auth"])
+        .unwrap();
     assert!(
         out.status.success(),
         "ship workspace switch failed:\n{}",

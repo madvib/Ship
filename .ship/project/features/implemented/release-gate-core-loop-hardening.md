@@ -2,7 +2,7 @@
 id = "KPmx9VzP"
 title = "Release Gate: Core Loop Hardening"
 created = "2026-03-04T03:00:48.730307+00:00"
-updated = "2026-03-04T15:05:56+0000"
+updated = "2026-03-04T19:07:21+0000"
 tags = []
 +++
 
@@ -38,6 +38,10 @@ tags = []
   - added regression coverage to ensure checkout skips unknown feature provider IDs and still exports valid targets
   - added regression coverage to ensure checkout still works when project provider config is malformed
 - [x] Full `cargo test -p e2e` green with new suites included.
+- [x] Hardened release CLI read/update consistency:
+  - `release get <id>` now exits non-zero when the release does not exist.
+  - release updates now overwrite the canonical markdown file instead of creating suffixed duplicates.
+  - added module + e2e regressions for release create/update/get round-trip and duplicate-file prevention.
 - [x] Added workspace failure-path rollback coverage:
   - failed `workspace create --checkout` does not persist stale workspace rows
   - failed `workspace create --worktree` does not persist stale workspace rows

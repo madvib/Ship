@@ -20,7 +20,12 @@ fn assert_success(out: &Output, context: &str) {
 
 fn branch_exists(project: &TestProject, branch: &str) -> bool {
     Command::new("git")
-        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
         .current_dir(project.root())
         .status()
         .map(|status| status.success())
