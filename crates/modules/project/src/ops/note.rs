@@ -43,6 +43,7 @@ pub fn create_note(
     title: &str,
     content: &str,
 ) -> OpsResult<Note> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     if title.trim().is_empty() {
         return Err(OpsError::Validation(
             "Note title cannot be empty".to_string(),
@@ -67,10 +68,12 @@ pub fn create_note(
 }
 
 pub fn get_note_by_id(scope: NoteScope, ship_dir: Option<&Path>, id: &str) -> OpsResult<Note> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     crate::note::get_note_by_id(scope, ship_dir, id).map_err(OpsError::from)
 }
 
 pub fn list_notes(scope: NoteScope, ship_dir: Option<&Path>) -> OpsResult<Vec<NoteEntry>> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     crate::note::list_notes(scope, ship_dir).map_err(OpsError::from)
 }
 
@@ -81,6 +84,7 @@ pub fn update_note(
     title: &str,
     content: &str,
 ) -> OpsResult<Note> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     if title.trim().is_empty() {
         return Err(OpsError::Validation(
             "Note title cannot be empty".to_string(),
@@ -111,6 +115,7 @@ pub fn update_note_content(
     id: &str,
     content: &str,
 ) -> OpsResult<Note> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     let note =
         crate::note::update_note_content(scope, ship_dir, id, content).map_err(OpsError::from)?;
     append_note_event(
@@ -131,6 +136,7 @@ pub fn update_note_content(
 }
 
 pub fn delete_note(scope: NoteScope, ship_dir: Option<&Path>, id: &str) -> OpsResult<()> {
+    let _ = project_dir_for_scope(scope, ship_dir)?;
     let note = crate::note::get_note_by_id(scope, ship_dir, id).map_err(OpsError::from)?;
     crate::note::delete_note(scope, ship_dir, id).map_err(OpsError::from)?;
     append_note_event(scope, ship_dir, EventAction::Delete, &note.id, None)?;
@@ -163,6 +169,22 @@ mod tests {
                 && event.subject == note.id
         }));
 
+        Ok(())
+    }
+
+    #[test]
+    fn project_note_scope_requires_project_dir() {
+        let err = create_note(NoteScope::Project, None, "missing-project", "body")
+            .expect_err("expected validation error when project dir missing");
+        assert!(matches!(err, OpsError::Validation(_)));
+    }
+
+    #[test]
+    fn user_note_ops_work_without_project_dir() -> anyhow::Result<()> {
+        let note = create_note(NoteScope::User, None, "user-note", "body")?;
+        assert!(!note.id.trim().is_empty());
+        let loaded = get_note_by_id(NoteScope::User, None, &note.id)?;
+        assert_eq!(loaded.title, "user-note");
         Ok(())
     }
 }

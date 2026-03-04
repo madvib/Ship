@@ -45,3 +45,35 @@ pub fn update_release_content(ship_dir: &Path, id: &str, content: &str) -> OpsRe
     )?;
     Ok(entry)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::init_project;
+    use runtime::read_log_entries;
+    use tempfile::tempdir;
+
+    #[test]
+    fn create_release_rejects_empty_version() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let err = create_release(&project_dir, "   ", "").expect_err("expected validation failure");
+        assert!(matches!(err, OpsError::Validation(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn update_release_content_happy_path_writes_project_log() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let created = create_release(&project_dir, "v9.9.9-alpha", "before")?;
+        let updated = update_release_content(&project_dir, &created.id, "after")?;
+        assert_eq!(updated.release.body, "after");
+
+        let logs = read_log_entries(&project_dir)?;
+        assert!(logs.iter().any(|entry| {
+            entry.action == "release update" && entry.details.contains(&updated.version)
+        }));
+        Ok(())
+    }
+}

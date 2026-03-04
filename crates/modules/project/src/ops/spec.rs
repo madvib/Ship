@@ -56,3 +56,37 @@ pub fn move_spec(ship_dir: &Path, id: &str, status: SpecStatus) -> OpsResult<Spe
     )?;
     Ok(entry)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::init_project;
+    use runtime::read_log_entries;
+    use tempfile::tempdir;
+
+    #[test]
+    fn create_spec_rejects_empty_title() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let err = create_spec(&project_dir, "   ", "", None, None)
+            .expect_err("expected validation failure");
+        assert!(matches!(err, OpsError::Validation(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn move_spec_happy_path_writes_project_log() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let created = create_spec(&project_dir, "ops-spec", "body", None, None)?;
+        let moved = move_spec(&project_dir, &created.id, SpecStatus::Active)?;
+        assert_eq!(moved.status, SpecStatus::Active);
+
+        let logs = read_log_entries(&project_dir)?;
+        assert!(
+            logs.iter()
+                .any(|entry| entry.action == "spec move" && entry.details.contains(&moved.id))
+        );
+        Ok(())
+    }
+}

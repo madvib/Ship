@@ -109,6 +109,7 @@ pub fn feature_done(ship_dir: &Path, id: &str) -> OpsResult<FeatureEntry> {
 mod tests {
     use super::*;
     use crate::{init_project, update_feature};
+    use runtime::read_log_entries;
     use tempfile::tempdir;
 
     #[test]
@@ -144,6 +145,33 @@ mod tests {
 
         let err = feature_done(&project_dir, &created.id).expect_err("expected validation failure");
         assert!(matches!(err, OpsError::Validation(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn feature_done_happy_path_transitions_and_logs() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let created = create_feature(
+            &project_dir,
+            "ops-done-happy",
+            "",
+            None,
+            None,
+            Some("feature/ops-done-happy"),
+        )?;
+
+        let started = feature_start(&project_dir, &created.id)?;
+        assert_eq!(started.status, FeatureStatus::InProgress);
+
+        let done = feature_done(&project_dir, &created.id)?;
+        assert_eq!(done.status, FeatureStatus::Implemented);
+
+        let logs = read_log_entries(&project_dir)?;
+        assert!(
+            logs.iter()
+                .any(|entry| entry.action == "feature done" && entry.details.contains(&done.id))
+        );
         Ok(())
     }
 }

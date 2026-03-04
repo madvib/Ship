@@ -102,6 +102,7 @@ pub fn delete_issue(ship_dir: &Path, id: &str) -> OpsResult<()> {
 mod tests {
     use super::*;
     use crate::init_project;
+    use runtime::read_log_entries;
     use tempfile::tempdir;
 
     #[test]
@@ -127,6 +128,38 @@ mod tests {
         )
         .expect_err("expected transition validation failure");
         assert!(matches!(err, OpsError::InvalidTransition(_, _)));
+        let unchanged = get_issue_by_id(&project_dir, &issue.id)?;
+        assert_eq!(unchanged.status, IssueStatus::Backlog);
+        Ok(())
+    }
+
+    #[test]
+    fn move_issue_with_from_happy_path_writes_project_log() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+        let issue = create_issue(
+            &project_dir,
+            "happy-path",
+            "state",
+            IssueStatus::Backlog,
+            None,
+            None,
+            None,
+            None,
+        )?;
+
+        let moved = move_issue_with_from(
+            &project_dir,
+            &issue.id,
+            IssueStatus::Backlog,
+            IssueStatus::InProgress,
+        )?;
+        assert_eq!(moved.status, IssueStatus::InProgress);
+
+        let logs = read_log_entries(&project_dir)?;
+        assert!(logs.iter().any(|entry| {
+            entry.action == "issue move" && entry.details.contains(&moved.file_name)
+        }));
         Ok(())
     }
 }

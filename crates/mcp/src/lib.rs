@@ -2065,4 +2065,44 @@ mod tests {
         assert!(claude_md.exists(), "CLAUDE.md should be written");
         assert!(mcp_json.exists(), ".mcp.json should be written");
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mcp_move_issue_rejects_from_status_mismatch() {
+        let tmp = tempdir().expect("tempdir");
+        let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
+
+        let server = ShipServer::new();
+        *server.active_project.lock().await = Some(project_dir.clone());
+
+        let created = server
+            .create_issue(Parameters(CreateIssueRequest {
+                title: "Ops guard".to_string(),
+                description: "ensure from-status check".to_string(),
+                status: Some("backlog".to_string()),
+            }))
+            .await;
+        assert!(
+            created.contains("Created issue:"),
+            "unexpected create response: {}",
+            created
+        );
+
+        let issues = list_issues(&project_dir).expect("list issues");
+        assert_eq!(issues.len(), 1);
+        let file_name = issues[0].file_name.clone();
+
+        let moved = server
+            .move_issue(Parameters(MoveIssueRequest {
+                file_name,
+                from_status: "in-progress".to_string(),
+                to_status: "done".to_string(),
+            }))
+            .await;
+
+        assert!(
+            moved.contains("Invalid status transition"),
+            "unexpected move response: {}",
+            moved
+        );
+    }
 }
