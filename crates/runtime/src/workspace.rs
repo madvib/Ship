@@ -670,4 +670,58 @@ mod tests {
         assert_eq!(workspace.feature_id.as_deref(), Some("feat-auth"));
         Ok(())
     }
+
+    #[test]
+    fn activating_workspace_demotes_other_active_workspace() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = tmp.path().join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        crate::state_db::ensure_project_database(&ship_dir)?;
+
+        let first = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/alpha".to_string(),
+                status: Some(WorkspaceStatus::Active),
+                feature_id: Some("feat-alpha".to_string()),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+        assert_eq!(first.status, WorkspaceStatus::Active);
+
+        let second = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/beta".to_string(),
+                status: Some(WorkspaceStatus::Active),
+                feature_id: Some("feat-beta".to_string()),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+        assert_eq!(second.status, WorkspaceStatus::Active);
+
+        let first_after = get_workspace(&ship_dir, "feature/alpha")?
+            .ok_or_else(|| anyhow::anyhow!("feature/alpha workspace missing"))?;
+        let second_after = get_workspace(&ship_dir, "feature/beta")?
+            .ok_or_else(|| anyhow::anyhow!("feature/beta workspace missing"))?;
+        assert_eq!(first_after.status, WorkspaceStatus::Idle);
+        assert_eq!(second_after.status, WorkspaceStatus::Active);
+        assert!(second_after.last_activated_at.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn activate_workspace_main_branch_stays_unlinked() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = tmp.path().join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        crate::state_db::ensure_project_database(&ship_dir)?;
+
+        let workspace = activate_workspace(&ship_dir, "main")?;
+        assert_eq!(workspace.status, WorkspaceStatus::Active);
+        assert!(workspace.feature_id.is_none());
+        assert!(workspace.spec_id.is_none());
+        assert!(get_branch_link(&ship_dir, "main")?.is_none());
+        Ok(())
+    }
 }

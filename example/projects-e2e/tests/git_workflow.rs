@@ -725,6 +725,7 @@ mod existing_agent_configs {
 
 mod core_loop {
     use super::*;
+    use runtime::{WorkspaceStatus, get_workspace};
 
     /// The complete recommended workflow in one test.
     #[test]
@@ -743,7 +744,7 @@ mod core_loop {
         assert!(gitignore.contains("CLAUDE.md"));
 
         // 3. Create a feature and link it to a branch
-        create_feature(
+        let (feature_id, _) = create_feature(
             p.ship_dir.clone(),
             "Payment Processing",
             "Stripe checkout integration.",
@@ -762,6 +763,11 @@ mod core_loop {
         p.assert_root_file_contains("CLAUDE.md", "Payment Processing");
         p.assert_root_file_contains("CLAUDE.md", "Feature Spec");
         p.assert_root_file_contains("CLAUDE.md", "Shipwright Workflow Policy");
+        let workspace = get_workspace(&p.ship_dir, "feature/payments")
+            .unwrap()
+            .expect("feature workspace should be present");
+        assert_eq!(workspace.status, WorkspaceStatus::Active);
+        assert_eq!(workspace.feature_id.as_deref(), Some(feature_id.as_str()));
 
         // 6. Work files can be committed; generated files cannot be staged
         p.write_root_file("src/payments.rs", "pub fn charge() {}");
@@ -773,6 +779,16 @@ mod core_loop {
         on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
         p.assert_no_root_file("CLAUDE.md");
         p.assert_no_root_file(".mcp.json");
+        let main_workspace = get_workspace(&p.ship_dir, "main")
+            .unwrap()
+            .expect("main workspace should be active after checkout");
+        assert_eq!(main_workspace.status, WorkspaceStatus::Active);
+        assert!(main_workspace.feature_id.is_none());
+
+        let feature_workspace = get_workspace(&p.ship_dir, "feature/payments")
+            .unwrap()
+            .expect("feature workspace should remain tracked");
+        assert_eq!(feature_workspace.status, WorkspaceStatus::Idle);
     }
 
     /// The core loop works identically on an existing codebase (not a new project).
