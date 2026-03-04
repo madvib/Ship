@@ -287,3 +287,65 @@ fn workspace_worktree_failure_does_not_persist_workspace_record() {
         "failed worktree create should not switch the main checkout branch"
     );
 }
+
+#[test]
+fn workspace_recreate_without_worktree_clears_worktree_metadata() {
+    let project = TestProject::with_git().unwrap();
+    let init = project.initial_commit().unwrap();
+    assert_success(&init, "initial git commit failed");
+
+    let worktree_path = project
+        .root()
+        .join(".worktrees")
+        .join("feature-worktree-metadata");
+    let worktree_arg = worktree_path.to_string_lossy().to_string();
+    let branch = "feature/worktree-metadata";
+
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "create",
+            branch,
+            "--worktree",
+            "--worktree-path",
+            &worktree_arg,
+            "--feature",
+            "feat-worktree-metadata",
+        ],
+    );
+    assert_success(&out, "workspace create --worktree failed");
+
+    let worktree_workspace = get_workspace(&project.ship_dir, branch)
+        .unwrap()
+        .expect("worktree workspace should exist");
+    assert!(worktree_workspace.is_worktree);
+    assert_eq!(
+        worktree_workspace.worktree_path.as_deref(),
+        Some(worktree_arg.as_str())
+    );
+
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "create",
+            branch,
+            "--feature",
+            "feat-worktree-metadata",
+        ],
+    );
+    assert_success(&out, "workspace recreate without --worktree failed");
+
+    let updated = get_workspace(&project.ship_dir, branch)
+        .unwrap()
+        .expect("updated workspace should exist");
+    assert!(
+        !updated.is_worktree,
+        "workspace should no longer be marked as worktree"
+    );
+    assert!(
+        updated.worktree_path.is_none(),
+        "worktree path should be cleared when workspace is no longer a worktree"
+    );
+}

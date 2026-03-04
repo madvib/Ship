@@ -454,7 +454,23 @@ pub fn create_workspace(ship_dir: &Path, request: CreateWorkspaceRequest) -> Res
         workspace.is_worktree = is_worktree;
     }
     if let Some(worktree_path) = request.worktree_path {
-        workspace.worktree_path = Some(worktree_path);
+        let path = worktree_path.trim();
+        if path.is_empty() {
+            workspace.worktree_path = None;
+        } else if workspace.is_worktree {
+            workspace.worktree_path = Some(path.to_string());
+        } else {
+            return Err(anyhow::anyhow!(
+                "Worktree path can only be set when is_worktree=true"
+            ));
+        }
+    }
+    if !workspace.is_worktree {
+        workspace.worktree_path = None;
+    } else if workspace.worktree_path.is_none() {
+        return Err(anyhow::anyhow!(
+            "Worktree workspace requires a worktree path"
+        ));
     }
     if let Some(context_hash) = request.context_hash {
         workspace.context_hash = Some(context_hash);
@@ -789,6 +805,70 @@ mod tests {
         assert!(workspace.feature_id.is_none());
         assert!(workspace.spec_id.is_none());
         assert!(get_branch_link(&ship_dir, "main")?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn create_workspace_clears_worktree_metadata_when_switched_to_non_worktree() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = tmp.path().join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        crate::state_db::ensure_project_database(&ship_dir)?;
+
+        let branch = "feature/worktree-cleanup";
+        let initial = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: branch.to_string(),
+                is_worktree: Some(true),
+                worktree_path: Some("../worktrees/worktree-cleanup".to_string()),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+        assert!(initial.is_worktree);
+        assert_eq!(
+            initial.worktree_path.as_deref(),
+            Some("../worktrees/worktree-cleanup")
+        );
+
+        let updated = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: branch.to_string(),
+                is_worktree: Some(false),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+        assert!(!updated.is_worktree);
+        assert!(updated.worktree_path.is_none());
+
+        let stored = get_workspace(&ship_dir, branch)?
+            .ok_or_else(|| anyhow::anyhow!("workspace missing after update"))?;
+        assert!(!stored.is_worktree);
+        assert!(stored.worktree_path.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn create_workspace_requires_path_for_worktree_records() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = tmp.path().join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        crate::state_db::ensure_project_database(&ship_dir)?;
+
+        let err = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/missing-path".to_string(),
+                is_worktree: Some(true),
+                ..CreateWorkspaceRequest::default()
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Worktree workspace requires a worktree path")
+        );
         Ok(())
     }
 }
