@@ -1,20 +1,20 @@
-import type { SpecDocument as RawSpecDocument, SpecInfo as RawSpecInfo } from '@/bindings';
+import type { Spec as RawSpec, SpecEntry as RawSpecEntry } from '@/bindings';
 
-export interface SpecInfo extends RawSpecInfo { }
+export interface SpecInfo extends RawSpecEntry { }
 
-export interface SpecDocument extends RawSpecDocument { }
+export interface SpecDocument extends RawSpec { }
 
-export function toSpecInfo(entry: RawSpecInfo): SpecInfo {
+export function toSpecInfo(entry: RawSpecEntry): SpecInfo {
   return entry;
 }
 
-export function toSpecDocument(entry: RawSpecDocument): SpecDocument {
+export function toSpecDocument(entry: RawSpec): SpecDocument {
   return entry;
 }
 
 export function stubSpecDocument(entry: SpecInfo, content = ''): SpecDocument {
   return {
-    ...entry,
-    content,
+    ...entry.spec,
+    body: content,
   };
 }

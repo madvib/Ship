@@ -80,7 +80,7 @@ export function SearchModal() {
                                 }
                             >
                                 <Target className="mr-2 h-4 w-4" />
-                                <span>{feature.feature.metadata.title}</span>
+                                <span>{feature.title}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>
@@ -98,7 +98,7 @@ export function SearchModal() {
                                 }
                             >
                                 <FileText className="mr-2 h-4 w-4" />
-                                <span>{spec.title}</span>
+                                <span>{spec.id}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>
@@ -117,7 +117,7 @@ export function SearchModal() {
                                 }
                             >
                                 <Package className="mr-2 h-4 w-4" />
-                                <span>{release.release.metadata.version}</span>
+                                <span>{release.version}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>
@@ -156,7 +156,7 @@ export function SearchModal() {
                                 }
                             >
                                 <Gavel className="mr-2 h-4 w-4" />
-                                <span>{adr.adr.metadata.title}</span>
+                                <span>{adr.title || adr.file_name}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>

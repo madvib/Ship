@@ -13,7 +13,7 @@ import {
   setActiveModeCmd,
 } from '../platform/tauri/commands';
 import { isTauriRuntime } from '../platform/tauri/runtime';
-import { applyTheme, SIDEBAR_COLLAPSED_STORAGE_KEY, projectFromInfo } from './workspace/constants';
+import { SIDEBAR_COLLAPSED_STORAGE_KEY, projectFromInfo } from './workspace/constants';
 import { useWorkspaceLifecycle } from './workspace/useWorkspaceLifecycle';
 import { useProjectActions } from './workspace/useProjectActions';
 import { useSettingsActions } from './workspace/useSettingsActions';
@@ -205,7 +205,11 @@ export function useWorkspaceController() {
     handleSaveProjectSettings,
     handleSaveGlobalAgentSettings,
     handleSetActiveMode,
-    applyTheme,
+    applyTheme: (theme?: 'light' | 'dark') => {
+      if (theme) {
+        handleSaveSettings({ ...config, theme });
+      }
+    },
     // Layered Ship DSL data
     ship,
   };

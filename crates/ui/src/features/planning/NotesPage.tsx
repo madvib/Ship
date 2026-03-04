@@ -294,8 +294,8 @@ export default function NotesPage() {
                     title={isGlobalScope ? 'Global Notes' : 'Notes'}
                     badge={<Badge variant="outline">{isGlobalScope ? 'Global' : 'Project'}</Badge>}
                     actions={
-                        <Button size="sm" onClick={handleNewNote}>
-                            <Plus className="size-3.5" />
+                        <Button onClick={handleNewNote} className="gap-2">
+                            <Plus className="size-4" />
                             New Note
                         </Button>
                     }

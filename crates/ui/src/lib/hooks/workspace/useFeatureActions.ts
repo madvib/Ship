@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction } from 'react';
-import { FeatureEntry } from '@/bindings';
+import { FeatureInfo, FeatureDocument } from '@/bindings';
 import {
   createFeatureCmd,
   getFeatureCmd,
@@ -8,8 +8,8 @@ import {
 import { isTauriRuntime } from '../../platform/tauri/runtime';
 
 interface UseFeatureActionsParams {
-  setFeatures: Dispatch<SetStateAction<FeatureEntry[]>>;
-  setSelectedFeature: Dispatch<SetStateAction<FeatureEntry | null>>;
+  setFeatures: Dispatch<SetStateAction<FeatureInfo[]>>;
+  setSelectedFeature: Dispatch<SetStateAction<FeatureDocument | null>>;
   setError: Dispatch<SetStateAction<string | null>>;
   refreshActivity: () => Promise<void>;
 }
@@ -20,9 +20,11 @@ export function useFeatureActions({
   setError,
   refreshActivity,
 }: UseFeatureActionsParams) {
-  const handleSelectFeature = async (entry: FeatureEntry) => {
+  const handleSelectFeature = async (entry: FeatureInfo) => {
     if (!isTauriRuntime()) {
-      setSelectedFeature(entry);
+      // In non-tauri, we can't fetch the document, so we just set the info
+      // but the types will complain. This is a fallback case.
+      setSelectedFeature(entry as unknown as FeatureDocument);
       return;
     }
 
@@ -77,7 +79,7 @@ export function useFeatureActions({
       if (result.status === 'ok') {
         const updated = result.data;
         setFeatures((prev) =>
-          prev.map((entry) => (entry.file_name === updated.file_name ? updated : entry))
+          prev.map((entry: FeatureInfo) => (entry.file_name === updated.file_name ? updated : entry))
         );
         setSelectedFeature(updated);
         await refreshActivity();

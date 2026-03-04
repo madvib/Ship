@@ -81,12 +81,12 @@ const ADR_STATUS_OPTIONS: Array<{
   label: string;
   icon: ComponentType<{ className?: string }>;
 }> = [
-  { value: 'proposed', label: 'Proposed', icon: HelpCircle },
-  { value: 'accepted', label: 'Accepted', icon: CheckCircle2 },
-  { value: 'rejected', label: 'Rejected', icon: XCircle },
-  { value: 'superseded', label: 'Superseded', icon: RefreshCcw },
-  { value: 'deprecated', label: 'Deprecated', icon: AlertCircle },
-];
+    { value: 'proposed', label: 'Proposed', icon: HelpCircle },
+    { value: 'accepted', label: 'Accepted', icon: CheckCircle2 },
+    { value: 'rejected', label: 'Rejected', icon: XCircle },
+    { value: 'superseded', label: 'Superseded', icon: RefreshCcw },
+    { value: 'deprecated', label: 'Deprecated', icon: AlertCircle },
+  ];
 
 function formatStatusLabel(status: AdrStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -173,11 +173,11 @@ export default function AdrList({
     const next = adrs.filter((entry) => {
       const matchesSearch =
         !needle ||
-        entry.adr.metadata.title.toLowerCase().includes(needle) ||
+        entry.adr?.metadata?.title.toLowerCase().includes(needle) ||
         entry.status.toLowerCase().includes(needle) ||
         entry.file_name.toLowerCase().includes(needle) ||
         entry.id.toLowerCase().includes(needle) ||
-        (entry.adr.metadata.spec_id ?? '').toLowerCase().includes(needle);
+        (entry.adr?.metadata?.spec_id ?? '').toLowerCase().includes(needle);
 
       const matchesStatus =
         selectedStatuses.size === 0 || selectedStatuses.has(entry.status);
@@ -193,7 +193,7 @@ export default function AdrList({
         case 'oldest':
           return (
             (Number.isNaN(dateA) ? 0 : dateA) -
-              (Number.isNaN(dateB) ? 0 : dateB) ||
+            (Number.isNaN(dateB) ? 0 : dateB) ||
             a.file_name.localeCompare(b.file_name)
           );
         case 'status':
@@ -203,14 +203,14 @@ export default function AdrList({
           );
         case 'title':
           return (
-            a.adr.metadata.title.localeCompare(b.adr.metadata.title) ||
+            a.adr?.metadata?.title.toLowerCase().localeCompare(b.adr?.metadata?.title.toLowerCase()) ||
             (Number.isNaN(dateB) ? 0 : dateB) - (Number.isNaN(dateA) ? 0 : dateA)
           );
         case 'newest':
         default:
           return (
             (Number.isNaN(dateB) ? 0 : dateB) -
-              (Number.isNaN(dateA) ? 0 : dateA) ||
+            (Number.isNaN(dateA) ? 0 : dateA) ||
             a.file_name.localeCompare(b.file_name)
           );
       }
@@ -478,181 +478,181 @@ export default function AdrList({
 
             <section className="h-full min-h-0">
               <Card size="sm" className="flex h-full min-h-[60vh] flex-col">
-              <CardHeader className="gap-3 border-b pb-3">
-                {!creating && !displayEntry ? (
-                  <div>
-                    <CardTitle>Select A Decision</CardTitle>
-                    <CardDescription>
-                      Choose an ADR from the register to read or edit it.
-                    </CardDescription>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <CardTitle className="truncate">{displayTitle}</CardTitle>
-                      <CardDescription className="flex flex-wrap items-center gap-2">
-                        {displayDate && <span>{formatDate(displayDate)}</span>}
-                        {!creating && displayEntry && (
-                          <>
-                            <span className="inline-flex items-center gap-1">
-                              <Shapes className="size-3.5" />
-                              {displayEntry.adr.metadata.spec_id
-                                ? displayEntry.adr.metadata.spec_id
-                                : 'No linked spec'}
-                            </span>
-                            <span className="inline-flex items-center gap-1">
-                              <GitBranch className="size-3.5" />
-                              {displayEntry.adr.metadata.supersedes_id
-                                ? `Supersedes ${displayEntry.adr.metadata.supersedes_id}`
-                                : 'No lineage link'}
-                            </span>
-                          </>
-                        )}
+                <CardHeader className="gap-3 border-b pb-3">
+                  {!creating && !displayEntry ? (
+                    <div>
+                      <CardTitle>Select A Decision</CardTitle>
+                      <CardDescription>
+                        Choose an ADR from the register to read or edit it.
                       </CardDescription>
                     </div>
+                  ) : (
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 space-y-1">
+                        <CardTitle className="truncate">{displayTitle}</CardTitle>
+                        <CardDescription className="flex flex-wrap items-center gap-2">
+                          {displayDate && <span>{formatDate(displayDate)}</span>}
+                          {!creating && displayEntry && (
+                            <>
+                              <span className="inline-flex items-center gap-1">
+                                <Shapes className="size-3.5" />
+                                {displayEntry.adr.metadata.spec_id
+                                  ? displayEntry.adr.metadata.spec_id
+                                  : 'No linked spec'}
+                              </span>
+                              <span className="inline-flex items-center gap-1">
+                                <GitBranch className="size-3.5" />
+                                {displayEntry.adr.metadata.supersedes_id
+                                  ? `Supersedes ${displayEntry.adr.metadata.supersedes_id}`
+                                  : 'No lineage link'}
+                              </span>
+                            </>
+                          )}
+                        </CardDescription>
+                      </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {creating ? (
-                        <Select value={createStatus} onValueChange={(next) => next && setCreateStatus(next as AdrStatus)}>
-                          <SelectTrigger size="sm" className="h-8 w-36">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ADR_STATUS_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : displayEntry ? (
-                        <Select
-                          value={displayEntry.status}
-                          onValueChange={(next) => {
-                            if (next) handleMoveStatus(displayEntry, next);
-                          }}
-                          disabled={movingIds.has(displayEntry.id)}
-                        >
-                          <SelectTrigger size="sm" className="h-8 w-36">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ADR_STATUS_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : null}
-
-                      {(creating || editMode) ? (
-                        <>
-                          <Button variant="outline" size="sm" onClick={cancelEditing} disabled={saving}>
-                            <X className="size-4" />
-                            Cancel
-                          </Button>
-                          <Button size="sm" onClick={() => void saveDraft()} disabled={saving || (!dirty && !creating)}>
-                            <Save className="size-4" />
-                            {creating ? (saving ? 'Creating…' : 'Create') : (saving ? 'Saving…' : 'Save')}
-                          </Button>
-                        </>
-                      ) : displayEntry ? (
-                        <Button size="sm" onClick={() => setEditMode(true)}>
-                          <Edit3 className="size-4" />
-                          Edit Full Screen
-                        </Button>
-                      ) : null}
-
-                      {!creating && displayEntry && (
-                        <AlertDialog>
-                          <AlertDialogTrigger
-                            render={
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                              />
-                            }
+                      <div className="flex flex-wrap items-center gap-2">
+                        {creating ? (
+                          <Select value={createStatus} onValueChange={(next) => next && setCreateStatus(next as AdrStatus)}>
+                            <SelectTrigger size="sm" className="h-8 w-36">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ADR_STATUS_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : displayEntry ? (
+                          <Select
+                            value={displayEntry.status}
+                            onValueChange={(next) => {
+                              if (next) handleMoveStatus(displayEntry, next);
+                            }}
+                            disabled={movingIds.has(displayEntry.id)}
                           >
-                            <Trash2 className="size-4" />
-                          </AlertDialogTrigger>
-                          <AlertDialogContent size="sm">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete this ADR?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently remove the decision document.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => void onDeleteAdr(displayEntry.id)}
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      )}
+                            <SelectTrigger size="sm" className="h-8 w-36">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ADR_STATUS_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : null}
+
+                        {(creating || editMode) ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={cancelEditing} disabled={saving}>
+                              <X className="size-4" />
+                              Cancel
+                            </Button>
+                            <Button size="sm" onClick={() => void saveDraft()} disabled={saving || (!dirty && !creating)}>
+                              <Save className="size-4" />
+                              {creating ? (saving ? 'Creating…' : 'Create') : (saving ? 'Saving…' : 'Save')}
+                            </Button>
+                          </>
+                        ) : displayEntry ? (
+                          <Button size="sm" onClick={() => setEditMode(true)}>
+                            <Edit3 className="size-4" />
+                            Edit Full Screen
+                          </Button>
+                        ) : null}
+
+                        {!creating && displayEntry && (
+                          <AlertDialog>
+                            <AlertDialogTrigger
+                              render={
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                                />
+                              }
+                            >
+                              <Trash2 className="size-4" />
+                            </AlertDialogTrigger>
+                            <AlertDialogContent size="sm">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete this ADR?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently remove the decision document.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => void onDeleteAdr(displayEntry.id)}
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </CardHeader>
+                  )}
+                </CardHeader>
 
-              <CardContent className="min-h-0 flex-1 overflow-hidden p-2 md:p-3">
-                {createError && (
-                  <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                    {createError}
-                  </div>
-                )}
+                <CardContent className="min-h-0 flex-1 overflow-hidden p-2 md:p-3">
+                  {createError && (
+                    <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                      {createError}
+                    </div>
+                  )}
 
-                {creating || editMode ? (
-                  draft ? (
-                    <div className="h-full min-h-0">
-                      <AdrEditor
-                        adr={draft}
-                        onChange={(next) => {
-                          setDraft(next);
-                          setDirty(true);
-                          setCreateError(null);
-                        }}
-                        specSuggestions={specSuggestions}
-                        tagSuggestions={tagSuggestions}
-                        adrSuggestions={adrSuggestions}
-                        mcpEnabled={mcpEnabled}
+                  {creating || editMode ? (
+                    draft ? (
+                      <div className="h-full min-h-0">
+                        <AdrEditor
+                          adr={draft}
+                          onChange={(next) => {
+                            setDraft(next);
+                            setDirty(true);
+                            setCreateError(null);
+                          }}
+                          specSuggestions={specSuggestions}
+                          tagSuggestions={tagSuggestions}
+                          adrSuggestions={adrSuggestions}
+                          mcpEnabled={mcpEnabled}
+                        />
+                      </div>
+                    ) : (
+                      <EmptyState
+                        icon={<Compass className="size-4" />}
+                        title="No Draft Loaded"
+                        description="Start a new ADR or select an existing one."
+                      />
+                    )
+                  ) : displayEntry ? (
+                    <div className="h-full overflow-auto space-y-4">
+                      <MarkdownSection
+                        title="Context"
+                        content={displayEntry.adr.context}
+                        emptyFallback="_No context captured yet._"
+                      />
+                      <MarkdownSection
+                        title="Decision"
+                        content={displayEntry.adr.decision}
+                        emptyFallback="_No decision recorded yet._"
                       />
                     </div>
                   ) : (
                     <EmptyState
                       icon={<Compass className="size-4" />}
-                      title="No Draft Loaded"
-                      description="Start a new ADR or select an existing one."
+                      title="No ADR Selected"
+                      description="Pick a decision from the register to inspect context and decision markdown."
                     />
-                  )
-                ) : displayEntry ? (
-                  <div className="h-full overflow-auto space-y-4">
-                    <MarkdownSection
-                      title="Context"
-                      content={displayEntry.adr.context}
-                      emptyFallback="_No context captured yet._"
-                    />
-                    <MarkdownSection
-                      title="Decision"
-                      content={displayEntry.adr.decision}
-                      emptyFallback="_No decision recorded yet._"
-                    />
-                  </div>
-                ) : (
-                  <EmptyState
-                    icon={<Compass className="size-4" />}
-                    title="No ADR Selected"
-                    description="Pick a decision from the register to inspect context and decision markdown."
-                  />
-                )}
-              </CardContent>
+                  )}
+                </CardContent>
               </Card>
             </section>
           </div>

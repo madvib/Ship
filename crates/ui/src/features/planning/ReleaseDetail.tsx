@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FeatureEntry, ReleaseEntry } from '@/bindings';
+import { FeatureInfo as FeatureEntry, ReleaseDocument as ReleaseEntry } from '@/bindings';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -39,18 +39,18 @@ function featureTileClasses(status: string) {
   switch (status) {
     case 'implemented':
       return {
-        tile: 'border-emerald-500/35 bg-emerald-500/5',
-        progress: 'bg-emerald-500',
+        tile: 'border-status-green/35 bg-status-green/5',
+        progress: 'bg-status-green',
       };
     case 'in-progress':
       return {
-        tile: 'border-sky-500/35 bg-sky-500/5',
-        progress: 'bg-sky-500',
+        tile: 'border-status-blue/35 bg-status-blue/5',
+        progress: 'bg-status-blue',
       };
     case 'planned':
       return {
-        tile: 'border-amber-500/35 bg-amber-500/5',
-        progress: 'bg-amber-500',
+        tile: 'border-status-yellow/35 bg-status-yellow/5',
+        progress: 'bg-status-yellow',
       };
     default:
       return {
@@ -68,14 +68,14 @@ export default function ReleaseDetail({
   onSelectFeature,
   onSave,
 }: ReleaseDetailProps) {
-  const [content, setContent] = useState(release.release.body);
+  const [content, setContent] = useState(release.content ?? '');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showAllLinkedFeatures, setShowAllLinkedFeatures] = useState(false);
 
   useEffect(() => {
-    setContent(release.release.body);
+    setContent(release.content ?? '');
     setDirty(false);
     setSaving(false);
     setEditing(false);
@@ -95,17 +95,17 @@ export default function ReleaseDetail({
   }, [content, dirty, onSave, release.file_name, saving]);
 
   const cancelEditing = useCallback(() => {
-    setContent(release.release.body);
+    setContent(release.content ?? '');
     setDirty(false);
     setEditing(false);
-  }, [release.release.body]);
+  }, [release.content]);
 
   const linkedFeatures = useMemo(
     () =>
       features.filter(
-        (feature) => feature.feature.metadata.release_id === release.file_name || feature.feature.metadata.release_id === release.release.metadata.version
+        (feature) => feature.release_id === release.file_name || feature.release_id === release.version
       ),
-    [features, release.file_name, release.release.metadata.version]
+    [features, release.file_name, release.version]
   );
 
   const linkedStatusSummary = useMemo(() => {
@@ -167,7 +167,7 @@ export default function ReleaseDetail({
             </div>
 
             <h2 className="truncate px-2 text-center text-xl font-semibold tracking-tight">
-              {release.release.metadata.version}
+              {release.version}
             </h2>
 
             <div className="flex min-w-0 justify-end gap-2">
@@ -215,7 +215,7 @@ export default function ReleaseDetail({
                 <ReleaseMetadataPanel
                   frontmatter={frontmatter}
                   delimiter={delimiter}
-                  defaultVersion={release.release.metadata.version}
+                  defaultVersion={release.version}
                   defaultStatus={release.status}
                   onChange={onChange}
                 />
@@ -314,7 +314,7 @@ export default function ReleaseDetail({
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="truncate font-medium">{feature.feature.metadata.title}</p>
+                                <p className="truncate font-medium">{feature.title}</p>
                                 <p className="text-muted-foreground text-[11px]">
                                   {feature.file_name}
                                 </p>

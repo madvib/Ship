@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { PackagePlus, Plus } from 'lucide-react';
 import {
-  FeatureEntry,
-  ReleaseEntry,
+  FeatureInfo as FeatureEntry,
+  ReleaseInfo,
+  ReleaseDocument,
 } from '@/bindings';
 import DetailSheet from './DetailSheet';
 import { Alert, AlertDescription } from '@ship/ui';
@@ -26,11 +27,11 @@ import ReleaseDetail from './ReleaseDetail';
 import HubSectionHeader from '@/features/planning/hub/components/HubSectionHeader';
 
 interface ReleasesPageProps {
-  releases: ReleaseEntry[];
+  releases: ReleaseInfo[];
   features: FeatureEntry[];
-  selectedRelease: ReleaseEntry | null;
+  selectedRelease: ReleaseDocument | null;
   onCloseReleaseDetail: () => void;
-  onSelectRelease: (entry: ReleaseEntry) => void;
+  onSelectRelease: (entry: ReleaseInfo) => void;
   onSelectFeatureFromRelease: (feature: FeatureEntry) => void;
   onSaveRelease: (fileName: string, content: string) => Promise<void> | void;
   onCreateRelease: (version: string, content: string) => Promise<void>;
@@ -62,7 +63,7 @@ interface ReleaseFeatureReadiness {
 }
 
 interface ReleaseReadinessSummary {
-  release: ReleaseEntry;
+  release: ReleaseInfo;
   linked: ReleaseFeatureReadiness[];
   progressPercent: number;
   blockers: number;
@@ -130,7 +131,7 @@ tags = []
     const summaries = new Map<string, ReleaseReadinessSummary>();
     for (const release of releases) {
       const linked = features
-        .filter((feature) => feature.feature.metadata.release_id === release.file_name || feature.feature.metadata.release_id === release.release.metadata.version)
+        .filter((feature) => feature.release_id === release.file_name || feature.release_id === release.version)
         .map((feature) => {
           const metrics = featureMetricsByFile[feature.file_name];
           const readiness = metrics?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
@@ -173,7 +174,7 @@ tags = []
   const dashboard = useMemo(() => {
     const active = releases.find((release) => release.status === 'active') ?? null;
     const shippedCount = releases.filter((release) => release.status === 'shipped').length;
-    const linkedFeatureCount = features.filter((feature) => feature.feature.metadata.release_id).length;
+    const linkedFeatureCount = features.filter((feature) => feature.release_id).length;
     const activeBlockers = active
       ? releaseSummaries.get(active.file_name)?.blockers ?? 0
       : Array.from(releaseSummaries.values()).reduce((sum, summary) => sum + summary.blockers, 0);
@@ -218,7 +219,7 @@ tags = []
     viewFiltered.sort((a, b) => {
       switch (sortBy) {
         case 'oldest':
-          return updatedAt(a.release.metadata.updated) - updatedAt(b.release.metadata.updated);
+          return updatedAt(a.updated) - updatedAt(b.updated);
         case 'status':
           return (RELEASE_STATUS_ORDER[a.status ?? 'planned'] ?? 99) - (RELEASE_STATUS_ORDER[b.status ?? 'planned'] ?? 99);
         case 'progress': {
@@ -228,7 +229,7 @@ tags = []
         }
         case 'newest':
         default:
-          return updatedAt(b.release.metadata.updated) - updatedAt(a.release.metadata.updated);
+          return updatedAt(b.updated) - updatedAt(a.updated);
       }
     });
     return viewFiltered;
@@ -358,6 +359,7 @@ tags = []
               const linked = summary?.linked ?? [];
               const progress = summary?.progressPercent ?? 0;
               const blockers = summary?.blockers ?? 0;
+              const releaseSuggestions = releases.map((entry: ReleaseInfo) => entry.file_name);
 
               return (
                 <ReleaseHubRow

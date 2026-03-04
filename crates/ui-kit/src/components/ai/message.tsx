@@ -4,18 +4,18 @@
 export type MessageRole = 'user' | 'assistant' | 'system' | 'data' | 'tool';
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
 
-import { Button } from "@/components/button";
+import { Button } from "../button";
 import {
   ButtonGroup,
   ButtonGroupText,
-} from "@/components/ui/button-group";
+} from "../ui/button-group";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+} from "../ui/tooltip";
+import { cn } from "../../lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";

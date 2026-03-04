@@ -2,20 +2,20 @@
 
 import type { ComponentProps, ReactNode } from "react";
 
-import { Button } from "@/components/button";
+import { Button } from "../button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@/components/collapsible";
-import { Input } from "@/components/input";
+} from "../collapsible";
+import { Input } from "../input";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+} from "../ui/tooltip";
+import { cn } from "../../lib/utils";
 import { ChevronDownIcon } from "lucide-react";
 import {
   createContext,

@@ -1,12 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Flag, Plus } from 'lucide-react';
 import {
+  FeatureInfo as FeatureEntry,
+  FeatureDocument,
+  ReleaseInfo as ReleaseEntry,
+  SpecEntry,
   AdrEntry,
-  FeatureEntry,
-  FeatureStatus,
-  ReleaseEntry,
 } from '@/bindings';
-import { SpecInfo as SpecEntry } from '@/lib/types/spec';
 import DetailSheet from './DetailSheet';
 import { Alert, AlertDescription } from '@ship/ui';
 import {
@@ -41,7 +41,7 @@ interface FeaturesPageProps {
   releases: ReleaseEntry[];
   specs: SpecEntry[];
   adrs: AdrEntry[];
-  selectedFeature: FeatureEntry | null;
+  selectedFeature: FeatureDocument | null;
   onCloseFeatureDetail: () => void;
   onSelectFeature: (entry: FeatureEntry) => void;
   onSelectReleaseFromFeature: (fileName: string) => void;
@@ -109,9 +109,8 @@ export default function FeaturesPage({
     const available = Array.from(
       new Set([
         ...fallback,
-        ...features
-          .map((feature) => feature.status)
-          .filter((status): status is FeatureStatus => typeof status === 'string' && status.length > 0),
+        ...(Array.from(new Set(features.map((f) => f.status)))
+          .filter((status): status is string => typeof status === 'string' && status.length > 0)),
       ])
     );
     available.sort((a, b) => {
@@ -130,6 +129,9 @@ export default function FeaturesPage({
   const sortedFeatures = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase();
     const filtered = features.filter((feature) => {
+      // Guard against stale/partial backend data
+      if (!feature?.id) return false;
+
       const featureStatus = feature.status ?? 'planned';
       const metric = featureMetricsByFile[feature.file_name];
       const readiness = metric?.readinessPercent ?? featureStatusFallbackReadiness(featureStatus);
@@ -137,10 +139,10 @@ export default function FeaturesPage({
         metric?.blocking ?? (featureStatus !== 'implemented' && featureStatus !== 'deprecated');
       const ready = !blocking && readiness >= 90;
 
-      const title = (feature.feature.metadata.title ?? '').toLowerCase();
-      const fileName = (feature.file_name ?? '').toLowerCase();
-      const releaseId = (feature.feature.metadata.release_id ?? '').toLowerCase();
-      const specId = (feature.feature.metadata.spec_id ?? '').toLowerCase();
+      const title = (feature?.title ?? '').toLowerCase();
+      const fileName = (feature?.file_name ?? '').toLowerCase();
+      const releaseId = (feature?.release_id ?? '').toLowerCase();
+      const specId = (feature?.spec_id ?? '').toLowerCase();
 
       const matchesSearch =
         title.includes(needle) ||
@@ -158,7 +160,7 @@ export default function FeaturesPage({
     filtered.sort((a, b) => {
       switch (sortBy) {
         case 'oldest':
-          return updatedAt(a.feature.metadata.updated) - updatedAt(b.feature.metadata.updated);
+          return updatedAt(a.updated) - updatedAt(b.updated);
         case 'status':
           return (STATUS_ORDER[a.status ?? 'planned'] ?? 99) - (STATUS_ORDER[b.status ?? 'planned'] ?? 99);
         case 'readiness': {
@@ -172,7 +174,7 @@ export default function FeaturesPage({
         }
         case 'newest':
         default:
-          return updatedAt(b.feature.metadata.updated) - updatedAt(a.feature.metadata.updated);
+          return updatedAt(b.updated) - updatedAt(a.updated);
       }
     });
 
@@ -200,7 +202,7 @@ export default function FeaturesPage({
       if (featureStatus === 'implemented') {
         implemented += 1;
       }
-      if (!feature.feature.metadata.release_id) {
+      if (!feature?.release_id) {
         unlinked += 1;
       }
 
@@ -225,8 +227,8 @@ export default function FeaturesPage({
   }, [featureMetricsByFile, features]);
 
   const createInitialFeatureDocument = () => {
-    return `+++
-title = ""
+    return `++ +
+  title = ""
 status = "planned"
 release_id = ""
 spec_id = ""
@@ -239,14 +241,14 @@ tags = []
 
 ## Acceptance Criteria
 
-- [ ]
+  - []
 
 ## Delivery Todos
 
-- [ ]
+  - []
 
 ## Notes
-`;
+  `;
   };
 
   const submitCreate = async (event: FormEvent) => {
@@ -385,8 +387,8 @@ tags = []
             )}
 
             {sortedFeatures.map((feature) => {
-              const linkedRelease = releases.find((release) => release.file_name === feature.feature.metadata.release_id);
-              const linkedSpec = specs.find((spec) => spec.file_name === feature.feature.metadata.spec_id);
+              const linkedRelease = releases.find((release) => release.file_name === feature?.release_id);
+              const linkedSpec = specs.find((spec) => spec.file_name === feature?.spec_id);
               const metric = featureMetricsByFile[feature.file_name];
               const readiness = metric?.readinessPercent ?? featureStatusFallbackReadiness(feature.status);
               const isBlocking =

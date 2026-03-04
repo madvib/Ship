@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FeatureEntry } from '@/bindings';
+import { FeatureDocument as FeatureEntry } from '@/bindings';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -57,13 +57,13 @@ export default function FeatureDetail({
   onSelectSpec,
   onSave,
 }: FeatureDetailProps) {
-  const [content, setContent] = useState(feature.feature.body);
+  const [content, setContent] = useState(feature.content ?? '');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    setContent(feature.feature.body);
+    setContent(feature.content ?? '');
     setDirty(false);
     setSaving(false);
     setEditing(false);
@@ -82,10 +82,10 @@ export default function FeatureDetail({
   }, [content, dirty, feature.file_name, onSave, saving]);
 
   const cancelEditing = useCallback(() => {
-    setContent(feature.feature.body);
+    setContent(feature.content ?? '');
     setDirty(false);
     setEditing(false);
-  }, [feature.feature.body]);
+  }, [feature.content]);
 
   const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
   const readiness = useMemo(
@@ -130,7 +130,7 @@ export default function FeatureDetail({
             </div>
 
             <h2 className="truncate px-2 text-center text-xl font-semibold tracking-tight">
-              {feature.feature.metadata.title}
+              {feature?.title}
             </h2>
 
             <div className="flex min-w-0 justify-end gap-2">
@@ -182,7 +182,7 @@ export default function FeatureDetail({
                 <FeatureMetadataPanel
                   frontmatter={frontmatter}
                   delimiter={delimiter}
-                  defaultTitle={feature.feature.metadata.title}
+                  defaultTitle={feature?.title}
                   defaultStatus={feature.status}
                   releaseSuggestions={releaseSuggestions}
                   specSuggestions={specSuggestions}
@@ -230,15 +230,15 @@ export default function FeatureDetail({
                 <CardTitle className="text-sm">Planning Links</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {feature.feature.metadata.release_id ? (
+                {feature?.release_id ? (
                   <button
                     type="button"
-                    onClick={() => onSelectRelease(feature.feature.metadata.release_id!)}
+                    onClick={() => onSelectRelease(feature?.release_id!)}
                     className="hover:bg-muted/40 flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-xs"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <Package className="size-3.5 text-primary" />
-                      {feature.feature.metadata.release_id}
+                      {feature?.release_id}
                     </span>
                     <ExternalLink className="size-3.5 text-muted-foreground" />
                   </button>
@@ -246,15 +246,15 @@ export default function FeatureDetail({
                   <p className="text-muted-foreground text-xs italic">No linked release.</p>
                 )}
 
-                {feature.feature.metadata.spec_id ? (
+                {feature?.spec_id ? (
                   <button
                     type="button"
-                    onClick={() => onSelectSpec(feature.feature.metadata.spec_id!)}
+                    onClick={() => onSelectSpec(feature?.spec_id!)}
                     className="hover:bg-muted/40 flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-xs"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <FileText className="size-3.5 text-primary" />
-                      {feature.feature.metadata.spec_id}
+                      {feature?.spec_id}
                     </span>
                     <ExternalLink className="size-3.5 text-muted-foreground" />
                   </button>
@@ -262,10 +262,10 @@ export default function FeatureDetail({
                   <p className="text-muted-foreground text-xs italic">No linked specification.</p>
                 )}
 
-                {feature.feature.metadata.branch && (
+                {feature?.branch && (
                   <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
                     <GitBranch className="size-3.5" />
-                    {feature.feature.metadata.branch}
+                    {feature?.branch}
                   </p>
                 )}
               </CardContent>

@@ -6,6 +6,7 @@ import {
   Search,
   Settings2,
   Sparkles,
+  Plus,
 } from 'lucide-react';
 import { ProjectDiscovery as Project, StatusConfig } from '@/bindings';
 import { Config, DEFAULT_STATUSES } from '@/lib/workspace-ui';
@@ -30,6 +31,7 @@ import {
 } from '@ship/ui';
 import { Input } from '@ship/ui';
 import { Textarea } from '@ship/ui';
+import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 
 export interface CreateProjectInput {
   name: string;
@@ -151,23 +153,11 @@ export default function ProjectOnboarding({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-5 md:p-8">
-      <header className="relative overflow-hidden rounded-2xl border bg-card p-5 md:p-6">
-        <div className="from-primary/15 pointer-events-none absolute inset-0 bg-gradient-to-br via-transparent to-transparent" />
-        <div className="relative flex items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <div className="bg-primary/10 border-primary/30 flex size-14 items-center justify-center rounded-xl border md:size-16">
-              <span className="text-primary text-lg font-black tracking-tight md:text-xl">SW</span>
-            </div>
-            <div className="space-y-2">
-              <p className="text-muted-foreground text-xs font-medium uppercase tracking-widest">Shipwright</p>
-              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Select a project</h1>
-              <p className="text-muted-foreground max-w-2xl text-sm md:text-base">
-                Open an existing project or create a new one to get started.
-              </p>
-            </div>
-          </div>
-
+    <PageFrame width="wide">
+      <PageHeader
+        title="Select a project"
+        description="Open an existing project or create a new one to get started."
+        actions={
           <DropdownMenu>
             <DropdownMenuTrigger render={<Button variant="outline" className="gap-2" />}>
               <Settings2 className="size-4" />
@@ -198,8 +188,8 @@ export default function ProjectOnboarding({
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
-      </header>
+        }
+      />
 
       <Card size="sm" className="overflow-hidden">
         <CardHeader className="pb-3">
@@ -212,7 +202,7 @@ export default function ProjectOnboarding({
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 !pt-5">
           <div className="flex flex-wrap gap-2">
             <Button className="gap-2" onClick={onOpenProject}>
               <FolderOpen className="size-4" />
@@ -250,8 +240,8 @@ export default function ProjectOnboarding({
             )}
 
             <AlertDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-              <AlertDialogTrigger render={<Button variant="secondary" className="gap-2" />}>
-                <FolderPlus className="size-4" />
+              <AlertDialogTrigger render={<Button variant="outline" className="gap-2" />}>
+                <Plus className="size-4" />
                 Create New Project
               </AlertDialogTrigger>
 
@@ -378,6 +368,6 @@ export default function ProjectOnboarding({
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageFrame>
   );
 }

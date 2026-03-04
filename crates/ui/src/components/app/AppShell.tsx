@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useUpdateChecker } from '@/lib/hooks/useUpdateChecker';
 import Sidebar from '@/components/app/Sidebar';
@@ -67,16 +68,30 @@ export default function App() {
     },
   ];
 
-  // Merge injected module sections with shell sections
-  const COMBINED_SECTIONS = [...SHIP_NAV_SECTIONS];
-  for (const shellSection of SHELL_SECTIONS) {
-    const existing = COMBINED_SECTIONS.find(s => s.id === shellSection.id);
-    if (existing) {
-      existing.items = [...existing.items, ...shellSection.items];
-    } else {
-      COMBINED_SECTIONS.push(shellSection);
-    }
-  }
+  const COMBINED_SECTIONS = useMemo(() => {
+    // Start with a clone of shell sections to avoid accidental mutation
+    const sectionsMap = new Map<string, NavSection>();
+
+    // Process ship modules first to establish primary section grouping
+    SHIP_NAV_SECTIONS.forEach(shipSection => {
+      sectionsMap.set(shipSection.id, { ...shipSection, items: [...shipSection.items] });
+    });
+
+    // Merge shell sections into the map
+    SHELL_SECTIONS.forEach(shellSection => {
+      const existing = sectionsMap.get(shellSection.id);
+      if (existing) {
+        // Merge items, deduplicating by ID
+        const existingIds = new Set(existing.items.map(i => i.id));
+        const newItems = shellSection.items.filter(i => !existingIds.has(i.id));
+        existing.items = [...existing.items, ...newItems];
+      } else {
+        sectionsMap.set(shellSection.id, { ...shellSection, items: [...shellSection.items] });
+      }
+    });
+
+    return Array.from(sectionsMap.values());
+  }, [SHIP_NAV_SECTIONS, SHELL_SECTIONS]);
 
   const navigateTo = (path: AppRoutePath) => {
     if (path === NOTES_ROUTE) {
@@ -169,6 +184,8 @@ export default function App() {
         onSelectProject={handleSelectProject}
         onOpenGlobalNotes={openGlobalNotes}
         sections={COMBINED_SECTIONS}
+        theme={workspace.config.theme as 'light' | 'dark'}
+        onThemeChange={workspace.applyTheme}
         agentControl={
           !workspace.noProject ? (
             <AgentModeControl

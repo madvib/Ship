@@ -299,16 +299,22 @@ pub fn get_recent_projects_global() -> Result<Vec<PathBuf>> {
     Ok(state.recent_projects)
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Type)]
-pub struct ProjectEntry {
-    pub name: String,
-    #[specta(type = String)]
-    pub path: PathBuf,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct ProjectRegistry {
-    pub projects: Vec<ProjectEntry>,
+fn normalize_registry_project_path(path: &Path) -> PathBuf {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name == SHIP_DIR_NAME)
+        .unwrap_or(false)
+    {
+        return canonical;
+    }
+    let ship_candidate = canonical.join(SHIP_DIR_NAME);
+    if ship_candidate.exists() && ship_candidate.is_dir() {
+        fs::canonicalize(&ship_candidate).unwrap_or(ship_candidate)
+    } else {
+        canonical
+    }
 }
 
 pub fn sanitize_file_name(name: &str) -> String {

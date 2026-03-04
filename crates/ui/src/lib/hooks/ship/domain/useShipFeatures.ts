@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction, useState } from 'react';
-import { FeatureEntry } from '@/bindings';
+import { FeatureInfo, FeatureDocument } from '@/bindings';
 import { useFeatureActions } from '../../workspace/useFeatureActions';
 
 interface UseShipFeaturesParams {
@@ -11,8 +11,8 @@ export function useShipFeatures({
     setError,
     refreshActivity,
 }: UseShipFeaturesParams) {
-    const [features, setFeatures] = useState<FeatureEntry[]>([]);
-    const [selectedFeature, setSelectedFeature] = useState<FeatureEntry | null>(null);
+    const [features, setFeatures] = useState<FeatureInfo[]>([]);
+    const [selectedFeature, setSelectedFeature] = useState<FeatureDocument | null>(null);
 
     const actions = useFeatureActions({
         setFeatures,
