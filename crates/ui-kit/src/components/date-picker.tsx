@@ -27,7 +27,7 @@ function parseIsoDate(value: string): Date | undefined {
   return parsed
 }
 
-export default function DatePicker({ value, onValueChange, className }: DatePickerProps) {
+export function DatePicker({ value, onValueChange, className }: DatePickerProps) {
   const selected = parseIsoDate(value)
 
   return (

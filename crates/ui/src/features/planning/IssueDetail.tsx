@@ -4,7 +4,7 @@ import DetailSheet from './DetailSheet';
 import MarkdownEditor from '@/components/editor';
 import { Button } from '@ship/ui';
 import { Card, CardContent } from '@ship/ui';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
 import { Badge } from '@ship/ui';
 import IssueMetadataPanel from '@/components/editor/IssueMetadataPanel';

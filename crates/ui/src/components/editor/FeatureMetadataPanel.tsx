@@ -3,7 +3,7 @@ import { Check, Plus, X } from 'lucide-react';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
 import { Input } from '@ship/ui';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import {
   FrontmatterDelimiter,
   readFrontmatterStringField,

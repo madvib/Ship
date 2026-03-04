@@ -33,7 +33,7 @@ function normalize(text: string | null | undefined): string {
   return (text || '').trim().toLowerCase();
 }
 
-export default function AutocompleteInput({
+export function AutocompleteInput({
   id,
   value,
   options,
@@ -138,3 +138,5 @@ export default function AutocompleteInput({
     </Combobox>
   );
 }
+
+export { AutocompleteInput };

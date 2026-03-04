@@ -5,7 +5,7 @@ import { Button } from '@ship/ui';
 import { Input } from '@ship/ui';
 import { Textarea } from '@ship/ui';
 import { FacetedFilter } from '@ship/ui';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import { cn } from '@/lib/utils';
 import {
   FrontmatterDelimiter,

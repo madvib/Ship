@@ -1,4 +1,4 @@
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import { FacetedFilter } from '@ship/ui';
 import { FieldLabel } from '@ship/ui';
 import { Input } from '@ship/ui';

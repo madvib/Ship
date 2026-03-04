@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { Check, Plus, X } from 'lucide-react';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
-import DatePicker from '@ship/ui';
+import { DatePicker } from '@ship/ui';
 import { Input } from '@ship/ui';
 import { Switch } from '@ship/ui';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import {
   FrontmatterDelimiter,
   readFrontmatterBooleanField,

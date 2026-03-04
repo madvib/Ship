@@ -15,7 +15,7 @@ import { Separator } from '@ship/ui';
 import { Textarea } from '@ship/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@ship/ui';
 import MarkdownEditor from '@/components/editor';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import { cn } from '@/lib/utils';
 
 interface AgentsPanelProps {

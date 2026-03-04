@@ -5,7 +5,7 @@ import DetailSheet from './DetailSheet';
 import { Alert, AlertDescription } from '@ship/ui';
 import { Button } from '@ship/ui';
 import { Input } from '@ship/ui';
-import AutocompleteInput from '@ship/ui';
+import { AutocompleteInput } from '@ship/ui';
 import {
   Select,
   SelectContent,
