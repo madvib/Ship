@@ -46,6 +46,8 @@ tags = []
   - worktree workspace records now require a non-empty `worktree_path`
   - CLI now rejects `workspace create --worktree-path ...` when `--worktree` is not set
   - CLI now rejects conflicting `workspace create --checkout --worktree` flag combinations
+  - failed `workspace create --worktree` now rolls back newly-created git branches when worktree add fails
+  - added regression coverage to ensure failed worktree creation does not leave dangling git branches
   - added runtime + e2e regression coverage for worktree-to-non-worktree metadata cleanup
 
 ## Next

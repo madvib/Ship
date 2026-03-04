@@ -1211,6 +1211,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                             .current_dir(&project_root)
                             .status()?;
                         if !status.success() {
+                            if !exists {
+                                let _ = ProcessCommand::new("git")
+                                    .args(["branch", "-D", &branch])
+                                    .current_dir(&project_root)
+                                    .status();
+                            }
                             anyhow::bail!("Failed to create git worktree: {}", branch);
                         }
                     } else if checkout {

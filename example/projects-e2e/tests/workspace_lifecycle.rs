@@ -2,7 +2,7 @@ mod helpers;
 
 use helpers::TestProject;
 use runtime::{WorkspaceStatus, get_workspace};
-use std::process::Output;
+use std::process::{Command, Output};
 
 fn run_cli(project: &TestProject, args: &[&str]) -> Output {
     project.cli(args).output().unwrap()
@@ -16,6 +16,15 @@ fn assert_success(out: &Output, context: &str) {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+fn branch_exists(project: &TestProject, branch: &str) -> bool {
+    Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .current_dir(project.root())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 #[test]
@@ -276,6 +285,10 @@ fn workspace_worktree_failure_does_not_persist_workspace_record() {
     assert!(
         workspace.is_none(),
         "failed worktree add should not leave a persisted workspace row"
+    );
+    assert!(
+        !branch_exists(&project, branch),
+        "failed worktree add should not leave a dangling branch"
     );
     assert!(
         occupied_path.join("already.txt").exists(),
