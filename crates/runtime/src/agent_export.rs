@@ -1223,7 +1223,10 @@ fn home() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
+    use crate::config::{
+        HookConfig, HookTrigger, McpServerConfig, McpServerType, ModeConfig, PermissionConfig,
+        ProjectConfig, save_config,
+    };
     use crate::project::init_project;
     use std::collections::HashMap;
     use tempfile::tempdir;
@@ -1267,6 +1270,108 @@ mod tests {
         };
         save_config(&config, Some(project_dir.clone())).unwrap();
         (tmp, project_dir)
+    }
+
+    #[test]
+    fn build_payload_active_mode_filters_servers_and_applies_mode_hooks_permissions() {
+        let (_tmp, project_dir) =
+            project_with_servers(vec![make_stdio_server("allowed"), make_stdio_server("blocked")]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.hooks = vec![HookConfig {
+            id: "project-global-hook".to_string(),
+            trigger: HookTrigger::PreToolUse,
+            matcher: Some("Bash".to_string()),
+            command: "echo global".to_string(),
+        }];
+        config.modes = vec![ModeConfig {
+            id: "focus".to_string(),
+            name: "Focus".to_string(),
+            description: None,
+            active_tools: vec![],
+            mcp_servers: vec!["allowed".to_string()],
+            prompt_id: None,
+            hooks: vec![HookConfig {
+                id: "mode-hook".to_string(),
+                trigger: HookTrigger::PostToolUse,
+                matcher: Some("Bash".to_string()),
+                command: "echo mode".to_string(),
+            }],
+            permissions: PermissionConfig {
+                allow: vec!["Bash(*)".to_string()],
+                deny: vec!["WebFetch(*)".to_string()],
+            },
+            target_agents: vec![],
+        }];
+        config.active_mode = Some("focus".to_string());
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let payload = build_payload(&project_dir).unwrap();
+        let server_ids: Vec<_> = payload.servers.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(server_ids, vec!["allowed"]);
+        assert_eq!(payload.active_mode_id.as_deref(), Some("focus"));
+        assert_eq!(payload.permissions.allow, vec!["Bash(*)".to_string()]);
+        assert_eq!(payload.permissions.deny, vec!["WebFetch(*)".to_string()]);
+
+        let hook_ids: Vec<_> = payload.hooks.iter().map(|h| h.id.as_str()).collect();
+        let global_idx = hook_ids
+            .iter()
+            .position(|id| *id == "project-global-hook")
+            .expect("global hook missing");
+        let mode_idx = hook_ids
+            .iter()
+            .position(|id| *id == "mode-hook")
+            .expect("mode hook missing");
+        assert!(
+            global_idx < mode_idx,
+            "mode hooks must append after global hooks"
+        );
+    }
+
+    #[test]
+    fn build_payload_without_active_mode_uses_default_permissions() {
+        let (_tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.hooks = vec![HookConfig {
+            id: "project-global-hook-only".to_string(),
+            trigger: HookTrigger::Notification,
+            matcher: None,
+            command: "echo global".to_string(),
+        }];
+        config.modes = vec![ModeConfig {
+            id: "unused".to_string(),
+            name: "Unused".to_string(),
+            description: None,
+            active_tools: vec![],
+            mcp_servers: vec![],
+            prompt_id: None,
+            hooks: vec![HookConfig {
+                id: "unused-mode-hook".to_string(),
+                trigger: HookTrigger::Stop,
+                matcher: None,
+                command: "echo unused".to_string(),
+            }],
+            permissions: PermissionConfig {
+                allow: vec!["Bash(*)".to_string()],
+                deny: vec!["WebFetch(*)".to_string()],
+            },
+            target_agents: vec![],
+        }];
+        config.active_mode = None;
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let payload = build_payload(&project_dir).unwrap();
+        assert_eq!(payload.active_mode_id, None);
+        assert!(payload.permissions.allow.is_empty());
+        assert!(payload.permissions.deny.is_empty());
+        assert!(payload
+            .hooks
+            .iter()
+            .any(|hook| hook.id == "project-global-hook-only"));
+        assert!(!payload
+            .hooks
+            .iter()
+            .any(|hook| hook.id == "unused-mode-hook"));
+        assert!(payload.servers.iter().any(|server| server.id == "github"));
     }
 
     // ── Registry ───────────────────────────────────────────────────────────────

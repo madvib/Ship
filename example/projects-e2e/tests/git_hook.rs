@@ -246,3 +246,40 @@ fn default_task_policy_requires_ship_tooling_in_generated_context() {
         "default task policy guidance should be included in CLAUDE.md"
     );
 }
+
+#[test]
+fn claude_md_reflects_rule_updates_after_regeneration() {
+    let p = TestProject::with_git().unwrap();
+    create_feature(
+        p.ship_dir.clone(),
+        "Rule Sync",
+        "Ensure rule changes flow into generated context.",
+        None,
+        None,
+        Some("feature/rule-sync"),
+    )
+    .unwrap();
+
+    let custom_rule = p.ship_dir.join("agents/rules/999-test-rule-sync.md");
+    std::fs::write(&custom_rule, "Always include migration notes in release docs.").unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/rule-sync", &p.root()).unwrap();
+    let first = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    assert!(
+        first.contains("Always include migration notes in release docs."),
+        "initial custom rule should be present in CLAUDE.md"
+    );
+
+    std::fs::write(&custom_rule, "Never ship without explicit rollback notes.").unwrap();
+    on_post_checkout(&p.ship_dir, "feature/rule-sync", &p.root()).unwrap();
+    let second = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+
+    assert!(
+        second.contains("Never ship without explicit rollback notes."),
+        "updated custom rule should be present after regeneration"
+    );
+    assert!(
+        !second.contains("Always include migration notes in release docs."),
+        "stale rule content should not remain after regeneration"
+    );
+}

@@ -555,7 +555,40 @@ pub fn sync_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::Connection;
     use tempfile::tempdir;
+
+    fn insert_feature_for_branch(
+        ship_dir: &Path,
+        feature_id: &str,
+        branch: &str,
+        spec_id: Option<&str>,
+        release_id: Option<&str>,
+    ) -> Result<()> {
+        crate::state_db::ensure_project_database(ship_dir)?;
+        let mut conn = crate::state_db::open_project_connection(ship_dir)?;
+        let now = Utc::now().to_rfc3339();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        rt.block_on(async {
+            sqlx::query(
+                "INSERT INTO feature (id, title, description, status, release_id, spec_id, branch, agent_json, tags_json, created_at, updated_at)
+                 VALUES (?, ?, '', 'planned', ?, ?, ?, '{}', '[]', ?, ?)",
+            )
+            .bind(feature_id)
+            .bind(format!("Feature {}", feature_id))
+            .bind(release_id)
+            .bind(spec_id)
+            .bind(branch)
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut conn)
+            .await
+        })?;
+        rt.block_on(async { conn.close().await })?;
+        Ok(())
+    }
 
     #[test]
     fn lifecycle_transition_matrix_covers_expected_paths() {
@@ -668,6 +701,40 @@ mod tests {
         )?;
 
         assert_eq!(workspace.feature_id.as_deref(), Some("feat-auth"));
+        Ok(())
+    }
+
+    #[test]
+    fn create_workspace_mixed_branch_links_preserve_spec_context_and_hydrate_feature_release()
+    -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = tmp.path().join(".ship");
+        std::fs::create_dir_all(&ship_dir)?;
+        crate::state_db::ensure_project_database(&ship_dir)?;
+
+        insert_feature_for_branch(
+            &ship_dir,
+            "feat-mixed",
+            "feature/mixed",
+            Some("spec-from-feature"),
+            Some("release-from-feature"),
+        )?;
+        crate::state_db::set_branch_link(&ship_dir, "feature/mixed", "spec", "spec-direct")?;
+
+        let workspace = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/mixed".to_string(),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+
+        assert_eq!(workspace.feature_id.as_deref(), Some("feat-mixed"));
+        assert_eq!(workspace.spec_id.as_deref(), Some("spec-direct"));
+        assert_eq!(
+            workspace.release_id.as_deref(),
+            Some("release-from-feature")
+        );
         Ok(())
     }
 

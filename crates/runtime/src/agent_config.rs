@@ -311,4 +311,65 @@ mod tests {
         assert_eq!(figma.command, "figma-command");
         Ok(())
     }
+
+    #[test]
+    fn resolve_agent_config_mode_and_feature_mcp_filters_intersect() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.mcp_servers = vec![
+            stdio_server("github", "github-bin"),
+            stdio_server("linear", "linear-bin"),
+            stdio_server("figma", "figma-bin"),
+        ];
+        config.modes = vec![ModeConfig {
+            id: "planning".to_string(),
+            name: "Planning".to_string(),
+            mcp_servers: vec!["github".to_string(), "linear".to_string()],
+            ..Default::default()
+        }];
+        config.active_mode = Some("planning".to_string());
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec!["linear".to_string(), "figma".to_string()],
+            skills: vec![],
+            providers: vec![],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        let ids: Vec<&str> = resolved.mcp_servers.iter().map(|server| server.id.as_str()).collect();
+        assert_eq!(ids, vec!["linear"]);
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_agent_config_feature_without_provider_override_uses_project_providers() -> Result<()>
+    {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+
+        let mut config = ProjectConfig::default();
+        config.providers = vec!["claude".to_string(), "gemini".to_string()];
+        save_config(&config, Some(ship_dir.clone()))?;
+
+        let feature_agent = FeatureAgentConfig {
+            model: Some("feature-model".to_string()),
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec![],
+            providers: vec![],
+        };
+
+        let resolved = resolve_agent_config(&ship_dir, Some(&feature_agent))?;
+        assert_eq!(
+            resolved.providers,
+            vec!["claude".to_string(), "gemini".to_string()]
+        );
+        assert_eq!(resolved.model.as_deref(), Some("feature-model"));
+        Ok(())
+    }
 }

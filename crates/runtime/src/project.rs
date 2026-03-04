@@ -150,10 +150,41 @@ fn ship_dir_from_git_worktree(start_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+fn ship_dir_from_git_worktree_pointer(start_dir: &Path) -> Option<PathBuf> {
+    for ancestor in start_dir.ancestors() {
+        let dot_git = ancestor.join(".git");
+        if !dot_git.exists() {
+            continue;
+        }
+
+        if dot_git.is_dir() {
+            return None;
+        }
+
+        let gitdir = canonicalize_lossy(&parse_gitdir_pointer(&dot_git)?);
+        let worktrees = gitdir.parent()?;
+        if worktrees.file_name()?.to_str()? != "worktrees" {
+            return None;
+        }
+        let common_git = canonicalize_lossy(worktrees.parent()?);
+        let main_root = common_git.parent()?;
+        let ship_candidate = main_root.join(SHIP_DIR_NAME);
+        if ship_candidate.exists() && ship_candidate.is_dir() {
+            return Some(canonicalize_lossy(&ship_candidate));
+        }
+        return None;
+    }
+    None
+}
+
 fn resolve_project_dir_from_start(
     start_dir: &Path,
     migrate_legacy: bool,
 ) -> Result<Option<PathBuf>> {
+    if let Some(ship_path) = ship_dir_from_git_worktree_pointer(start_dir) {
+        return Ok(Some(ship_path));
+    }
+
     let mut current_dir = start_dir.to_path_buf();
     loop {
         let ship_path = current_dir.join(SHIP_DIR_NAME);
@@ -340,6 +371,30 @@ mod tests {
 
         fs::create_dir_all(&main_ship)?;
         fs::create_dir_all(&worktree_git)?;
+        fs::create_dir_all(&wt_nested)?;
+        fs::write(
+            wt_root.join(".git"),
+            format!("gitdir: {}\n", worktree_git.display()),
+        )?;
+
+        let resolved = resolve_project_ship_dir(&wt_nested).expect("expected .ship resolution");
+        assert_eq!(resolved, canonicalize_lossy(&main_ship));
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_project_ship_dir_prefers_main_ship_over_worktree_copy() -> Result<()> {
+        let tmp = tempdir()?;
+        let main_root = tmp.path().join("main");
+        let main_ship = main_root.join(".ship");
+        let common_git = main_root.join(".git");
+        let worktree_git = common_git.join("worktrees").join("feature-auth");
+        let wt_root = tmp.path().join("worktrees").join("feature-auth");
+        let wt_nested = wt_root.join("src").join("app");
+
+        fs::create_dir_all(&main_ship)?;
+        fs::create_dir_all(&worktree_git)?;
+        fs::create_dir_all(wt_root.join(".ship"))?;
         fs::create_dir_all(&wt_nested)?;
         fs::write(
             wt_root.join(".git"),

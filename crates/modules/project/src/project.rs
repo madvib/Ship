@@ -24,6 +24,7 @@ use runtime::project::{
 use runtime::{EventAction, EventEntity, append_event};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -130,6 +131,10 @@ pub fn load_registry() -> Result<ProjectRegistry> {
     }
     let content = fs::read_to_string(path)?;
     let registry: ProjectRegistry = serde_json::from_str(&content)?;
+    let (registry, changed) = normalize_registry(registry);
+    if changed {
+        save_registry(&registry)?;
+    }
     Ok(registry)
 }
 
@@ -163,6 +168,61 @@ fn normalize_registry_project_path(path: &Path) -> PathBuf {
     } else {
         canonical
     }
+}
+
+fn normalize_registry_project_name(name: &str, default_name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        default_name.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn should_prefer_candidate_name(
+    existing_name: &str,
+    candidate_name: &str,
+    default_name: &str,
+) -> bool {
+    let existing_is_default = existing_name.trim() == default_name;
+    let candidate_is_default = candidate_name.trim() == default_name;
+    existing_is_default && !candidate_is_default
+}
+
+fn normalize_registry(registry: ProjectRegistry) -> (ProjectRegistry, bool) {
+    let mut changed = false;
+    let mut deduped: Vec<ProjectEntry> = Vec::new();
+    let mut index_by_path: HashMap<PathBuf, usize> = HashMap::new();
+
+    for project in registry.projects {
+        let normalized_path = normalize_registry_project_path(&project.path);
+        let default_name = runtime_get_project_name(&normalized_path);
+        let normalized_name = normalize_registry_project_name(&project.name, &default_name);
+
+        if normalized_path != project.path || normalized_name != project.name {
+            changed = true;
+        }
+
+        if let Some(existing_index) = index_by_path.get(&normalized_path).copied() {
+            changed = true;
+            let existing = &mut deduped[existing_index];
+            if should_prefer_candidate_name(&existing.name, &normalized_name, &default_name)
+                && existing.name != normalized_name
+            {
+                existing.name = normalized_name;
+            }
+            continue;
+        }
+
+        let insert_index = deduped.len();
+        deduped.push(ProjectEntry {
+            name: normalized_name,
+            path: normalized_path.clone(),
+        });
+        index_by_path.insert(normalized_path, insert_index);
+    }
+
+    (ProjectRegistry { projects: deduped }, changed)
 }
 
 fn should_keep_existing_name(existing_name: &str, incoming_name: &str, default_name: &str) -> bool {
@@ -767,5 +827,65 @@ mod tests {
             "my-repo"
         ));
         assert!(!should_keep_existing_name("my-repo", "my-repo", "my-repo"));
+    }
+
+    #[test]
+    fn normalize_registry_collapses_duplicates_and_prefers_custom_name() -> Result<()> {
+        let tmp = tempdir()?;
+        let main_root = tmp.path().join("main");
+        let main_ship = main_root.join(".ship");
+        let common_git = main_root.join(".git");
+        let worktree_git = common_git.join("worktrees").join("feature-auth");
+        let worktree_root = tmp.path().join("worktrees").join("feature-auth");
+
+        fs::create_dir_all(&main_ship)?;
+        fs::create_dir_all(&worktree_git)?;
+        fs::create_dir_all(&worktree_root)?;
+        fs::write(
+            worktree_root.join(".git"),
+            format!("gitdir: {}\n", worktree_git.display()),
+        )?;
+
+        let registry = ProjectRegistry {
+            projects: vec![
+                ProjectEntry {
+                    name: "main".to_string(),
+                    path: worktree_root.clone(),
+                },
+                ProjectEntry {
+                    name: "Shipwright Runtime".to_string(),
+                    path: main_root.clone(),
+                },
+            ],
+        };
+
+        let (normalized, changed) = normalize_registry(registry);
+        assert!(changed);
+        assert_eq!(normalized.projects.len(), 1);
+        assert_eq!(normalized.projects[0].name, "Shipwright Runtime");
+        assert_eq!(normalized.projects[0].path, fs::canonicalize(main_ship)?);
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_registry_fills_empty_name_from_default() -> Result<()> {
+        let tmp = tempdir()?;
+        let root = tmp.path().join("alpha");
+        let ship = root.join(".ship");
+        fs::create_dir_all(&ship)?;
+
+        let registry = ProjectRegistry {
+            projects: vec![ProjectEntry {
+                name: "   ".to_string(),
+                path: root.clone(),
+            }],
+        };
+
+        let (normalized, changed) = normalize_registry(registry);
+        assert!(changed);
+        assert_eq!(normalized.projects.len(), 1);
+        assert_eq!(normalized.projects[0].name, "alpha");
+        assert_eq!(normalized.projects[0].path, fs::canonicalize(ship)?);
+        Ok(())
     }
 }

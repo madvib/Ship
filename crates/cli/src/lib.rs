@@ -2208,4 +2208,20 @@ mod tests {
         assert_eq!(list_features(&project_dir)?.len(), 2);
         Ok(())
     }
+
+    #[test]
+    fn cli_parses_projects_rename_subcommand() {
+        let cli = Cli::try_parse_from(["ship", "projects", "rename", "/tmp/project", "ship-core"])
+            .expect("projects rename should parse");
+
+        match cli.command {
+            Some(Commands::Projects {
+                action: ProjectCommands::Rename { path, name },
+            }) => {
+                assert_eq!(path, PathBuf::from("/tmp/project"));
+                assert_eq!(name, "ship-core");
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
 }
