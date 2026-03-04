@@ -27,11 +27,22 @@ export * from "./components/switch";
 export * from "./components/tabs";
 export * from "./components/textarea";
 
+// Shadcn extended primitives
+export * from "./components/ui/tooltip";
+export * from "./components/ui/hover-card";
+export * from "./components/ui/spinner";
+export * from "./components/ui/button-group";
+
 // Editors & Markdown
 export { default as MarkdownEditor, type MarkdownEditorProps } from "./components/editor/MarkdownEditor";
 export { default as CustomMilkdownEditor } from "./components/editor/CustomMilkdownEditor";
 export { default as FrontmatterPanel } from "./components/editor/FrontmatterPanel";
 export * from "./components/editor/frontmatter";
+
+// AI Primitives
+export * from "./components/ai/message";
+export * from "./components/ai/prompt-input";
+export * from "./components/ai/side-by-side";
 
 // Utils
 export * from "./lib/utils";

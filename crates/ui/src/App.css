@@ -155,34 +155,52 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-body);
     margin: 0;
     overflow-x: hidden;
   }
 
+  /* Subtle background grain */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.02'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .glass {
+    background: color-mix(in oklch, var(--card) 85%, transparent);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+  }
+
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--accent) var(--muted);
+    scrollbar-color: var(--muted) transparent;
   }
 
   *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   *::-webkit-scrollbar-track {
-    background: color-mix(in oklch, var(--muted) 88%, transparent);
-    border-radius: 999px;
+    background: transparent;
   }
 
   *::-webkit-scrollbar-thumb {
-    background: color-mix(in oklch, var(--accent) 64%, transparent);
+    background: color-mix(in oklch, var(--muted) 40%, transparent);
     border-radius: 999px;
-    border: 2px solid color-mix(in oklch, var(--muted) 80%, transparent);
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 
   *::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in oklch, var(--accent) 78%, transparent);
+    background: color-mix(in oklch, var(--muted) 60%, transparent);
+    background-clip: padding-box;
   }
 }
 

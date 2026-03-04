@@ -8,6 +8,7 @@ import { AutocompleteInput } from '@ship/ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
 import { Badge } from '@ship/ui';
 import IssueMetadataPanel from '@/components/editor/IssueMetadataPanel';
+import { EntityLink } from '@/lib/links';
 
 interface IssueDetailProps {
   entry: IssueEntry;
@@ -249,11 +250,11 @@ export default function IssueDetail({
           {(linkRows.length > 0 || showAddLink) && (
             <div className="mt-2 space-y-2">
               {linkRows.map((link, index) => (
-                <div key={`${link.type}-${link.target}-${index}`} className="flex items-center gap-2">
-                  <Badge variant="outline" className="text-[10px]">{link.type}</Badge>
-                  <span className="flex-1 truncate text-xs">{link.target}</span>
-                  <Button size="xs" variant="ghost" onClick={() => removeLink(index)}>Remove</Button>
-                </div>
+                <EntityLink
+                  key={`${link.type}-${link.target}-${index}`}
+                  link={link}
+                  onRemove={() => removeLink(index)}
+                />
               ))}
               {showAddLink && (
                 <div className="grid gap-2 md:grid-cols-[10rem_1fr_auto_auto]">
