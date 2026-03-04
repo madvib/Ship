@@ -8,7 +8,7 @@ import {
   readFrontmatterStringListField,
   setFrontmatterStringField,
   setFrontmatterStringListField,
-} from './frontmatter';
+} from '@ship/ui';
 
 const SPEC_STATUSES = ['draft', 'active', 'archived'];
 

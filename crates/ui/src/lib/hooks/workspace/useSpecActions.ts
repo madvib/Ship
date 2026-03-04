@@ -53,16 +53,7 @@ export function useSpecActions({
       const result = await createSpecCmd(title, content);
       if (result.status === 'ok') {
         const created = result.data;
-        setSpecs((prev) => [
-          ...prev,
-          {
-            id: created.id,
-            file_name: created.file_name,
-            title: created.title,
-            path: created.path,
-            status: created.status,
-          },
-        ]);
+        setSpecs((prev) => [...prev, created]);
         setSelectedSpec(created);
         await refreshActivity();
       } else {
@@ -86,17 +77,7 @@ export function useSpecActions({
       if (result.status === 'ok') {
         const updated = result.data;
         setSpecs((prev) =>
-          prev.map((entry) =>
-            entry.file_name === updated.file_name
-              ? {
-                id: updated.id,
-                file_name: updated.file_name,
-                title: updated.title,
-                path: updated.path,
-                status: updated.status,
-              }
-              : entry
-          )
+          prev.map((entry) => (entry.file_name === updated.file_name ? updated : entry))
         );
         setSelectedSpec(updated);
         await refreshActivity();

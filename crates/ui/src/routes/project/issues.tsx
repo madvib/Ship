@@ -5,16 +5,17 @@ import { Button } from '@ship/ui';
 import { EmptyState } from '@ship/ui';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import TemplateEditorButton from '@/features/planning/TemplateEditorButton';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 import { Plus } from 'lucide-react';
 
 function IssuesRouteComponent() {
   const workspace = useWorkspace();
-  const totalIssues = workspace.issues.length;
+  const ship = useShip();
+  const totalIssues = ship.issues.length;
   const statusTotals = workspace.statuses.map((status) => ({
     id: status.id,
     label: status.name,
-    count: workspace.issues.filter((issue) => issue.status === status.id).length,
+    count: ship.issues.filter((issue) => issue.status === status.id).length,
   }));
 
   return (
@@ -25,7 +26,7 @@ function IssuesRouteComponent() {
         actions={
           <div className="flex items-center gap-2">
             <TemplateEditorButton kind="issue" />
-            <Button onClick={() => workspace.setShowNewIssue(true)}>+ New Issue</Button>
+            <Button onClick={() => ship.setShowNewIssue(true)}>+ New Issue</Button>
           </div>
         }
         footer={
@@ -48,7 +49,7 @@ function IssuesRouteComponent() {
           title="No issues yet"
           description="Create your first issue to start tracking work."
           action={
-            <Button onClick={() => workspace.setShowNewIssue(true)}>
+            <Button onClick={() => ship.setShowNewIssue(true)}>
               <Plus className="mr-2 size-4" />
               Create First Issue
             </Button>
@@ -56,13 +57,13 @@ function IssuesRouteComponent() {
         />
       ) : (
         <IssueList
-          issues={workspace.issues}
+          issues={ship.issues}
           statuses={workspace.statuses}
-          onSelect={workspace.setSelectedIssue}
+          onSelect={ship.setSelectedIssue}
           onMove={(fileName, fromStatus, toStatus) =>
-            workspace.handleStatusChange(fileName, fromStatus, toStatus, { selectMovedIssue: false })
+            ship.handleStatusChange(fileName, fromStatus, toStatus, { selectMovedIssue: false })
           }
-          onNewIssue={() => workspace.setShowNewIssue(true)}
+          onNewIssue={() => ship.setShowNewIssue(true)}
         />
       )}
     </PageFrame>

@@ -1,22 +1,23 @@
 import { createFileRoute } from '@tanstack/react-router';
 import AdrList from '@/features/planning/AdrList';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 
 function AdrsRouteComponent() {
   const workspace = useWorkspace();
+  const ship = useShip();
 
   return (
     <AdrList
-      adrs={workspace.adrs}
-      selectedAdr={workspace.selectedAdr}
-      onCreateAdr={workspace.handleCreateAdr}
-      onSelectAdr={workspace.handleSelectAdr}
-      onMoveAdr={workspace.handleMoveAdr}
-      onSaveAdr={workspace.handleSaveAdr}
-      onDeleteAdr={workspace.handleDeleteAdr}
-      specSuggestions={workspace.specSuggestions}
-      tagSuggestions={workspace.tagSuggestions}
-      adrSuggestions={workspace.adrSuggestions}
+      adrs={ship.adrs}
+      selectedAdr={ship.selectedAdr}
+      onCreateAdr={ship.handleCreateAdr}
+      onSelectAdr={ship.handleSelectAdr}
+      onMoveAdr={ship.handleMoveAdr}
+      onSaveAdr={ship.handleSaveAdr}
+      onDeleteAdr={ship.handleDeleteAdr}
+      specSuggestions={ship.specSuggestions}
+      tagSuggestions={ship.tagSuggestions}
+      adrSuggestions={ship.adrSuggestions}
       mcpEnabled={workspace.mcpEnabled}
     />
   );

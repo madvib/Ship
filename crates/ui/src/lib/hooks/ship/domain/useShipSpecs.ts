@@ -1,0 +1,39 @@
+import { Dispatch, SetStateAction, useState, useMemo } from 'react';
+import { SpecDocument, SpecInfo as SpecEntry } from '@/lib/types/spec';
+import { useSpecActions } from '../../workspace/useSpecActions';
+
+interface UseShipSpecsParams {
+    setError: Dispatch<SetStateAction<string | null>>;
+    refreshActivity: () => Promise<void>;
+}
+
+export function useShipSpecs({
+    setError,
+    refreshActivity,
+}: UseShipSpecsParams) {
+    const [specs, setSpecs] = useState<SpecEntry[]>([]);
+    const [selectedSpec, setSelectedSpec] = useState<SpecDocument | null>(null);
+
+    const actions = useSpecActions({
+        setSpecs,
+        setSelectedSpec,
+        setError,
+        refreshActivity,
+    });
+
+    const specSuggestions = useMemo(() => {
+        return specs
+            .map((entry) => entry.file_name)
+            .filter((value) => value.trim().length > 0)
+            .sort((a, b) => a.localeCompare(b));
+    }, [specs]);
+
+    return {
+        specs,
+        setSpecs,
+        selectedSpec,
+        setSelectedSpec,
+        specSuggestions,
+        ...actions,
+    };
+}

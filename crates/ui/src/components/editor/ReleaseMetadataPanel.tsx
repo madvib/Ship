@@ -14,7 +14,7 @@ import {
   setFrontmatterBooleanField,
   setFrontmatterStringField,
   setFrontmatterStringListField,
-} from './frontmatter';
+} from '@ship/ui';
 
 const RELEASE_STATUSES = ['planned', 'active', 'shipped', 'archived'];
 

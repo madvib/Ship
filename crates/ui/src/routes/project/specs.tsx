@@ -1,16 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router';
 import SpecsPage from '@/features/planning/SpecsPage';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 
 function SpecsRouteComponent() {
-  const workspace = useWorkspace();
+  const ship = useShip();
 
   return (
     <SpecsPage
-      specs={workspace.specs}
-      tagSuggestions={workspace.tagSuggestions}
-      onSelectSpec={workspace.handleSelectSpec}
-      onCreateSpec={workspace.handleCreateSpec}
+      specs={ship.specs}
+      tagSuggestions={ship.tagSuggestions}
+      onSelectSpec={ship.handleSelectSpec}
+      onCreateSpec={ship.handleCreateSpec}
     />
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FeatureDocument } from '@/bindings';
+import { FeatureEntry } from '@/bindings';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -25,7 +25,7 @@ import { Progress } from '@ship/ui';
 import {
   readFrontmatterStringListField,
   splitFrontmatterDocument,
-} from '@/components/editor/frontmatter';
+} from '@ship/ui';
 import {
   deriveFeatureChecklistMetrics,
   formatStatusLabel,
@@ -33,7 +33,7 @@ import {
 import { cn } from '@/lib/utils';
 
 interface FeatureDetailProps {
-  feature: FeatureDocument;
+  feature: FeatureEntry;
   releaseSuggestions?: string[];
   specSuggestions?: string[];
   adrSuggestions?: string[];
@@ -57,13 +57,13 @@ export default function FeatureDetail({
   onSelectSpec,
   onSave,
 }: FeatureDetailProps) {
-  const [content, setContent] = useState(feature.content);
+  const [content, setContent] = useState(feature.feature.body);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    setContent(feature.content);
+    setContent(feature.feature.body);
     setDirty(false);
     setSaving(false);
     setEditing(false);
@@ -82,10 +82,10 @@ export default function FeatureDetail({
   }, [content, dirty, feature.file_name, onSave, saving]);
 
   const cancelEditing = useCallback(() => {
-    setContent(feature.content);
+    setContent(feature.feature.body);
     setDirty(false);
     setEditing(false);
-  }, [feature.content]);
+  }, [feature.feature.body]);
 
   const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
   const readiness = useMemo(
@@ -130,7 +130,7 @@ export default function FeatureDetail({
             </div>
 
             <h2 className="truncate px-2 text-center text-xl font-semibold tracking-tight">
-              {feature.title}
+              {feature.feature.metadata.title}
             </h2>
 
             <div className="flex min-w-0 justify-end gap-2">
@@ -182,7 +182,7 @@ export default function FeatureDetail({
                 <FeatureMetadataPanel
                   frontmatter={frontmatter}
                   delimiter={delimiter}
-                  defaultTitle={feature.title}
+                  defaultTitle={feature.feature.metadata.title}
                   defaultStatus={feature.status}
                   releaseSuggestions={releaseSuggestions}
                   specSuggestions={specSuggestions}
@@ -230,15 +230,15 @@ export default function FeatureDetail({
                 <CardTitle className="text-sm">Planning Links</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
-                {feature.release_id ? (
+                {feature.feature.metadata.release_id ? (
                   <button
                     type="button"
-                    onClick={() => onSelectRelease(feature.release_id!)}
+                    onClick={() => onSelectRelease(feature.feature.metadata.release_id!)}
                     className="hover:bg-muted/40 flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-xs"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <Package className="size-3.5 text-primary" />
-                      {feature.release_id}
+                      {feature.feature.metadata.release_id}
                     </span>
                     <ExternalLink className="size-3.5 text-muted-foreground" />
                   </button>
@@ -246,15 +246,15 @@ export default function FeatureDetail({
                   <p className="text-muted-foreground text-xs italic">No linked release.</p>
                 )}
 
-                {feature.spec_id ? (
+                {feature.feature.metadata.spec_id ? (
                   <button
                     type="button"
-                    onClick={() => onSelectSpec(feature.spec_id!)}
+                    onClick={() => onSelectSpec(feature.feature.metadata.spec_id!)}
                     className="hover:bg-muted/40 flex w-full items-center justify-between rounded-md border px-2.5 py-2 text-left text-xs"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <FileText className="size-3.5 text-primary" />
-                      {feature.spec_id}
+                      {feature.feature.metadata.spec_id}
                     </span>
                     <ExternalLink className="size-3.5 text-muted-foreground" />
                   </button>
@@ -262,10 +262,10 @@ export default function FeatureDetail({
                   <p className="text-muted-foreground text-xs italic">No linked specification.</p>
                 )}
 
-                {feature.branch && (
+                {feature.feature.metadata.branch && (
                   <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
                     <GitBranch className="size-3.5" />
-                    {feature.branch}
+                    {feature.feature.metadata.branch}
                   </p>
                 )}
               </CardContent>

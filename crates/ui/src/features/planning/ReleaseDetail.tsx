@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FeatureInfo, ReleaseDocument } from '@/bindings';
+import { FeatureEntry, ReleaseEntry } from '@/bindings';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -18,16 +18,16 @@ import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ship/ui';
 import { Progress } from '@ship/ui';
-import { splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import { splitFrontmatterDocument } from '@ship/ui';
 import { featureStatusFallbackReadiness, formatStatusLabel } from '@/features/planning/hub/utils/featureMetrics';
 import { cn } from '@/lib/utils';
 
 interface ReleaseDetailProps {
-  release: ReleaseDocument;
-  features: FeatureInfo[];
+  release: ReleaseEntry;
+  features: FeatureEntry[];
   mcpEnabled?: boolean;
   onClose: () => void;
-  onSelectFeature: (feature: FeatureInfo) => void;
+  onSelectFeature: (feature: FeatureEntry) => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
 }
 
@@ -68,14 +68,14 @@ export default function ReleaseDetail({
   onSelectFeature,
   onSave,
 }: ReleaseDetailProps) {
-  const [content, setContent] = useState(release.content);
+  const [content, setContent] = useState(release.release.body);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [showAllLinkedFeatures, setShowAllLinkedFeatures] = useState(false);
 
   useEffect(() => {
-    setContent(release.content);
+    setContent(release.release.body);
     setDirty(false);
     setSaving(false);
     setEditing(false);
@@ -95,17 +95,17 @@ export default function ReleaseDetail({
   }, [content, dirty, onSave, release.file_name, saving]);
 
   const cancelEditing = useCallback(() => {
-    setContent(release.content);
+    setContent(release.release.body);
     setDirty(false);
     setEditing(false);
-  }, [release.content]);
+  }, [release.release.body]);
 
   const linkedFeatures = useMemo(
     () =>
       features.filter(
-        (feature) => feature.release_id === release.file_name || feature.release_id === release.version
+        (feature) => feature.feature.metadata.release_id === release.file_name || feature.feature.metadata.release_id === release.release.metadata.version
       ),
-    [features, release.file_name, release.version]
+    [features, release.file_name, release.release.metadata.version]
   );
 
   const linkedStatusSummary = useMemo(() => {
@@ -116,11 +116,11 @@ export default function ReleaseDetail({
       linkedFeatures.length === 0
         ? 0
         : Math.round(
-            linkedFeatures.reduce(
-              (sum, entry) => sum + featureStatusFallbackReadiness(entry.status),
-              0
-            ) / linkedFeatures.length
-          );
+          linkedFeatures.reduce(
+            (sum, entry) => sum + featureStatusFallbackReadiness(entry.status),
+            0
+          ) / linkedFeatures.length
+        );
     return {
       implemented,
       inProgress,
@@ -167,7 +167,7 @@ export default function ReleaseDetail({
             </div>
 
             <h2 className="truncate px-2 text-center text-xl font-semibold tracking-tight">
-              {release.version}
+              {release.release.metadata.version}
             </h2>
 
             <div className="flex min-w-0 justify-end gap-2">
@@ -215,7 +215,7 @@ export default function ReleaseDetail({
                 <ReleaseMetadataPanel
                   frontmatter={frontmatter}
                   delimiter={delimiter}
-                  defaultVersion={release.version}
+                  defaultVersion={release.release.metadata.version}
                   defaultStatus={release.status}
                   onChange={onChange}
                 />
@@ -314,7 +314,7 @@ export default function ReleaseDetail({
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="truncate font-medium">{feature.title}</p>
+                                <p className="truncate font-medium">{feature.feature.metadata.title}</p>
                                 <p className="text-muted-foreground text-[11px]">
                                   {feature.file_name}
                                 </p>

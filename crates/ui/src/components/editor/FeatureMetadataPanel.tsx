@@ -10,7 +10,7 @@ import {
   readFrontmatterStringListField,
   setFrontmatterStringField,
   setFrontmatterStringListField,
-} from './frontmatter';
+} from '@ship/ui';
 
 const FEATURE_STATUSES = ['active', 'paused', 'complete', 'archived'];
 

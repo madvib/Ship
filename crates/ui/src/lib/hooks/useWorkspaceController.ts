@@ -1,19 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
-  AdrEntry,
   EventRecord,
-  FeatureDocument,
-  FeatureInfo as FeatureEntry,
-  IssueEntry,
   ModeConfig,
-  NoteDocument,
-  NoteInfo as NoteEntry,
   ProjectDiscovery as Project,
   ProjectConfig,
-  ReleaseDocument,
-  ReleaseInfo as ReleaseEntry,
 } from '@/bindings';
-import { SpecDocument, SpecInfo as SpecEntry } from '@/lib/types/spec';
 import { Config, DEFAULT_STATUSES } from '@/lib/workspace-ui';
 import {
   getActiveProject,
@@ -25,13 +16,8 @@ import { isTauriRuntime } from '../platform/tauri/runtime';
 import { applyTheme, SIDEBAR_COLLAPSED_STORAGE_KEY, projectFromInfo } from './workspace/constants';
 import { useWorkspaceLifecycle } from './workspace/useWorkspaceLifecycle';
 import { useProjectActions } from './workspace/useProjectActions';
-import { useIssueActions } from './workspace/useIssueActions';
-import { useAdrActions } from './workspace/useAdrActions';
-import { useSpecActions } from './workspace/useSpecActions';
 import { useSettingsActions } from './workspace/useSettingsActions';
-import { useReleaseActions } from './workspace/useReleaseActions';
-import { useFeatureActions } from './workspace/useFeatureActions';
-import { useNoteActions } from './workspace/useNoteActions';
+import { useShipEntities } from './ship/useShipEntities';
 
 function mergeModes(base: ModeConfig[] = [], overlay: ModeConfig[] = []): ModeConfig[] {
   const merged = [...base];
@@ -53,24 +39,10 @@ export function useWorkspaceController() {
   const [detectingProject, setDetectingProject] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
-  const [issues, setIssues] = useState<IssueEntry[]>([]);
-  const [adrs, setAdrs] = useState<AdrEntry[]>([]);
-  const [specs, setSpecs] = useState<SpecEntry[]>([]);
-  const [releases, setReleases] = useState<ReleaseEntry[]>([]);
-  const [features, setFeatures] = useState<FeatureEntry[]>([]);
-  const [notes, setNotes] = useState<NoteEntry[]>([]);
   const [eventEntries, setEventEntries] = useState<EventRecord[]>([]);
   const [config, setConfig] = useState<Config>({});
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [globalAgentConfig, setGlobalAgentConfig] = useState<ProjectConfig | null>(null);
-  const [selectedIssue, setSelectedIssue] = useState<IssueEntry | null>(null);
-  const [selectedAdr, setSelectedAdr] = useState<AdrEntry | null>(null);
-  const [selectedSpec, setSelectedSpec] = useState<SpecDocument | null>(null);
-  const [selectedRelease, setSelectedRelease] = useState<ReleaseDocument | null>(null);
-  const [selectedFeature, setSelectedFeature] = useState<FeatureDocument | null>(null);
-  const [selectedNote, setSelectedNote] = useState<NoteDocument | null>(null);
-  const [showNewIssue, setShowNewIssue] = useState(false);
-  const [showNewAdr, setShowNewAdr] = useState(false);
   const [switchingMode, setSwitchingMode] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -92,15 +64,21 @@ export function useWorkspaceController() {
     globalAgentConfig?.ai?.model?.trim() ||
     null;
 
+  const ship = useShipEntities({
+    refreshActivity: async () => {
+      await refreshEvents();
+    },
+    refreshProjectInfo: async () => {
+      if (!isTauriRuntime()) return;
+      const info = await getActiveProject().catch(() => null);
+      if (info) setActiveProject(projectFromInfo(info));
+    },
+    setError,
+  });
+
   const { loadProjectData, loadProjectConfig, refreshDetectedProject } = useWorkspaceLifecycle({
     activeProject,
     sidebarCollapsed,
-    setIssues,
-    setAdrs,
-    setSpecs,
-    setReleases,
-    setFeatures,
-    setNotes,
     setEventEntries,
     setProjectConfig,
     setGlobalAgentConfig,
@@ -110,6 +88,7 @@ export function useWorkspaceController() {
     setConfig,
     setError,
     setLoading,
+    onProjectDataChange: ship.loadShipData,
   });
 
   const refreshEvents = async () => {
@@ -131,11 +110,6 @@ export function useWorkspaceController() {
     return count;
   };
 
-  const refreshProjectInfo = async () => {
-    if (!isTauriRuntime()) return;
-    const info = await getActiveProject().catch(() => null);
-    if (info) setActiveProject(projectFromInfo(info));
-  };
 
   const {
     handleOpenProject,
@@ -147,89 +121,16 @@ export function useWorkspaceController() {
     setError,
     setActiveProject,
     setDetectedProject,
-    setSelectedIssue,
-    setSelectedAdr,
-    setSelectedSpec,
-    setSelectedRelease,
-    setSelectedFeature,
+    setSelectedIssue: ship.setSelectedIssue,
+    setSelectedAdr: ship.setSelectedAdr,
+    setSelectedSpec: ship.setSelectedSpec,
+    setSelectedRelease: ship.setSelectedRelease,
+    setSelectedFeature: ship.setSelectedFeature,
     setCreatingProject,
     loadProjectData,
     loadProjectConfig,
   });
 
-  const {
-    handleCreateIssue,
-    handleStatusChange,
-    handleSaveIssue,
-    handleDeleteIssue,
-  } = useIssueActions({
-    issues,
-    setIssues,
-    setSelectedIssue,
-    setShowNewIssue,
-    setError,
-    refreshActivity,
-    refreshProjectInfo,
-  });
-
-  const {
-    handleCreateAdr,
-    handleSelectAdr,
-    handleSaveAdr,
-    handleMoveAdr,
-    handleDeleteAdr,
-  } = useAdrActions({
-    setAdrs,
-    setSelectedAdr,
-    setShowNewAdr,
-    setError,
-    refreshActivity,
-  });
-
-  const {
-    handleSelectSpec,
-    handleCreateSpec,
-    handleSaveSpec,
-    handleDeleteSpec,
-  } = useSpecActions({
-    setSpecs,
-    setSelectedSpec,
-    setError,
-    refreshActivity,
-  });
-
-  const {
-    handleSelectRelease,
-    handleCreateRelease,
-    handleSaveRelease,
-  } = useReleaseActions({
-    setReleases,
-    setSelectedRelease,
-    setError,
-    refreshActivity,
-  });
-
-  const {
-    handleSelectFeature,
-    handleCreateFeature,
-    handleSaveFeature,
-  } = useFeatureActions({
-    setFeatures,
-    setSelectedFeature,
-    setError,
-    refreshActivity,
-  });
-
-  const {
-    handleSelectNote,
-    handleCreateNote,
-    handleSaveNote,
-  } = useNoteActions({
-    setNotes,
-    setSelectedNote,
-    setError,
-    refreshActivity,
-  });
 
   const { handleSaveSettings, handleSaveProjectSettings, handleSaveGlobalAgentSettings } = useSettingsActions({
     setConfig,
@@ -262,39 +163,6 @@ export function useWorkspaceController() {
 
   const noProject = !activeProject;
 
-  const tagSuggestions = useMemo(() => {
-    return Array.from(
-      new Set([
-        ...issues
-          .flatMap((entry) => entry.issue?.tags ?? [])
-          .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0),
-        ...adrs
-          .flatMap((entry) => entry.adr.metadata.tags ?? [])
-          .filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0),
-      ])
-    ).sort((a, b) => a.localeCompare(b));
-  }, [issues, adrs]);
-
-  const specSuggestions = useMemo(() => {
-    return specs
-      .map((entry) => entry.file_name)
-      .filter((value) => value.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b));
-  }, [specs]);
-
-  const issueFileSuggestions = useMemo(() => {
-    return issues
-      .map((entry) => entry.file_name)
-      .filter((value) => value.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b));
-  }, [issues]);
-
-  const adrSuggestions = useMemo(() => {
-    return adrs
-      .map((entry) => entry.adr.metadata.id)
-      .filter((value) => value.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b));
-  }, [adrs]);
 
   const mcpEnabled = config.mcp_enabled !== false;
 
@@ -304,24 +172,10 @@ export function useWorkspaceController() {
     detectingProject,
     creatingProject,
     recentProjects,
-    issues,
-    adrs,
-    specs,
-    releases,
-    features,
-    notes,
     eventEntries,
     config,
     projectConfig,
     globalAgentConfig,
-    selectedIssue,
-    selectedAdr,
-    selectedSpec,
-    selectedRelease,
-    selectedFeature,
-    selectedNote,
-    showNewIssue,
-    showNewAdr,
     sidebarCollapsed,
     error,
     loading,
@@ -333,21 +187,9 @@ export function useWorkspaceController() {
     aiModel,
     switchingMode,
     noProject,
-    tagSuggestions,
-    specSuggestions,
-    adrSuggestions,
-    issueFileSuggestions,
     mcpEnabled,
     notesScope,
-    setSelectedIssue,
-    setSelectedAdr,
-    setSelectedSpec,
-    setSelectedRelease,
-    setSelectedFeature,
-    setSelectedNote,
     setNotesScope,
-    setShowNewIssue,
-    setShowNewAdr,
     setSidebarCollapsed,
     setError,
     refreshDetectedProject,
@@ -356,28 +198,6 @@ export function useWorkspaceController() {
     handlePickProjectDirectory,
     handleCreateProjectFromForm,
     handleSelectProject,
-    handleCreateIssue,
-    handleStatusChange,
-    handleSaveIssue,
-    handleDeleteIssue,
-    handleCreateAdr,
-    handleSelectAdr,
-    handleSaveAdr,
-    handleMoveAdr,
-    handleDeleteAdr,
-    handleSelectSpec,
-    handleCreateSpec,
-    handleSaveSpec,
-    handleDeleteSpec,
-    handleSelectRelease,
-    handleCreateRelease,
-    handleSaveRelease,
-    handleSelectFeature,
-    handleCreateFeature,
-    handleSaveFeature,
-    handleSelectNote,
-    handleCreateNote,
-    handleSaveNote,
     refreshActivity,
     refreshEvents,
     ingestEvents,
@@ -386,5 +206,7 @@ export function useWorkspaceController() {
     handleSaveGlobalAgentSettings,
     handleSetActiveMode,
     applyTheme,
+    // Layered Ship DSL data
+    ship,
   };
 }

@@ -8,7 +8,7 @@ import {
     CheckCircle2,
     Package,
 } from 'lucide-react';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 import {
     CommandDialog,
     CommandEmpty,
@@ -22,6 +22,13 @@ import { ADRS_ROUTE, FEATURES_ROUTE, NOTES_ROUTE, RELEASES_ROUTE } from '@/lib/c
 export function SearchModal() {
     const [open, setOpen] = React.useState(false);
     const navigate = useNavigate();
+    const workspace = useWorkspace();
+    const ship = useShip();
+
+    const {
+        setNotesScope,
+    } = workspace;
+
     const {
         notes,
         specs,
@@ -32,11 +39,10 @@ export function SearchModal() {
         handleSelectNote,
         handleSelectFeature,
         handleSelectRelease,
-        setNotesScope,
         setSelectedSpec,
         setSelectedAdr,
         setSelectedIssue,
-    } = useWorkspace();
+    } = ship;
 
     React.useEffect(() => {
         const down = (e: KeyboardEvent) => {
@@ -74,7 +80,7 @@ export function SearchModal() {
                                 }
                             >
                                 <Target className="mr-2 h-4 w-4" />
-                                <span>{feature.title}</span>
+                                <span>{feature.feature.metadata.title}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>
@@ -111,7 +117,7 @@ export function SearchModal() {
                                 }
                             >
                                 <Package className="mr-2 h-4 w-4" />
-                                <span>{release.version}</span>
+                                <span>{release.release.metadata.version}</span>
                             </CommandItem>
                         ))}
                     </CommandGroup>

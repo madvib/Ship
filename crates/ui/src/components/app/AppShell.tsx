@@ -9,7 +9,7 @@ import ProjectOnboarding from '@/features/planning/ProjectOnboarding';
 import SpecDetail from '@/features/planning/SpecDetail';
 import { SearchModal } from '@/components/app/SearchModal';
 import { Button } from '@ship/ui';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 import {
   AppRoutePath,
   AGENTS_MCP_ROUTE,
@@ -24,15 +24,59 @@ import {
   SETTINGS_ROUTE,
   OVERVIEW_ROUTE,
   PROJECTS_ROUTE,
+  WORKFLOW_WORKSPACE_ROUTE,
   normalizePath,
 } from '@/lib/constants/routes';
+import {
+  Bot,
+  FileCode2,
+  FileCog,
+  FileStack,
+  Package,
+  Workflow,
+} from 'lucide-react';
+import { NavSection } from '@/lib/types/navigation';
+import { SHIP_NAV_SECTIONS } from '@/lib/modules/ship';
 
 export default function App() {
   useUpdateChecker();
   const location = useLocation();
   const navigate = useNavigate();
   const workspace = useWorkspace();
+  const ship = useShip();
   const routePath = normalizePath(location.pathname) as AppRoutePath;
+
+  const SHELL_SECTIONS: NavSection[] = [
+    {
+      id: 'workflow',
+      label: 'Workflow',
+      items: [
+        { id: 'workspaces', path: WORKFLOW_WORKSPACE_ROUTE, label: 'Workspaces', icon: Workflow },
+      ],
+    },
+    {
+      id: 'agents',
+      label: 'Agents',
+      items: [
+        { id: 'providers', path: AGENTS_PROVIDERS_ROUTE, label: 'Providers', icon: Bot },
+        { id: 'mcp', path: AGENTS_MCP_ROUTE, label: 'MCP Servers', icon: Package },
+        { id: 'skills', path: AGENTS_SKILLS_ROUTE, label: 'Skills', icon: FileStack },
+        { id: 'rules', path: AGENTS_RULES_ROUTE, label: 'Rules', icon: FileCode2 },
+        { id: 'permissions', path: AGENTS_PERMISSIONS_ROUTE, label: 'Permissions', icon: FileCog },
+      ],
+    },
+  ];
+
+  // Merge injected module sections with shell sections
+  const COMBINED_SECTIONS = [...SHIP_NAV_SECTIONS];
+  for (const shellSection of SHELL_SECTIONS) {
+    const existing = COMBINED_SECTIONS.find(s => s.id === shellSection.id);
+    if (existing) {
+      existing.items = [...existing.items, ...shellSection.items];
+    } else {
+      COMBINED_SECTIONS.push(shellSection);
+    }
+  }
 
   const navigateTo = (path: AppRoutePath) => {
     if (path === NOTES_ROUTE) {
@@ -124,6 +168,7 @@ export default function App() {
         onNewProject={workspace.handleNewProject}
         onSelectProject={handleSelectProject}
         onOpenGlobalNotes={openGlobalNotes}
+        sections={COMBINED_SECTIONS}
         agentControl={
           !workspace.noProject ? (
             <AgentModeControl
@@ -152,40 +197,40 @@ export default function App() {
           value={
             !workspace.noProject || routePath === PROJECTS_ROUTE
               ? {
-                  breadcrumb: (
-                    <nav className="text-muted-foreground flex items-center gap-1 text-xs">
-                      {routePath === PROJECTS_ROUTE ? (
-                        <span className="text-foreground">Projects</span>
-                      ) : (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="h-6 px-1.5 text-xs"
-                            onClick={() => navigateTo(PROJECTS_ROUTE)}
-                          >
-                            Projects
-                          </Button>
-                          <span>/</span>
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="h-6 px-1.5 text-xs"
-                            onClick={() => navigateTo(OVERVIEW_ROUTE)}
-                          >
-                            {workspace.activeProject?.name ?? 'Project'}
-                          </Button>
-                          {routePath !== OVERVIEW_ROUTE && (
-                            <>
-                              <span>/</span>
-                              <span className="text-foreground">{ROUTE_LABELS[routePath]}</span>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </nav>
-                  ),
-                }
+                breadcrumb: (
+                  <nav className="text-muted-foreground flex items-center gap-1 text-xs">
+                    {routePath === PROJECTS_ROUTE ? (
+                      <span className="text-foreground">Projects</span>
+                    ) : (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="h-6 px-1.5 text-xs"
+                          onClick={() => navigateTo(PROJECTS_ROUTE)}
+                        >
+                          Projects
+                        </Button>
+                        <span>/</span>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="h-6 px-1.5 text-xs"
+                          onClick={() => navigateTo(OVERVIEW_ROUTE)}
+                        >
+                          {workspace.activeProject?.name ?? 'Project'}
+                        </Button>
+                        {routePath !== OVERVIEW_ROUTE && (
+                          <>
+                            <span>/</span>
+                            <span className="text-foreground">{ROUTE_LABELS[routePath]}</span>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </nav>
+                ),
+              }
               : null
           }
         >
@@ -193,43 +238,43 @@ export default function App() {
         </PageChromeProvider>
       </main>
 
-      {workspace.selectedIssue && (
+      {ship.selectedIssue && (
         <IssueDetail
-          entry={workspace.selectedIssue}
+          entry={ship.selectedIssue}
           statuses={workspace.statuses}
-          onClose={() => workspace.setSelectedIssue(null)}
-          onStatusChange={workspace.handleStatusChange}
-          onDelete={workspace.handleDeleteIssue}
-          onSave={workspace.handleSaveIssue}
-          tagSuggestions={workspace.tagSuggestions}
-          specSuggestions={workspace.specSuggestions}
-          issueSuggestions={workspace.issueFileSuggestions}
+          onClose={() => ship.setSelectedIssue(null)}
+          onStatusChange={ship.handleStatusChange}
+          onDelete={ship.handleDeleteIssue}
+          onSave={ship.handleSaveIssue}
+          tagSuggestions={ship.tagSuggestions}
+          specSuggestions={ship.specSuggestions}
+          issueSuggestions={ship.issueFileSuggestions}
           mcpEnabled={workspace.mcpEnabled}
         />
       )}
-      {workspace.showNewIssue && (
+      {ship.showNewIssue && (
         <NewIssueModal
-          onClose={() => workspace.setShowNewIssue(false)}
+          onClose={() => ship.setShowNewIssue(false)}
           statuses={workspace.statuses}
-          tagSuggestions={workspace.tagSuggestions}
-          specSuggestions={workspace.specSuggestions}
-          onSubmit={workspace.handleCreateIssue}
+          tagSuggestions={ship.tagSuggestions}
+          specSuggestions={ship.specSuggestions}
+          onSubmit={ship.handleCreateIssue}
           defaultStatus={workspace.config.default_status ?? workspace.statuses[0]?.id}
         />
       )}
-      {workspace.selectedSpec && (
+      {ship.selectedSpec && (
         <SpecDetail
-          spec={workspace.selectedSpec}
-          features={workspace.features}
-          tagSuggestions={workspace.tagSuggestions}
-          onClose={() => workspace.setSelectedSpec(null)}
+          spec={ship.selectedSpec}
+          features={ship.features}
+          tagSuggestions={ship.tagSuggestions}
+          onClose={() => ship.setSelectedSpec(null)}
           onSelectFeature={(f) => {
-            workspace.setSelectedSpec(null);
+            ship.setSelectedSpec(null);
             void navigate({ to: FEATURES_ROUTE });
-            void workspace.handleSelectFeature(f);
+            void ship.handleSelectFeature(f);
           }}
-          onSave={workspace.handleSaveSpec}
-          onDelete={workspace.handleDeleteSpec}
+          onSave={ship.handleSaveSpec}
+          onDelete={ship.handleDeleteSpec}
           mcpEnabled={workspace.mcpEnabled}
         />
       )}

@@ -19,7 +19,7 @@ export function EmptyState({
   className,
 }: EmptyStateProps) {
   return (
-    <Card size="sm" className={cn('items-center text-center', className)}>
+    <Card size="sm" className={cn('w-full items-center text-center', className)}>
       <CardHeader>
         {icon && (
           <div className="text-muted-foreground mb-2 flex justify-center">{icon}</div>

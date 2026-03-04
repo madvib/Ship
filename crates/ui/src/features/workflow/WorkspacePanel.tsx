@@ -17,13 +17,14 @@ import {
   syncWorkspaceCmd,
 } from '@/lib/platform/tauri/commands';
 import { Workspace } from '@/bindings';
+import { RuntimeWorkspace } from '@/lib/types/workspace';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@ship/ui';
+import { Card, CardContent, CardHeader, CardTitle } from '@ship/ui';
 import { Alert, AlertDescription, AlertTitle } from '@ship/ui';
 import { Input } from '@ship/ui';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 import { AGENTS_PROVIDERS_ROUTE, FEATURES_ROUTE, SPECS_ROUTE } from '@/lib/constants/routes';
 import {
   WorkspaceLifecycleGraph,
@@ -88,6 +89,7 @@ function shortToken(value: string, size = 10): string {
 export default function WorkspacePanel() {
   const navigate = useNavigate();
   const workspaceUi = useWorkspace();
+  const ship = useShip();
   const [branch, setBranch] = useState<string | null>(null);
   const [runtimeWorkspaces, setRuntimeWorkspaces] = useState<Workspace[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
@@ -136,23 +138,24 @@ export default function WorkspacePanel() {
 
     return runtimeWorkspaces
       .map((workspace) => {
+        const rw = workspace as RuntimeWorkspace;
         const status = normalizeWorkspaceStatus(
-          workspace.status ?? (workspace.branch === branch ? 'active' : 'idle'),
+          rw.status ?? (workspace.branch === branch ? 'active' : 'idle'),
         );
         return {
-          id: workspace.id,
+          id: workspace.branch || 'unknown',
           branch: workspace.branch,
-          workspaceType: normalizeWorkspaceType(workspace.workspace_type),
+          workspaceType: normalizeWorkspaceType(rw.workspace_type),
           featureId: workspace.feature_id ?? null,
           specId: workspace.spec_id ?? null,
-          releaseId: workspace.release_id ?? null,
+          releaseId: rw.release_id ?? null,
           activeMode: workspace.active_mode ?? null,
           providers: workspace.providers ?? [],
           resolvedAt: workspace.resolved_at,
           isWorktree: workspace.is_worktree,
           worktreePath: workspace.worktree_path ?? null,
-          lastActivatedAt: workspace.last_activated_at ?? null,
-          contextHash: workspace.context_hash ?? null,
+          lastActivatedAt: rw.last_activated_at ?? null,
+          contextHash: rw.context_hash ?? null,
           status,
         };
       })
@@ -254,20 +257,20 @@ export default function WorkspacePanel() {
   const linkedFeature = useMemo(() => {
     if (!detail) return null;
     return (
-      workspaceUi.features.find((entry) => entry.branch === detail.branch) ??
-      workspaceUi.features.find((entry) => entry.file_name === detail.featureId) ??
+      ship.features.find((entry) => entry.feature.metadata.branch === detail.branch) ??
+      ship.features.find((entry) => entry.file_name === detail.featureId) ??
       null
     );
-  }, [detail, workspaceUi.features]);
+  }, [detail, ship.features]);
 
   const linkedSpec = useMemo(() => {
     if (!detail) return null;
     return (
-      workspaceUi.specs.find((entry) => entry.file_name === detail.specId) ??
-      workspaceUi.specs.find((entry) => entry.file_name === linkedFeature?.spec_id) ??
+      ship.specs.find((entry) => entry.file_name === detail.specId) ??
+      ship.specs.find((entry) => entry.file_name === linkedFeature?.feature.metadata.spec_id) ??
       null
     );
-  }, [detail, linkedFeature?.spec_id, workspaceUi.specs]);
+  }, [detail, linkedFeature?.feature.metadata.spec_id, ship.specs]);
 
   const syncCurrentWorkspace = async () => {
     if (!branch) return;
@@ -318,12 +321,12 @@ export default function WorkspacePanel() {
     setError(null);
     try {
       const linkedFeatureForBranch =
-        workspaceUi.features.find((entry) => entry.branch === key) ?? null;
+        ship.features.find((entry) => entry.feature.metadata.branch === key) ?? null;
       const result = await createWorkspaceCmd(key, {
         activate: true,
-        featureId: linkedFeatureForBranch?.id ?? linkedFeatureForBranch?.file_name ?? null,
-        specId: linkedFeatureForBranch?.spec_id ?? null,
-        releaseId: linkedFeatureForBranch?.release_id ?? null,
+        featureId: linkedFeatureForBranch?.file_name ?? null,
+        specId: linkedFeatureForBranch?.feature.metadata.spec_id ?? null,
+        releaseId: linkedFeatureForBranch?.feature.metadata.release_id ?? null,
       });
       if (result.status === 'ok') {
         setSelectedBranch(result.data.branch);
@@ -380,13 +383,13 @@ export default function WorkspacePanel() {
   const openFeature = () => {
     if (!linkedFeature) return;
     void navigate({ to: FEATURES_ROUTE });
-    void workspaceUi.handleSelectFeature(linkedFeature);
+    void ship.handleSelectFeature(linkedFeature);
   };
 
   const openSpec = () => {
     if (!linkedSpec) return;
     void navigate({ to: SPECS_ROUTE });
-    void workspaceUi.handleSelectSpec(linkedSpec);
+    void ship.handleSelectSpec(linkedSpec);
   };
 
   const openAgentProviders = () => {
@@ -602,7 +605,7 @@ export default function WorkspacePanel() {
                   )}
                   {linkedFeature ? (
                     <Button size="xs" variant="outline" onClick={openFeature} className="h-6 max-w-[16rem]">
-                      <span className="truncate">feature {shortToken(linkedFeature.title, 24)}</span>
+                      <span className="truncate">feature {shortToken(linkedFeature.feature.metadata.title, 24)}</span>
                       <ExternalLink className="size-3.5" />
                     </Button>
                   ) : (

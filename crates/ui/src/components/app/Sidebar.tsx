@@ -1,25 +1,16 @@
-import { useState, type ComponentType, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
-  FileCode2,
   FileCog,
-  FileStack,
-  Flag,
-  FolderSearch,
   FolderOpen,
   FolderPlus,
   Globe2,
-  LayoutDashboard,
-  NotebookPen,
-  Package,
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
   History,
   Target,
-  Workflow,
 } from 'lucide-react';
 import { ProjectDiscovery as Project } from '@/bindings';
 import { Button } from '@ship/ui';
@@ -37,21 +28,9 @@ import { cn } from '@/lib/utils';
 import {
   AppRoutePath,
   ACTIVITY_ROUTE as ACTIVITY_PATH,
-  ADRS_ROUTE as ADRS_PATH,
-  AGENTS_MCP_ROUTE as AGENTS_MCP_PATH,
-  AGENTS_PERMISSIONS_ROUTE as AGENTS_PERMISSIONS_PATH,
-  AGENTS_PROVIDERS_ROUTE as AGENTS_PROVIDERS_PATH,
-  AGENTS_RULES_ROUTE as AGENTS_RULES_PATH,
-  AGENTS_SKILLS_ROUTE as AGENTS_SKILLS_PATH,
-  FEATURES_ROUTE as FEATURES_PATH,
-  ISSUES_ROUTE as ISSUES_PATH,
-  NOTES_ROUTE as NOTES_PATH,
-  OVERVIEW_ROUTE as OVERVIEW_PATH,
-  RELEASES_ROUTE as RELEASES_PATH,
   SETTINGS_ROUTE as SETTINGS_PATH,
-  SPECS_ROUTE as SPECS_PATH,
-  WORKFLOW_WORKSPACE_ROUTE as WORKFLOW_WORKSPACE_PATH,
 } from '@/lib/constants/routes';
+import { NavItem, NavSection } from '@/lib/types/navigation';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -65,36 +44,8 @@ interface SidebarProps {
   onSelectProject: (project: Project) => void;
   onOpenGlobalNotes: () => void;
   agentControl?: ReactNode;
+  sections: NavSection[];
 }
-
-type NavItem = {
-  path: AppRoutePath;
-  label: string;
-  icon: ComponentType<{ className?: string }>;
-  priority?: 'primary' | 'secondary';
-};
-
-const PROJECT_ITEMS: NavItem[] = [
-  { path: OVERVIEW_PATH, label: 'Overview', icon: LayoutDashboard },
-  { path: NOTES_PATH, label: 'Notes', icon: NotebookPen },
-  { path: ADRS_PATH, label: 'Decisions', icon: FileStack },
-  { path: RELEASES_PATH, label: 'Releases', icon: Package },
-  { path: FEATURES_PATH, label: 'Features', icon: Flag },
-];
-
-const WORKFLOW_ITEMS: NavItem[] = [
-  { path: WORKFLOW_WORKSPACE_PATH, label: 'Workspaces', icon: Workflow },
-  { path: SPECS_PATH, label: 'Specs', icon: FileCode2 },
-  { path: ISSUES_PATH, label: 'Issues', icon: FolderSearch, priority: 'secondary' },
-];
-
-const AGENT_ITEMS: NavItem[] = [
-  { path: AGENTS_PROVIDERS_PATH, label: 'Providers', icon: Bot },
-  { path: AGENTS_MCP_PATH, label: 'MCP Servers', icon: Package },
-  { path: AGENTS_SKILLS_PATH, label: 'Skills', icon: FileStack },
-  { path: AGENTS_RULES_PATH, label: 'Rules', icon: FileCode2 },
-  { path: AGENTS_PERMISSIONS_PATH, label: 'Permissions', icon: FileCog },
-];
 
 function initialsFromProjectName(projectName: string | null | undefined): string {
   const cleaned = (projectName ?? '').trim();
@@ -121,10 +72,16 @@ export default function Sidebar({
   onSelectProject,
   onOpenGlobalNotes,
   agentControl,
+  sections,
 }: SidebarProps) {
-  const [projectOpen, setProjectOpen] = useState(true);
-  const [workflowOpen, setWorkflowOpen] = useState(true);
-  const [agentsOpen, setAgentsOpen] = useState(true);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
+    sections.reduce((acc, section) => ({ ...acc, [section.id]: true }), {})
+  );
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const otherProjects = recentProjects
     .filter((project) => project.path !== activeProject?.path)
     .slice(0, 3);
@@ -136,7 +93,7 @@ export default function Sidebar({
     const secondary = item.priority === 'secondary';
     return (
       <Button
-        key={item.path}
+        key={item.id}
         variant={active ? 'secondary' : 'ghost'}
         size={isCompact ? 'icon-sm' : 'default'}
         className={cn(
@@ -148,7 +105,7 @@ export default function Sidebar({
               ? 'text-muted-foreground/70 hover:bg-muted/35'
               : 'hover:bg-muted/50'
         )}
-        onClick={() => onNavigate(item.path)}
+        onClick={() => onNavigate(item.path as AppRoutePath)}
         title={item.label}
         aria-label={item.label}
       >
@@ -178,6 +135,7 @@ export default function Sidebar({
 
   return (
     <aside className={cn('sidebar flex h-full min-h-0 flex-col gap-4 p-3', collapsed && 'items-center px-2')}>
+      {/* ... header and agent control ... (omitted for brevity, keep existing) */}
       <header
         className={cn(
           'flex w-full items-center gap-2 rounded-xl border border-primary/10 bg-gradient-to-br from-card to-card/50 p-2 shadow-sm',
@@ -302,87 +260,47 @@ export default function Sidebar({
 
       <nav
         className={cn(
-          'flex w-full flex-1 flex-col gap-2 rounded-lg border bg-card/30 p-2',
+          'flex w-full flex-1 flex-col gap-2 rounded-lg border bg-card/30 p-2 overflow-y-auto no-scrollbar',
           collapsed && 'items-center p-1.5'
         )}
       >
         {!collapsed ? (
-          <>
-            <div className="w-full space-y-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start px-2"
-                onClick={() => setProjectOpen((current) => !current)}
-              >
-                <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">
-                  Project
-                </span>
-                <ChevronDown className={cn('ml-auto size-3.5 transition-transform', projectOpen && 'rotate-180')} />
-              </Button>
-              {projectOpen && <div className="space-y-1">{PROJECT_ITEMS.map((item) => renderNavButton(item))}</div>}
+          sections.map((section, idx) => (
+            <div key={section.id} className="w-full">
+              <div className="w-full space-y-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start px-2"
+                  onClick={() => toggleSection(section.id)}
+                >
+                  <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">
+                    {section.label}
+                  </span>
+                  <ChevronDown className={cn('ml-auto size-3.5 transition-transform', openSections[section.id] && 'rotate-180')} />
+                </Button>
+                {openSections[section.id] && (
+                  <div className="space-y-1">
+                    {section.items.map((item) => renderNavButton(item))}
+                  </div>
+                )}
+              </div>
+              {idx < sections.length - 1 && <Separator className="my-1" />}
             </div>
-
-            <Separator className="my-1" />
-
-            <div className="w-full space-y-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start px-2"
-                onClick={() => setWorkflowOpen((current) => !current)}
-              >
-                <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">
-                  Workflow
-                </span>
-                <ChevronDown className={cn('ml-auto size-3.5 transition-transform', workflowOpen && 'rotate-180')} />
-              </Button>
-              {workflowOpen && <div className="space-y-1">{WORKFLOW_ITEMS.map((item) => renderNavButton(item))}</div>}
-            </div>
-
-            <Separator className="my-1" />
-
-            <div className="w-full space-y-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start px-2"
-                onClick={() => setAgentsOpen((current) => !current)}
-              >
-                <span className="text-muted-foreground text-[10px] font-medium uppercase tracking-wider">
-                  Agents
-                </span>
-                <ChevronDown className={cn('ml-auto size-3.5 transition-transform', agentsOpen && 'rotate-180')} />
-              </Button>
-              {agentsOpen && <div className="space-y-1">{AGENT_ITEMS.map((item) => renderNavButton(item))}</div>}
-            </div>
-          </>
+          ))
         ) : (
           <div className="flex flex-col items-center gap-6 py-4">
-            <div className="group flex flex-col items-center gap-1.5">
-              <span className="text-[7px] font-black text-muted-foreground/40 uppercase tracking-[0.2em] transition-colors group-hover:text-primary/70">PRJ</span>
-              <div className="flex flex-col gap-1 w-full">
-                {PROJECT_ITEMS.map(item => renderNavButton(item, true))}
+            {sections.map((section, idx) => (
+              <div key={section.id} className="group flex flex-col items-center gap-1.5">
+                <span className="text-[7px] font-black text-muted-foreground/40 uppercase tracking-[0.2em] transition-colors group-hover:text-primary/70">
+                  {section.id.slice(0, 3).toUpperCase()}
+                </span>
+                <div className="flex flex-col gap-1 w-full">
+                  {section.items.map(item => renderNavButton(item, true))}
+                </div>
+                {idx < sections.length - 1 && <Separator className="w-8 opacity-20" />}
               </div>
-            </div>
-
-            <Separator className="w-8 opacity-20" />
-
-            <div className="group flex flex-col items-center gap-1.5">
-              <span className="text-[7px] font-black text-muted-foreground/40 uppercase tracking-[0.2em] transition-colors group-hover:text-primary/70">WKF</span>
-              <div className="flex flex-col gap-1 w-full">
-                {WORKFLOW_ITEMS.map(item => renderNavButton(item, true))}
-              </div>
-            </div>
-
-            <Separator className="w-8 opacity-20" />
-
-            <div className="group flex flex-col items-center gap-1.5">
-              <span className="text-[7px] font-black text-muted-foreground/40 uppercase tracking-[0.2em] transition-colors group-hover:text-primary/70">AGT</span>
-              <div className="flex flex-col gap-1 w-full">
-                {AGENT_ITEMS.map(item => renderNavButton(item, true))}
-              </div>
-            </div>
+            ))}
           </div>
         )}
       </nav>

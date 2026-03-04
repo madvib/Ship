@@ -9,7 +9,7 @@ import { EmptyState } from '@ship/ui';
 import MarkdownEditor from '@/components/editor';
 import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import SpecMetadataPanel from '@/components/editor/SpecMetadataPanel';
-import { readFrontmatterStringField, splitFrontmatterDocument } from '@/components/editor/frontmatter';
+import { readFrontmatterStringField, splitFrontmatterDocument } from '@ship/ui';
 import TemplateEditorButton from './TemplateEditorButton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
 import { Input } from '@ship/ui';

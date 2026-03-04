@@ -1,5 +1,5 @@
 import { Dispatch, SetStateAction } from 'react';
-import { ReleaseDocument, ReleaseInfo as ReleaseEntry } from '@/bindings';
+import { ReleaseEntry } from '@/bindings';
 import {
   createReleaseCmd,
   getReleaseCmd,
@@ -9,7 +9,7 @@ import { isTauriRuntime } from '../../platform/tauri/runtime';
 
 interface UseReleaseActionsParams {
   setReleases: Dispatch<SetStateAction<ReleaseEntry[]>>;
-  setSelectedRelease: Dispatch<SetStateAction<ReleaseDocument | null>>;
+  setSelectedRelease: Dispatch<SetStateAction<ReleaseEntry | null>>;
   setError: Dispatch<SetStateAction<string | null>>;
   refreshActivity: () => Promise<void>;
 }
@@ -22,7 +22,7 @@ export function useReleaseActions({
 }: UseReleaseActionsParams) {
   const handleSelectRelease = async (entry: ReleaseEntry) => {
     if (!isTauriRuntime()) {
-      setSelectedRelease({ ...entry, content: '' });
+      setSelectedRelease(entry);
       return;
     }
 
@@ -48,17 +48,7 @@ export function useReleaseActions({
       const result = await createReleaseCmd(version, content);
       if (result.status === 'ok') {
         const created = result.data;
-        setReleases((prev) => [
-          ...prev,
-          {
-            id: created.id,
-            file_name: created.file_name,
-            version: created.version,
-            status: created.status,
-            path: created.path,
-            updated: created.updated,
-          },
-        ]);
+        setReleases((prev) => [...prev, created]);
         setSelectedRelease(created);
         await refreshActivity();
       } else {
@@ -82,18 +72,7 @@ export function useReleaseActions({
       if (result.status === 'ok') {
         const updated = result.data;
         setReleases((prev) =>
-          prev.map((entry) =>
-            entry.file_name === updated.file_name
-              ? {
-                id: updated.id,
-                file_name: updated.file_name,
-                version: updated.version,
-                status: updated.status,
-                path: updated.path,
-                updated: updated.updated,
-              }
-              : entry
-          )
+          prev.map((entry) => (entry.file_name === updated.file_name ? updated : entry))
         );
         setSelectedRelease(updated);
         await refreshActivity();

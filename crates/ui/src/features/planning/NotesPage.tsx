@@ -6,7 +6,7 @@ import { PageFrame, PageHeader } from '@/components/app/PageFrame';
 import MarkdownEditor from '@/components/editor';
 import { cn } from '@/lib/utils';
 import { Badge } from '@ship/ui';
-import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
+import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
 import { relativeDate } from '@/lib/date';
 import { NoteDocument, NoteInfo as NoteEntry } from '@/bindings';
 import { createNoteCmd, getNoteCmd, listNotes, updateNoteCmd } from '@/lib/platform/tauri/commands';
@@ -45,17 +45,20 @@ NoteListItem.displayName = 'NoteListItem';
 
 export default function NotesPage() {
     const {
-        notes: projectNotes,
-        selectedNote: projectSelectedNote,
         loading: projectLoading,
         notesScope,
+        setError,
+        refreshActivity,
+    } = useWorkspace();
+
+    const {
+        notes: projectNotes,
+        selectedNote: projectSelectedNote,
         handleSelectNote: handleSelectProjectNote,
         handleCreateNote: handleCreateProjectNote,
         handleSaveNote: handleSaveProjectNote,
         setSelectedNote: setProjectSelectedNote,
-        setError,
-        refreshActivity,
-    } = useWorkspace();
+    } = useShip();
 
     const isGlobalScope = notesScope === 'global';
     const [globalNotes, setGlobalNotes] = useState<NoteEntry[]>([]);
