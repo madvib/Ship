@@ -8,6 +8,7 @@ Agent runtime configuration and policy.
 - `permissions.toml`: sandbox and command guardrails.
   - Canonical schema: `docs/agent-permissions-schema.md`
 - `rules/`: always-on guardrails.
+  - Rule contract: `docs/agent-rules-contract.md`
 - Skills live outside repo-local state:
   - global: `~/.ship/skills`
   - project-scoped: `~/.ship/projects/<project>/skills`

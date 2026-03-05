@@ -113,6 +113,8 @@ Run tests before closing feature todos.
 
 Rules in `agents/rules/*.md` are always-on — inlined into every provider's context file on every checkout.
 
+Rules contract (naming, mode matching, validation): `docs/agent-rules-contract.md`
+
 ---
 
 ## Quick Start
