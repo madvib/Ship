@@ -4,7 +4,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/syne";
 @import "@fontsource-variable/dm-sans";
-@import "@milkdown/crepe/theme/common/style.css";
+@import "@milkdown/crepe/theme/classic.css";
 
 @custom-variant dark (&:is(.dark *));
 

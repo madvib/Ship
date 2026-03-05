@@ -26,6 +26,12 @@ importers:
       '@fontsource-variable/syne':
         specifier: ^5.2.7
         version: 5.2.7
+      '@milkdown/crepe':
+        specifier: ^7.19.0
+        version: 7.19.0(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.6)(typescript@5.8.3)
+      '@milkdown/kit':
+        specifier: ^7.19.0
+        version: 7.19.0(@codemirror/language@6.12.2)(@codemirror/state@6.5.4)(@codemirror/view@6.39.16)(typescript@5.8.3)
       '@ship/ui':
         specifier: workspace:*
         version: link:../ui-kit
@@ -65,6 +71,12 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.4(react@19.2.4)
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.14)(react@19.2.4)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.5.0
