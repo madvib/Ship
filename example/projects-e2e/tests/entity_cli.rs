@@ -1,7 +1,6 @@
 mod helpers;
 
 use helpers::TestProject;
-use ship_module_project::{IssueStatus, get_issue_by_id};
 use std::process::Output;
 
 fn run_cli(project: &TestProject, args: &[&str]) -> Output {
@@ -126,11 +125,12 @@ fn issue_move_with_from_status_mismatch_fails_and_keeps_state() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let issue = get_issue_by_id(&project.ship_dir, &file_name).expect("issue should still exist");
-    assert_eq!(
-        issue.status,
-        IssueStatus::Backlog,
-        "mismatched move should keep issue in backlog"
+    let out = run_cli(&project, &["issue", "list"]);
+    assert_success(&out, "issue list after failed move");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(&format!("[backlog] {file_name}")),
+        "mismatched move should keep issue in backlog:\n{stdout}"
     );
 
     let out = run_cli(
@@ -139,10 +139,11 @@ fn issue_move_with_from_status_mismatch_fails_and_keeps_state() {
     );
     assert_success(&out, "issue move backlog -> in-progress failed");
 
-    let moved = get_issue_by_id(&project.ship_dir, &file_name).expect("issue should still exist");
-    assert_eq!(
-        moved.status,
-        IssueStatus::InProgress,
-        "valid move should update issue status"
+    let out = run_cli(&project, &["issue", "list"]);
+    assert_success(&out, "issue list after successful move");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains(&format!("[in-progress] {file_name}")),
+        "valid move should update issue status:\n{stdout}"
     );
 }

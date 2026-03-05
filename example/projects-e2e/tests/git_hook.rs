@@ -230,7 +230,7 @@ fn repeated_post_checkout_is_deterministic_for_claude_md() {
 #[test]
 fn default_task_policy_requires_ship_tooling_in_generated_context() {
     let p = TestProject::with_git().unwrap();
-    create_feature(
+    let feature_path = create_feature(
         p.ship_dir.clone(),
         "Policy Inclusion",
         "Ensure policy text is present.",
@@ -239,11 +239,28 @@ fn default_task_policy_requires_ship_tooling_in_generated_context() {
         Some("feature/policy"),
     )
     .unwrap();
+    create_skill(
+        &p.ship_dir,
+        "ship-policy",
+        "Ship Policy",
+        "Use Ship as the system of record.",
+    )
+    .unwrap();
+    set_feature_agent(
+        &feature_path.1,
+        FeatureAgentConfig {
+            model: None,
+            max_cost_per_session: None,
+            mcp_servers: vec![],
+            skills: vec!["ship-policy".to_string()],
+            providers: vec![],
+        },
+    );
 
     on_post_checkout(&p.ship_dir, "feature/policy", &p.root()).unwrap();
     let content = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
     assert!(
-        content.contains("Use Ship As System of Record"),
+        content.contains("Use Ship as the system of record"),
         "default task policy guidance should be included in CLAUDE.md"
     );
 }

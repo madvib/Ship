@@ -43,26 +43,57 @@ pub const EXISTING_RUST_PROJECT: &[(&str, &str)] = &[
 pub struct TestProject {
     pub dir: TempDir,
     pub ship_dir: PathBuf,
+    pub global_dir: PathBuf,
 }
 
 /// A git worktree checked out from a TestProject.
 pub struct TestWorktree {
     pub path: PathBuf,
     pub ship_dir: PathBuf,
+    pub global_dir: PathBuf,
 }
 
 impl TestProject {
+    fn shared_global_dir() -> Result<PathBuf> {
+        let global_dir = runtime::project::get_global_dir()?;
+        std::fs::create_dir_all(&global_dir)?;
+        Ok(global_dir)
+    }
+
+    fn init_with_cli(base_dir: &Path, global_dir: &Path) -> Result<PathBuf> {
+        let bin = std::env::var("SHIP_BIN").unwrap_or_else(|_| ship_bin_path());
+        let out = Command::new(bin)
+            .args(["init", "."])
+            .current_dir(base_dir)
+            .env("SHIP_GLOBAL_DIR", global_dir)
+            .output()?;
+        if !out.status.success() {
+            anyhow::bail!(
+                "ship init failed\nstdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        Ok(base_dir.join(".ship"))
+    }
+
     /// Create a new temp dir, run `ship init`, return the project.
     pub fn new() -> Result<Self> {
         let dir = TempDir::new()?;
-        let ship_dir = init_project(dir.path().to_path_buf())?;
-        Ok(Self { dir, ship_dir })
+        let global_dir = Self::shared_global_dir()?;
+        let ship_dir = Self::init_with_cli(dir.path(), &global_dir)?;
+        Ok(Self {
+            dir,
+            ship_dir,
+            global_dir,
+        })
     }
 
     /// Create a temp dir with pre-existing files (simulating an existing project),
     /// then run `ship init`. Files are created before init runs.
     pub fn with_existing_files(files: &[(&str, &str)]) -> Result<Self> {
         let dir = TempDir::new()?;
+        let global_dir = Self::shared_global_dir()?;
         for (rel, content) in files {
             let path = dir.path().join(rel);
             if let Some(parent) = path.parent() {
@@ -70,13 +101,18 @@ impl TestProject {
             }
             std::fs::write(path, content)?;
         }
-        let ship_dir = init_project(dir.path().to_path_buf())?;
-        Ok(Self { dir, ship_dir })
+        let ship_dir = Self::init_with_cli(dir.path(), &global_dir)?;
+        Ok(Self {
+            dir,
+            ship_dir,
+            global_dir,
+        })
     }
 
     /// Create a temp dir with a real git repo, pre-existing files, and run `ship init`.
     pub fn with_git_and_files(files: &[(&str, &str)]) -> Result<Self> {
         let dir = TempDir::new()?;
+        let global_dir = Self::shared_global_dir()?;
         let root = dir.path();
         for (rel, content) in files {
             let path = root.join(rel);
@@ -86,17 +122,26 @@ impl TestProject {
             std::fs::write(path, content)?;
         }
         Self::init_git(root)?;
-        let ship_dir = init_project(root.to_path_buf())?;
-        Ok(Self { dir, ship_dir })
+        let ship_dir = Self::init_with_cli(root, &global_dir)?;
+        Ok(Self {
+            dir,
+            ship_dir,
+            global_dir,
+        })
     }
 
     /// Create a temp dir with a real git repo and run `ship init`.
     pub fn with_git() -> Result<Self> {
         let dir = TempDir::new()?;
+        let global_dir = Self::shared_global_dir()?;
         let root = dir.path();
         Self::init_git(root)?;
-        let ship_dir = init_project(root.to_path_buf())?;
-        Ok(Self { dir, ship_dir })
+        let ship_dir = Self::init_with_cli(root, &global_dir)?;
+        Ok(Self {
+            dir,
+            ship_dir,
+            global_dir,
+        })
     }
 
     fn init_git(root: &Path) -> Result<()> {
@@ -125,7 +170,8 @@ impl TestProject {
         let bin = std::env::var("SHIP_BIN").unwrap_or_else(|_| ship_bin_path());
         let mut cmd = Command::new(bin);
         cmd.current_dir(self.dir.path())
-            .env("SHIP_DIR", &self.ship_dir);
+            .env("SHIP_DIR", &self.ship_dir)
+            .env("SHIP_GLOBAL_DIR", &self.global_dir);
         cmd.args(args);
         cmd
     }
@@ -235,6 +281,7 @@ impl TestProject {
         Ok(TestWorktree {
             ship_dir: self.ship_dir.clone(),
             path: worktree_path,
+            global_dir: self.global_dir.clone(),
         })
     }
 
@@ -377,7 +424,9 @@ impl TestWorktree {
     pub fn cli(&self, args: &[&str]) -> Command {
         let bin = std::env::var("SHIP_BIN").unwrap_or_else(|_| ship_bin_path());
         let mut cmd = Command::new(bin);
-        cmd.current_dir(&self.path).env("SHIP_DIR", &self.ship_dir);
+        cmd.current_dir(&self.path)
+            .env("SHIP_DIR", &self.ship_dir)
+            .env("SHIP_GLOBAL_DIR", &self.global_dir);
         cmd.args(args);
         cmd
     }
