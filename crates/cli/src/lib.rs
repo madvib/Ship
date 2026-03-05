@@ -2,6 +2,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use runtime::project::{get_global_dir, get_project_dir};
+use runtime::workspace::set_workspace_active_mode;
 use runtime::{
     CreateWorkspaceRequest, McpServerConfig, McpServerType, SkillInstallScope, WorkspaceStatus,
     WorkspaceType, activate_workspace, add_mcp_server, add_mode, add_status, autodetect_providers,
@@ -601,7 +602,12 @@ pub enum WorkspaceCommands {
         branch: Option<String>,
     },
     /// Checkout an existing branch and activate it
-    Switch { branch: String },
+    Switch {
+        branch: String,
+        /// Optional workspace mode override to apply while this workspace is active
+        #[arg(long)]
+        mode: Option<String>,
+    },
     /// Create/update a workspace runtime record (git checkout optional)
     Create {
         branch: String,
@@ -617,6 +623,9 @@ pub enum WorkspaceCommands {
         /// Link this workspace to a release id
         #[arg(long)]
         release: Option<String>,
+        /// Optional workspace mode override for this branch workspace
+        #[arg(long)]
+        mode: Option<String>,
         /// Mark workspace active immediately
         #[arg(long, default_value_t = false)]
         activate: bool,
@@ -1237,7 +1246,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         workspace.branch, workspace.status
                     );
                 }
-                WorkspaceCommands::Switch { branch } => {
+                WorkspaceCommands::Switch { branch, mode } => {
                     let result = ProcessCommand::new("git")
                         .args(["checkout", &branch])
                         .current_dir(&project_root)
@@ -1245,7 +1254,13 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     if !result.success() {
                         anyhow::bail!("Failed to checkout branch: {}", branch);
                     }
-                    let workspace = activate_workspace(&project_dir, &branch)?;
+                    let mut workspace = activate_workspace(&project_dir, &branch)?;
+                    if let Some(mode_id) = mode.as_deref() {
+                        workspace = set_workspace_active_mode(&project_dir, &branch, Some(mode_id))?;
+                    }
+                    // Ensure context + provider config are regenerated after any
+                    // workspace-level mode override is applied.
+                    on_post_checkout(&project_dir, &branch, &project_root)?;
                     println!(
                         "Workspace active: {} [{}]",
                         workspace.branch, workspace.status
@@ -1257,6 +1272,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     feature,
                     spec,
                     release,
+                    mode,
                     activate,
                     checkout,
                     worktree,
@@ -1355,6 +1371,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                             feature_id: feature,
                             spec_id: spec,
                             release_id: release,
+                            active_mode: mode,
                             is_worktree: Some(worktree),
                             worktree_path: resolved_worktree_path,
                             ..CreateWorkspaceRequest::default()

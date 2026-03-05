@@ -42,7 +42,7 @@ pub fn write_context(project_root: &Path, provider_id: &str, content: &str) -> R
 
 /// Export the active mode (or global config) to the specified provider.
 pub fn export_to(project_dir: PathBuf, target: &str) -> Result<()> {
-    export_to_inner(project_dir, target, None)
+    export_to_inner(project_dir, target, None, None)
 }
 
 /// Like `export_to` but restricts project MCP servers to those whose IDs appear in
@@ -52,16 +52,36 @@ pub fn export_to_filtered(
     target: &str,
     server_filter: Option<&[String]>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter)
+    export_to_inner(project_dir, target, server_filter, None)
+}
+
+/// Like `export_to` but applies a mode override when building payload.
+pub fn export_to_with_mode_override(
+    project_dir: PathBuf,
+    target: &str,
+    active_mode_override: Option<&str>,
+) -> Result<()> {
+    export_to_inner(project_dir, target, None, active_mode_override)
+}
+
+/// Like `export_to_filtered` but applies a mode override when building payload.
+pub fn export_to_filtered_with_mode_override(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+    active_mode_override: Option<&str>,
+) -> Result<()> {
+    export_to_inner(project_dir, target, server_filter, active_mode_override)
 }
 
 fn export_to_inner(
     project_dir: PathBuf,
     target: &str,
     server_filter: Option<&[String]>,
+    active_mode_override: Option<&str>,
 ) -> Result<()> {
     let desc = require_provider(target)?;
-    let mut payload = build_payload(&project_dir)?;
+    let mut payload = build_payload_with_mode_override(&project_dir, active_mode_override)?;
     if let Some(ids) = server_filter {
         payload.servers.retain(|s| ids.contains(&s.id));
     }
@@ -179,11 +199,17 @@ pub fn teardown(project_dir: PathBuf, target: &str) -> Result<()> {
 
 /// Sync all target agents configured for the active mode.
 pub fn sync_active_mode(project_dir: &Path) -> Result<Vec<String>> {
+    sync_active_mode_with_override(project_dir, None)
+}
+
+/// Sync all target agents configured for the active mode (or the override mode when provided).
+pub fn sync_active_mode_with_override(
+    project_dir: &Path,
+    active_mode_override: Option<&str>,
+) -> Result<Vec<String>> {
     let config = get_effective_config(Some(project_dir.to_path_buf()))?;
-    let mode_targets = config
-        .active_mode
-        .as_ref()
-        .and_then(|id| config.modes.iter().find(|m| &m.id == id))
+    let (resolved_mode, _) = resolve_active_mode(&config, active_mode_override);
+    let mode_targets = resolved_mode
         .map(|m| m.target_agents.clone())
         .unwrap_or_default();
     let targets: Vec<String> = if !mode_targets.is_empty() {
@@ -205,7 +231,11 @@ pub fn sync_active_mode(project_dir: &Path) -> Result<Vec<String>> {
             eprintln!("[ship] warning: skipping unknown target agent '{}'", target);
             continue;
         }
-        export_to(project_dir.to_path_buf(), &normalized)?;
+        export_to_with_mode_override(
+            project_dir.to_path_buf(),
+            &normalized,
+            active_mode_override,
+        )?;
         synced.push(normalized);
     }
     Ok(synced)
@@ -510,13 +540,38 @@ fn import_mcp_servers_from_toml(
 
 // ─── Payload builder ──────────────────────────────────────────────────────────
 
+fn resolve_active_mode<'a>(
+    config: &'a ProjectConfig,
+    active_mode_override: Option<&str>,
+) -> (Option<&'a ModeConfig>, Option<String>) {
+    let override_mode = active_mode_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|mode_id| config.modes.iter().find(|mode| mode.id == mode_id))
+        .map(|mode| mode.id.clone());
+
+    let selected_mode_id = override_mode.or_else(|| config.active_mode.clone());
+    let selected_mode = selected_mode_id
+        .as_ref()
+        .and_then(|mode_id| config.modes.iter().find(|mode| mode.id == *mode_id));
+
+    (selected_mode, selected_mode_id)
+}
+
+#[cfg(test)]
 fn build_payload(project_dir: &Path) -> Result<SyncPayload> {
+    build_payload_with_mode_override(project_dir, None)
+}
+
+fn build_payload_with_mode_override(
+    project_dir: &Path,
+    active_mode_override: Option<&str>,
+) -> Result<SyncPayload> {
     let config = get_effective_config(Some(project_dir.to_path_buf()))?;
     let mut effective_permissions = get_permissions(project_dir.to_path_buf())?;
+    let (mode, mode_id) = resolve_active_mode(&config, active_mode_override);
 
-    if let Some(mode_id) = &config.active_mode
-        && let Some(mode) = config.modes.iter().find(|m| &m.id == mode_id)
-    {
+    if let Some(mode) = mode {
         if !mode.permissions.allow.is_empty() {
             effective_permissions.tools.allow = mode.permissions.allow.clone();
         }
@@ -545,7 +600,7 @@ fn build_payload(project_dir: &Path) -> Result<SyncPayload> {
             instructions: instruction_skill.map(|skill| skill.content),
             hooks,
             permissions: effective_permissions,
-            active_mode_id: Some(mode_id.clone()),
+            active_mode_id: mode_id,
         });
     }
 
@@ -555,7 +610,7 @@ fn build_payload(project_dir: &Path) -> Result<SyncPayload> {
         instructions: None,
         hooks: config.hooks,
         permissions: effective_permissions,
-        active_mode_id: config.active_mode,
+        active_mode_id: mode_id,
     })
 }
 

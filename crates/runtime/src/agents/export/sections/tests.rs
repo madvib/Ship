@@ -273,6 +273,61 @@ mod tests {
     }
 
     #[test]
+    fn build_payload_workspace_mode_override_takes_precedence() {
+        let (_tmp, project_dir) = project_with_servers(vec![
+            make_stdio_server("planning-server"),
+            make_stdio_server("code-server"),
+        ]);
+        save_permissions(
+            project_dir.clone(),
+            &Permissions {
+                tools: crate::permissions::ToolPermissions {
+                    allow: vec!["Read(*)".to_string()],
+                    deny: vec!["Edit(*)".to_string()],
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.active_mode = Some("planning".to_string());
+        config.modes = vec![
+            ModeConfig {
+                id: "planning".to_string(),
+                name: "Planning".to_string(),
+                mcp_servers: vec!["planning-server".to_string()],
+                permissions: PermissionConfig {
+                    allow: vec!["WebFetch(*)".to_string()],
+                    deny: vec!["Bash(*)".to_string()],
+                },
+                ..Default::default()
+            },
+            ModeConfig {
+                id: "code".to_string(),
+                name: "Code".to_string(),
+                mcp_servers: vec!["code-server".to_string()],
+                permissions: PermissionConfig {
+                    allow: vec!["Bash(*)".to_string()],
+                    deny: vec!["WebFetch(*)".to_string()],
+                },
+                ..Default::default()
+            },
+        ];
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let payload = build_payload_with_mode_override(&project_dir, Some("code")).unwrap();
+        assert_eq!(payload.active_mode_id.as_deref(), Some("code"));
+        let server_ids: Vec<_> = payload.servers.iter().map(|server| server.id.as_str()).collect();
+        assert_eq!(server_ids, vec!["code-server"]);
+        assert_eq!(payload.permissions.tools.allow, vec!["Bash(*)".to_string()]);
+        assert_eq!(
+            payload.permissions.tools.deny,
+            vec!["WebFetch(*)".to_string()]
+        );
+    }
+
+    #[test]
     fn sync_active_mode_uses_connected_providers_when_targets_empty() {
         let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
         let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
@@ -331,6 +386,33 @@ mod tests {
         );
         assert!(tmp.path().join(".codex").join("config.toml").exists());
         assert!(tmp.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn sync_active_mode_with_override_uses_override_targets() {
+        let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.providers = vec!["claude".to_string()];
+        config.active_mode = Some("planning".to_string());
+        config.modes = vec![
+            ModeConfig {
+                id: "planning".to_string(),
+                name: "Planning".to_string(),
+                target_agents: vec!["claude".to_string()],
+                ..Default::default()
+            },
+            ModeConfig {
+                id: "code".to_string(),
+                name: "Code".to_string(),
+                target_agents: vec!["codex".to_string()],
+                ..Default::default()
+            },
+        ];
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        let synced = sync_active_mode_with_override(&project_dir, Some("code")).unwrap();
+        assert_eq!(synced, vec!["codex".to_string()]);
+        assert!(tmp.path().join(".codex").join("config.toml").exists());
     }
 
     // ── Registry ───────────────────────────────────────────────────────────────

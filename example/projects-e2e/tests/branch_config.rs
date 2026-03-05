@@ -11,7 +11,7 @@ mod helpers;
 use crate::helpers::create_feature;
 use helpers::TestProject;
 use runtime::agent_config::FeatureAgentConfig;
-use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
+use runtime::config::{McpServerConfig, McpServerType, ModeConfig, ProjectConfig, save_config};
 use runtime::create_skill;
 use ship_module_git::on_post_checkout;
 use std::collections::HashMap;
@@ -676,6 +676,69 @@ fn feature_switch_checks_out_branch_and_syncs_config() {
     );
     p.assert_root_file("CLAUDE.md");
     p.assert_root_file_contains("CLAUDE.md", "Auth Flow");
+}
+
+/// Workspace mode override should take precedence over project active_mode when
+/// compiling branch context.
+#[test]
+fn workspace_mode_override_applies_on_checkout() {
+    let p = TestProject::with_git().unwrap();
+    create_feature(
+        p.ship_dir.clone(),
+        "Auth Flow",
+        "Body",
+        None,
+        None,
+        Some("feature/auth"),
+    )
+    .unwrap();
+
+    create_skill(
+        &p.ship_dir,
+        "rt-planning-skill",
+        "Planning Skill",
+        "PLANNING-MODE-CONTENT",
+    )
+    .unwrap();
+    create_skill(
+        &p.ship_dir,
+        "rt-code-skill",
+        "Code Skill",
+        "CODE-MODE-CONTENT",
+    )
+    .unwrap();
+
+    let mut config = ProjectConfig::default();
+    config.active_mode = Some("planning".to_string());
+    config.modes = vec![
+        ModeConfig {
+            id: "planning".to_string(),
+            name: "Planning".to_string(),
+            skills: vec!["rt-planning-skill".to_string()],
+            ..Default::default()
+        },
+        ModeConfig {
+            id: "code".to_string(),
+            name: "Code".to_string(),
+            skills: vec!["rt-code-skill".to_string()],
+            ..Default::default()
+        },
+    ];
+    save_config(&config, Some(p.ship_dir.clone())).unwrap();
+
+    runtime::create_workspace(
+        &p.ship_dir,
+        runtime::CreateWorkspaceRequest {
+            branch: "feature/auth".to_string(),
+            active_mode: Some("code".to_string()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
+    p.assert_root_file_contains("CLAUDE.md", "CODE-MODE-CONTENT");
+    p.assert_root_file_not_contains("CLAUDE.md", "PLANNING-MODE-CONTENT");
 }
 
 // ─── Generated file gitignore ─────────────────────────────────────────────────

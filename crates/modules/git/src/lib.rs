@@ -1,7 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use runtime::{
-    Rule, Skill, agent_config::resolve_agent_config, agent_export, get_effective_config,
-    sync_workspace,
+    Rule, Skill,
+    agents::{config::resolve_agent_config_with_mode_override, export as agent_export},
+    get_effective_config, sync_workspace,
 };
 use ship_module_project::{
     Feature, FeatureEntry, IssueEntry, IssueStatus, Spec, SpecEntry, list_features, list_issues,
@@ -261,12 +262,16 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
 
     // Workspace state is owned by runtime. Git hook is the adapter that
     // reconciles current branch -> active workspace.
-    if let Err(error) = sync_workspace(ship_dir, new_branch) {
-        eprintln!(
-            "[ship] workspace sync warning for branch '{}': {}",
-            new_branch, error
-        );
-    }
+    let workspace_mode_override = match sync_workspace(ship_dir, new_branch) {
+        Ok(workspace) => workspace.active_mode,
+        Err(error) => {
+            eprintln!(
+                "[ship] workspace sync warning for branch '{}': {}",
+                new_branch, error
+            );
+            None
+        }
+    };
 
     let config = get_effective_config(Some(ship_dir.to_path_buf()))?;
 
@@ -298,7 +303,11 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
     match doc {
         BranchLinkedEntity::Feature(entry) => {
             let feature = entry.feature;
-            let agent_cfg = resolve_agent_config(ship_dir, feature.metadata.agent.as_ref())?;
+            let agent_cfg = resolve_agent_config_with_mode_override(
+                ship_dir,
+                feature.metadata.agent.as_ref(),
+                workspace_mode_override.as_deref(),
+            )?;
 
             let mcp_server_ids: Vec<String> =
                 agent_cfg.mcp_servers.iter().map(|s| s.id.clone()).collect();
@@ -315,10 +324,11 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
-                agent_export::export_to_filtered(
+                agent_export::export_to_filtered_with_mode_override(
                     ship_dir.to_path_buf(),
                     provider,
                     feature_server_filter,
+                    workspace_mode_override.as_deref(),
                 )?;
                 if provider == "claude" {
                     ensure_required_mcp_servers(project_root, &mcp_server_ids)?;
@@ -333,14 +343,19 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
         }
         BranchLinkedEntity::Spec(spec_entry) => {
             let spec = spec_entry.spec;
-            let agent_cfg = resolve_agent_config(ship_dir, None)?;
+            let agent_cfg =
+                resolve_agent_config_with_mode_override(ship_dir, None, workspace_mode_override.as_deref())?;
 
             let context =
                 build_spec_context(&spec, &open_issues, &agent_cfg.skills, &agent_cfg.rules);
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
-                agent_export::export_to(ship_dir.to_path_buf(), provider)?;
+                agent_export::export_to_with_mode_override(
+                    ship_dir.to_path_buf(),
+                    provider,
+                    workspace_mode_override.as_deref(),
+                )?;
             }
 
             println!(

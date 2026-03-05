@@ -165,6 +165,26 @@ fn workspace_id_from_branch(branch: &str) -> String {
     sanitize_file_name(branch)
 }
 
+fn normalize_mode_ref(mode: &str) -> Option<String> {
+    let trimmed = mode.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn validate_mode_exists(ship_dir: &Path, mode_id: &str) -> Result<String> {
+    let normalized = normalize_mode_ref(mode_id)
+        .ok_or_else(|| anyhow::anyhow!("Workspace mode cannot be empty"))?;
+    let effective = crate::config::get_effective_config(Some(ship_dir.to_path_buf()))?;
+    if effective.modes.iter().any(|mode| mode.id == normalized) {
+        Ok(normalized)
+    } else {
+        Err(anyhow::anyhow!("Mode '{}' not found", normalized))
+    }
+}
+
 fn ensure_branch_key(branch: &str) -> Result<&str> {
     let trimmed = branch.trim();
     if trimmed.is_empty() {
@@ -445,7 +465,7 @@ pub fn create_workspace(ship_dir: &Path, request: CreateWorkspaceRequest) -> Res
         workspace.release_id = Some(release_id);
     }
     if let Some(active_mode) = request.active_mode {
-        workspace.active_mode = Some(active_mode);
+        workspace.active_mode = Some(validate_mode_exists(ship_dir, &active_mode)?);
     }
     if let Some(providers) = request.providers {
         workspace.providers = providers;
@@ -560,6 +580,34 @@ pub fn activate_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
 
     persist_branch_link_from_workspace(ship_dir, &workspace)?;
     upsert_workspace(ship_dir, &workspace)?;
+    Ok(workspace)
+}
+
+/// Set or clear workspace-level mode override for a branch workspace.
+pub fn set_workspace_active_mode(
+    ship_dir: &Path,
+    branch: &str,
+    mode_id: Option<&str>,
+) -> Result<Workspace> {
+    let branch = ensure_branch_key(branch)?;
+    let mut workspace = get_workspace(ship_dir, branch)?
+        .ok_or_else(|| anyhow::anyhow!("Workspace not found for branch '{}'", branch))?;
+
+    workspace.active_mode = match mode_id {
+        Some(mode) => Some(validate_mode_exists(ship_dir, mode)?),
+        None => None,
+    };
+    workspace.resolved_at = Utc::now();
+    upsert_workspace(ship_dir, &workspace)?;
+    if workspace.status == WorkspaceStatus::Active
+        && let Err(error) =
+            crate::agents::export::sync_active_mode_with_override(ship_dir, workspace.active_mode.as_deref())
+    {
+        eprintln!(
+            "[ship] warning: workspace mode sync failed for branch '{}': {}",
+            workspace.branch, error
+        );
+    }
     Ok(workspace)
 }
 
@@ -869,6 +917,57 @@ mod tests {
             err.to_string()
                 .contains("Worktree workspace requires a worktree path")
         );
+        Ok(())
+    }
+
+    #[test]
+    fn create_workspace_rejects_unknown_active_mode() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        let err = create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/no-mode".to_string(),
+                active_mode: Some("ghost".to_string()),
+                ..Default::default()
+            },
+        )
+        .expect_err("expected invalid mode to be rejected");
+
+        assert!(err.to_string().contains("Mode 'ghost' not found"));
+        Ok(())
+    }
+
+    #[test]
+    fn set_workspace_active_mode_updates_and_clears_override() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        let mut config = crate::config::ProjectConfig::default();
+        config.modes = vec![crate::config::ModeConfig {
+            id: "planning".to_string(),
+            name: "Planning".to_string(),
+            target_agents: vec!["codex".to_string()],
+            ..Default::default()
+        }];
+        crate::config::save_config(&config, Some(ship_dir.clone()))?;
+
+        create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/mode-override".to_string(),
+                status: Some(WorkspaceStatus::Active),
+                ..Default::default()
+            },
+        )?;
+
+        let updated = set_workspace_active_mode(&ship_dir, "feature/mode-override", Some("planning"))?;
+        assert_eq!(updated.active_mode.as_deref(), Some("planning"));
+        assert!(tmp.path().join(".codex").join("config.toml").exists());
+
+        let cleared = set_workspace_active_mode(&ship_dir, "feature/mode-override", None)?;
+        assert!(cleared.active_mode.is_none());
         Ok(())
     }
 }
