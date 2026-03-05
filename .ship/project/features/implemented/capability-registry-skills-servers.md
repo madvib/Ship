@@ -19,7 +19,7 @@ skills = []
 
 ## Why
 
-Developers shouldn't need to know the exact npm package name or config syntax for popular MCP servers, or hunt GitHub for community skills. Shipwright embeds a curated catalog of official MCP servers and community skills that users can browse, install, and reference in feature `[agent]` blocks. The catalog is the discovery layer; `agents/mcp.toml` and `agents/skills/` are the installation layer.
+Developers shouldn't need to know the exact npm package name or config syntax for popular MCP servers, or hunt GitHub for community skills. Shipwright embeds a curated catalog of official MCP servers and community skills that users can browse, install, and reference in feature `[agent]` blocks. The catalog is the discovery layer; `agents/mcp.toml` and `~/.ship/skills` plus `~/.ship/projects/<project>/skills` are the installation layer.
 
 ## Acceptance Criteria
 
@@ -27,7 +27,7 @@ Developers shouldn't need to know the exact npm package name or config syntax fo
 - [ ] `ship catalog list` shows available entries by kind (Skill | McpServer)
 - [ ] `ship catalog search <query>` filters by name/description
 - [ ] MCP: `list_catalog`, `list_catalog_by_kind`, `search_catalog` tools
-- [ ] Skills installed to `agents/skills/<id>/` (directory format: `index.md` + `skill.toml`)
+- [ ] Skills installed to `~/.ship/skills/<id>/` or `~/.ship/projects/<project>/skills/<id>/` (directory format: `SKILL.md`)
 - [ ] MCP servers registered in `agents/mcp.toml`
 - [ ] UI: catalog browser with install action
 

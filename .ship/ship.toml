@@ -1,8 +1,10 @@
 version = "1"
 name = "Shipwright"
-description = "AI native project managment "
+description = "AI native project management workspace"
 modes = []
+mcp_servers = []
 hooks = []
+providers = ["claude"]
 
 [[statuses]]
 id = "backlog"
@@ -18,6 +20,11 @@ color = "red"
 id = "in-progress"
 name = "In Progress"
 color = "blue"
+
+[[statuses]]
+id = "review"
+name = "Review"
+color = "yellow"
 
 [[statuses]]
 id = "done"
@@ -40,41 +47,10 @@ commit = [
     "agents",
 ]
 
-[[mcp_servers]]
-id = "shadcn"
-name = "shadcn/ui"
-command = "npx"
-args = [
-    "shadcn@latest",
-    "mcp",
-]
-scope = "global"
-server_type = "stdio"
-disabled = false
-
-[mcp_servers.env]
-
-[[mcp_servers]]
-id = "ship"
-name = "Shipwright"
-command = "ship"
-args = ["mcp"]
-disabled = false
-timeout_secs = 30
-server_type = "stdio"
-
-[mcp_servers.env]
-
 [agent]
-skills = [
-    "clean-code",
-    "solid",
-    "task-policy",
-    "skill-1772336621485",
-]
+skills = []
 prompts = []
 context = []
-rules = []
 
 [[namespaces]]
 id = "project"

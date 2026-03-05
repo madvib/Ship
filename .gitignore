@@ -87,6 +87,7 @@ CLAUDE.md
 GEMINI.md
 AGENTS.md
 .mcp.json
+.agents/
 .claude/
 .gemini/
 .codex/
