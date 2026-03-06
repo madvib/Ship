@@ -569,11 +569,13 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     }
                 }
                 WorkspaceCommands::Sync { branch } => {
+                    let cwd = env::current_dir()?;
                     let branch = match branch {
                         Some(value) => value,
-                        None => current_branch(&project_root)?,
+                        None => current_branch(&cwd)?,
                     };
                     let workspace = sync_workspace(&project_dir, &branch)?;
+                    on_post_checkout(&project_dir, &branch, &cwd)?;
                     println!(
                         "Workspace synced: {} [{}]",
                         workspace.branch, workspace.status

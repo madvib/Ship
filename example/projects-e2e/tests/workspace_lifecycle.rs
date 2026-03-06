@@ -287,6 +287,38 @@ fn workspace_checkout_activation_demotes_previous_active_workspace() {
 }
 
 #[test]
+fn workspace_sync_regenerates_agent_context_for_current_workspace() {
+    let project = TestProject::with_git().unwrap();
+    let init = project.initial_commit().unwrap();
+    assert_success(&init, "initial git commit failed");
+
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "create",
+            "feature/sync-context",
+            "--type",
+            "feature",
+            "--feature-title",
+            "Sync Context",
+            "--checkout",
+        ],
+    );
+    assert_success(&out, "workspace create --checkout failed");
+    assert_eq!(project.current_branch(), "feature/sync-context");
+
+    project.assert_no_root_file("CLAUDE.md");
+
+    let out = run_cli(
+        &project,
+        &["workspace", "sync", "--branch", "feature/sync-context"],
+    );
+    assert_success(&out, "workspace sync failed");
+    project.assert_root_file_contains("CLAUDE.md", "# [ship] Sync Context");
+}
+
+#[test]
 fn workspace_create_worktree_sets_metadata_and_creates_worktree_dir() {
     let project = TestProject::with_git().unwrap();
     let init = project.initial_commit().unwrap();
