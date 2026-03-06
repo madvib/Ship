@@ -73,6 +73,9 @@ Shipwright knows how each agent tool works. It writes config in the format each 
 | Gemini CLI   | `GEMINI.md`  | `.gemini/settings.json`     | `.gemini/skills/<id>/SKILL.md`  |
 | OpenAI Codex | `AGENTS.md`  | `.codex/config.toml` (TOML) | `.agents/skills/<id>/SKILL.md`  |
 
+MCP sync contract (import/export paths, guardrails, precedence): `docs/mcp-import-export.md`
+CLI/MCP binary surfaces + PATH install/update workflow: `docs/cli-mcp-offerings.md`
+
 Add a provider in one command. Ship handles the rest:
 
 ```bash
@@ -110,6 +113,8 @@ Run tests before closing feature todos.
 ```
 
 Rules in `agents/rules/*.md` are always-on — inlined into every provider's context file on every checkout.
+
+Rules contract (naming, mode matching, validation): `docs/agent-rules-contract.md`
 
 ---
 
@@ -181,7 +186,7 @@ Shipwright is a Rust monorepo:
 
 | Crate                | Role                                                         |
 | -------------------- | ------------------------------------------------------------ |
-| `crates/runtime`     | Core data model, CRUD, event stream, agent config resolution |
+| `core/runtime`       | Core data model, CRUD, event stream, agent config resolution |
 | `crates/cli`         | `ship` binary — workflow CLI                                 |
 | `crates/mcp`         | `ship-mcp` binary — MCP stdio server                         |
 | `crates/modules/git` | Git hook handler, context file generation                    |

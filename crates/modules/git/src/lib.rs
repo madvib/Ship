@@ -1,12 +1,10 @@
 use anyhow::{Context, Result, anyhow};
 use runtime::{
-    Rule, Skill, agent_config::resolve_agent_config, agent_export, get_effective_config,
-    sync_workspace,
+    Rule, Skill,
+    agents::{config::resolve_agent_config_with_mode_override, export as agent_export},
+    get_effective_config, sync_workspace,
 };
-use ship_module_project::{
-    Feature, FeatureEntry, IssueEntry, IssueStatus, Spec, SpecEntry, list_features, list_issues,
-    list_specs,
-};
+use ship_module_project::{Feature, FeatureEntry, Spec, SpecEntry, list_features, list_specs};
 use std::collections::BTreeSet;
 use std::fs;
 #[cfg(unix)]
@@ -261,12 +259,16 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
 
     // Workspace state is owned by runtime. Git hook is the adapter that
     // reconciles current branch -> active workspace.
-    if let Err(error) = sync_workspace(ship_dir, new_branch) {
-        eprintln!(
-            "[ship] workspace sync warning for branch '{}': {}",
-            new_branch, error
-        );
-    }
+    let workspace_mode_override = match sync_workspace(ship_dir, new_branch) {
+        Ok(workspace) => workspace.active_mode,
+        Err(error) => {
+            eprintln!(
+                "[ship] workspace sync warning for branch '{}': {}",
+                new_branch, error
+            );
+            None
+        }
+    };
 
     let config = get_effective_config(Some(ship_dir.to_path_buf()))?;
 
@@ -292,13 +294,14 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
         return Ok(());
     };
 
-    let mut open_issues = list_issues(ship_dir)?;
-    open_issues.retain(|issue| issue.status != IssueStatus::Done);
-
     match doc {
         BranchLinkedEntity::Feature(entry) => {
             let feature = entry.feature;
-            let agent_cfg = resolve_agent_config(ship_dir, feature.metadata.agent.as_ref())?;
+            let agent_cfg = resolve_agent_config_with_mode_override(
+                ship_dir,
+                feature.metadata.agent.as_ref(),
+                workspace_mode_override.as_deref(),
+            )?;
 
             let mcp_server_ids: Vec<String> =
                 agent_cfg.mcp_servers.iter().map(|s| s.id.clone()).collect();
@@ -310,15 +313,15 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
                 .filter(|a| !a.mcp_servers.is_empty())
                 .map(|_| mcp_server_ids.as_slice());
 
-            let context =
-                build_feature_context(&feature, &open_issues, &agent_cfg.skills, &agent_cfg.rules);
+            let context = build_feature_context(&feature, &agent_cfg.skills, &agent_cfg.rules);
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
-                agent_export::export_to_filtered(
+                agent_export::export_to_filtered_with_mode_override(
                     ship_dir.to_path_buf(),
                     provider,
                     feature_server_filter,
+                    workspace_mode_override.as_deref(),
                 )?;
                 if provider == "claude" {
                     ensure_required_mcp_servers(project_root, &mcp_server_ids)?;
@@ -333,14 +336,21 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
         }
         BranchLinkedEntity::Spec(spec_entry) => {
             let spec = spec_entry.spec;
-            let agent_cfg = resolve_agent_config(ship_dir, None)?;
+            let agent_cfg = resolve_agent_config_with_mode_override(
+                ship_dir,
+                None,
+                workspace_mode_override.as_deref(),
+            )?;
 
-            let context =
-                build_spec_context(&spec, &open_issues, &agent_cfg.skills, &agent_cfg.rules);
+            let context = build_spec_context(&spec, &agent_cfg.skills, &agent_cfg.rules);
 
             for provider in &agent_cfg.providers {
                 agent_export::write_context(project_root, provider, &context)?;
-                agent_export::export_to(ship_dir.to_path_buf(), provider)?;
+                agent_export::export_to_with_mode_override(
+                    ship_dir.to_path_buf(),
+                    provider,
+                    workspace_mode_override.as_deref(),
+                )?;
             }
 
             println!(
@@ -357,12 +367,7 @@ pub fn on_post_checkout(ship_dir: &Path, new_branch: &str, project_root: &Path) 
 // ─── Context content builders ─────────────────────────────────────────────────
 
 /// Build provider-agnostic Markdown context for a feature branch.
-pub fn build_feature_context(
-    feature: &Feature,
-    open_issues: &[IssueEntry],
-    skills: &[Skill],
-    rules: &[Rule],
-) -> String {
+pub fn build_feature_context(feature: &Feature, skills: &[Skill], rules: &[Rule]) -> String {
     let mut c = String::new();
     c.push_str(&format!("# [ship] {}\n\n", feature.metadata.title));
     c.push_str("> Auto-generated by ship on branch checkout. Do not edit manually - re-run `ship git sync` to regenerate.\n\n");
@@ -375,7 +380,6 @@ pub fn build_feature_context(
         c.push_str("\n\n");
     }
 
-    append_issues_section(&mut c, open_issues);
     append_skills_section(&mut c, skills);
     append_rules_section(&mut c, rules);
 
@@ -390,12 +394,7 @@ pub fn build_feature_context(
 }
 
 /// Build provider-agnostic Markdown context for a spec branch.
-pub fn build_spec_context(
-    spec: &Spec,
-    open_issues: &[IssueEntry],
-    skills: &[Skill],
-    rules: &[Rule],
-) -> String {
+pub fn build_spec_context(spec: &Spec, skills: &[Skill], rules: &[Rule]) -> String {
     let mut c = String::new();
     c.push_str(&format!("# [ship] {}\n\n", spec.metadata.title));
     c.push_str("> Auto-generated by ship on branch checkout. Do not edit manually - re-run `ship git sync` to regenerate.\n\n");
@@ -408,7 +407,6 @@ pub fn build_spec_context(
         c.push_str("\n\n");
     }
 
-    append_issues_section(&mut c, open_issues);
     append_skills_section(&mut c, skills);
     append_rules_section(&mut c, rules);
 
@@ -420,28 +418,6 @@ pub fn build_spec_context(
     };
     c.push_str(&format!("---\n_Branch: {} | Spec: {}_\n", branch, sid));
     c
-}
-
-fn append_issues_section(c: &mut String, open_issues: &[IssueEntry]) {
-    c.push_str("## Open Issues\n\n");
-    if open_issues.is_empty() {
-        c.push_str("_No open issues._\n\n");
-    } else {
-        let mut ordered: Vec<&IssueEntry> = open_issues.iter().collect();
-        ordered.sort_by(|a, b| {
-            a.status
-                .to_string()
-                .cmp(&b.status.to_string())
-                .then_with(|| a.file_name.cmp(&b.file_name))
-        });
-        for issue in ordered {
-            c.push_str(&format!(
-                "- [ ] {} (`{}/{}`)\n",
-                issue.issue.metadata.title, issue.status, issue.file_name
-            ));
-        }
-        c.push('\n');
-    }
 }
 
 fn append_skills_section(c: &mut String, skills: &[Skill]) {
@@ -475,11 +451,10 @@ fn append_rules_section(c: &mut String, rules: &[Rule]) {
 pub fn generate_claude_md(
     project_root: &Path,
     feature: &Feature,
-    open_issues: &[IssueEntry],
     skills: &[Skill],
     rules: &[Rule],
 ) -> Result<()> {
-    let content = build_feature_context(feature, open_issues, skills, rules);
+    let content = build_feature_context(feature, skills, rules);
     agent_export::write_context(project_root, "claude", &content)
 }
 
@@ -624,7 +599,7 @@ mod tests {
         )?;
         let feature = entry.feature;
 
-        generate_claude_md(tmp.path(), &feature, &[], &[], &[])?;
+        generate_claude_md(tmp.path(), &feature, &[], &[])?;
         let content = fs::read_to_string(tmp.path().join("CLAUDE.md"))?;
         assert!(content.contains("# [ship] Feature Title"));
         assert!(content.contains("## Feature Spec"));

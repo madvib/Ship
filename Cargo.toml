@@ -1,6 +1,8 @@
 [workspace]
 members = [
-    "crates/runtime",
+    "core/cli-framework",
+    "core/mcp-framework",
+    "core/runtime",
     "crates/modules/project",
     "crates/modules/git",
     "crates/cli",

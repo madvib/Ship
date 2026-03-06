@@ -1,13 +1,11 @@
 +++
-# GENERATED FILE - DO NOT EDIT MANUALLY. SOURCE OF TRUTH IS SQLITE. NO 2-WAY SYNC.
 id = "KVVaSUTx"
 title = "Pre-defined Agent Modes"
 created = "2026-02-28T15:56:07Z"
-updated = "2026-02-28T15:56:07Z"
-branch = ""
+updated = "2026-03-05T02:32:14.520116+00:00"
 release_id = "v0.1.0-alpha"
 spec_id = ""
-adr_ids = []
+branch = ""
 tags = []
 
 [agent]
@@ -17,43 +15,53 @@ mcp_servers = []
 skills = []
 +++
 
+
 ## Why
 
-Developers working across different kinds of tasks — planning a spec, implementing an issue, reviewing an ADR — want the agent configured differently for each. Modes are named, pre-configured agent environments that set sensible defaults for skills, MCP servers, model, and cost limits. Switching modes reconfigures the agent without touching individual feature files. They are the "preset" layer in the workspace config resolution chain.
+Developers working across planning, implementation, and configuration need deterministic agent behavior changes when mode changes. A mode is only useful if it actually constrains tools and triggers immediate context/export sync to the active agent(s).
 
 ## Acceptance Criteria
 
-- [ ] At least three built-in modes: Planning, Execution, Review
-- [ ] Mode config lives in `agents/modes/<name>.toml` with same schema as feature `[agent]` block
-- [ ] Active mode stored in Workspace (SQLite) per branch session
-- [ ] `ship mode set <name>` switches active mode and regenerates CLAUDE.md/.mcp.json
-- [ ] UI mode switcher reflects current mode and shows what it configures
-- [ ] Feature `[agent]` overrides apply on top of active mode (not replace)
-- [ ] Custom modes can be created by users (copy a mode file, edit, `ship mode add`)
+- [x] At least three built-in modes seeded on init: Planning, Code, Config
+- [x] Mode definitions persist in SQLite (`agent_mode`) and are not duplicated in `ship.toml`
+- [x] `ship mode set <id>` recompiles effective agent configuration and syncs to active provider targets
+- [x] If mode `target_agents` is empty, sync falls back to connected providers (`config.providers`) before defaulting to Claude
+- [x] Feature `[agent]` overrides apply on top of active mode (filter semantics)
+- [x] Custom modes can be created/removed via CLI (`ship mode add/remove`)
+- [ ] MCP tools for mode management (`list_modes`, `set_mode`)
+- [ ] UI mode switcher that displays current mode and what it configures
 
 ## Delivery Todos
 
-- [ ] Define `AgentConfig` as the canonical schema for both modes and `[agent]` blocks
-- [ ] Implement mode file parsing in `runtime` (`agents/modes/*.toml`)
-- [ ] `ship mode list` / `ship mode set` CLI commands
-- [ ] MCP tools: `list_modes`, `set_mode`
-- [ ] Wire active mode into workspace resolution chain
-- [ ] Built-in mode templates: Planning, Execution, Review
-- [ ] UI mode switcher component
+- [x] Seed default modes with practical tool scopes (`planning`, `code`, `config`)
+- [x] Keep mode storage canonical in SQLite and loaded through runtime config APIs
+- [x] Trigger `sync_active_mode` from `set_active_mode`
+- [x] Harden sync target resolution (normalize, dedupe, skip unknown targets)
+- [x] Add fallback sync behavior to connected providers when mode targets are empty
+- [x] Add tests for mode sync behavior and provider fallback
+- [ ] Enforce `active_tools` at MCP call boundary so mode tool restrictions are hard gates
+- [ ] Add MCP mode-management tools and tests
+- [ ] Add UI mode management surface and tests
 
 ## Notes
 
-**Modes are workspace config presets, not PM state.** The UI mode (Planning vs Execution) shapes tool availability and agent behavior — it is not a project management status.
+Modes are an execution control plane, not PM status. The runtime path now guarantees that mode changes propagate to exported agent config for connected providers.
 
-**Schema unification:** Mode files and the feature `[agent]` block share the same `AgentConfig` schema. This means a Mode is just a named, reusable `[agent]` block. The resolution chain is: project defaults → active mode → feature `[agent]` overrides → resolved Workspace.
-
-Built-in modes (embedded in binary, copy-to-customize):
-- **Planning** — task-policy skill, ship MCP, conservative cost limit. Good for spec/feature drafting.
-- **Execution** — task-policy + git-commit + rust-conventions skills, ship MCP, higher cost limit. Day-to-day implementation.
-- **Review** — pr-review skill, minimal MCP surface, read-heavy prompts.
+Current built-in defaults:
+- Planning: planning/spec/issue authoring tools
+- Code: implementation + issue/spec update tools + feature sync
+- Config: skill/provider/git-config/hook tooling
 
 ## Current State
 
-Backend: `AgentConfig` struct and `resolve_agent_config` fully implemented in `agent_config.rs`. Resolution chain (project defaults → mode filter → feature `[agent]` overrides) working and covered by e2e tests. Mode files at `agents/modes/*.toml` are parsed. Active mode stored in Workspace (SQLite). `ship mode` CLI subcommand exists (`list`, `set`).
+Completed in runtime/module code:
+- Built-in mode seeding on init (`planning`, `code`, `config`)
+- Mode persistence in SQLite (`agent_mode`) via config read/write paths
+- Mode-aware filtering for skills/rules/MCP in resolved agent config
+- Mode-change sync wired through `set_active_mode`
+- Sync target fallback improved: mode targets -> connected providers -> `claude`
 
-Not yet done: Built-in mode template files (Planning, Execution, Review) not yet embedded. MCP tools `list_modes`/`set_mode` not yet exposed. UI mode switcher not yet in sidebar — Modes tab in Agents panel not implemented.
+Remaining:
+- MCP `list_modes` / `set_mode` tool exposure
+- UI mode switcher + mode detail surface
+- Strict runtime enforcement of `active_tools` at MCP tool invocation layer
