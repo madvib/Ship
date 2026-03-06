@@ -569,23 +569,43 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     }
                 }
                 WorkspaceCommands::Sync { branch } => {
+                    let cwd = env::current_dir()?;
                     let branch = match branch {
                         Some(value) => value,
-                        None => current_branch(&project_root)?,
+                        None => current_branch(&cwd)?,
                     };
                     let workspace = sync_workspace(&project_dir, &branch)?;
+                    let context_root = resolve_workspace_context_root(&project_root, &workspace);
+                    on_post_checkout(&project_dir, &workspace.branch, &context_root)?;
                     println!(
                         "Workspace synced: {} [{}]",
                         workspace.branch, workspace.status
                     );
                 }
                 WorkspaceCommands::Switch { branch, mode } => {
-                    let result = ProcessCommand::new("git")
-                        .args(["checkout", &branch])
-                        .current_dir(&project_root)
-                        .status()?;
-                    if !result.success() {
-                        anyhow::bail!("Failed to checkout branch: {}", branch);
+                    let existing_workspace = get_workspace(&project_dir, &branch)?;
+                    let switch_targets_worktree = existing_workspace
+                        .as_ref()
+                        .map(|workspace| workspace.is_worktree)
+                        .unwrap_or(false);
+
+                    if !switch_targets_worktree {
+                        let result = ProcessCommand::new("git")
+                            .args(["checkout", &branch])
+                            .current_dir(&project_root)
+                            .status()?;
+                        if !result.success() {
+                            anyhow::bail!("Failed to checkout branch: {}", branch);
+                        }
+                    } else if let Some(workspace) = existing_workspace.as_ref() {
+                        let context_root = resolve_workspace_context_root(&project_root, workspace);
+                        if !context_root.exists() {
+                            anyhow::bail!(
+                                "Workspace '{}' is a worktree, but path does not exist: {}",
+                                branch,
+                                context_root.display()
+                            );
+                        }
                     }
                     let mut workspace = activate_workspace(&project_dir, &branch)?;
                     if let Some(mode_id) = mode.as_deref() {
@@ -594,7 +614,8 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     }
                     // Ensure context + provider config are regenerated after any
                     // workspace-level mode override is applied.
-                    on_post_checkout(&project_dir, &branch, &project_root)?;
+                    let context_root = resolve_workspace_context_root(&project_root, &workspace);
+                    on_post_checkout(&project_dir, &workspace.branch, &context_root)?;
                     println!(
                         "Workspace active: {} [{}]",
                         workspace.branch, workspace.status
@@ -728,6 +749,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         workspace = sync_workspace(&project_dir, &branch)?;
                     } else if activate {
                         workspace = activate_workspace(&project_dir, &branch)?;
+                    }
+
+                    if worktree || checkout || workspace.status == WorkspaceStatus::Active {
+                        let context_root =
+                            resolve_workspace_context_root(&project_root, &workspace);
+                        on_post_checkout(&project_dir, &workspace.branch, &context_root)?;
                     }
 
                     println!(
@@ -1359,6 +1386,24 @@ fn resolve_workspace_feature_link(
 
 fn get_project_dir_cli() -> Result<PathBuf> {
     get_project_dir(None)
+}
+
+fn resolve_workspace_context_root(
+    project_root: &Path,
+    workspace: &runtime::workspace::Workspace,
+) -> PathBuf {
+    if workspace.is_worktree
+        && let Some(path) = workspace.worktree_path.as_deref()
+    {
+        let candidate = PathBuf::from(path);
+        if candidate.is_absolute() {
+            candidate
+        } else {
+            project_root.join(candidate)
+        }
+    } else {
+        project_root.to_path_buf()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
