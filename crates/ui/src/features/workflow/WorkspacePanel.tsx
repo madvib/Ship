@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent } fr
 import { useNavigate } from '@tanstack/react-router';
 import {
   ExternalLink,
+  ChevronDown,
   Clock3,
   GitBranch,
   GitFork,
@@ -39,6 +40,7 @@ import { RuntimeWorkspace } from '@/lib/types/workspace';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
 import { Alert, AlertDescription, AlertTitle } from '@ship/ui';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@ship/ui';
 import { Input } from '@ship/ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
 import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
@@ -126,6 +128,131 @@ function isEnterKey(event: KeyboardEvent<HTMLInputElement>): boolean {
   return event.key === 'Enter';
 }
 
+function editorLogoCandidates(editorId: string, isDarkTheme: boolean): string[] {
+  const byTheme = (dark: string, light: string) => (isDarkTheme ? dark : light);
+  const fallbackTheme = (dark: string, light: string) => (isDarkTheme ? light : dark);
+  switch (editorId) {
+    case 'vscode':
+      return ['/ide-logos/vscode.svg', '/ide-logos/vscode-alt.svg'];
+    case 'cursor':
+      return [
+        byTheme('/ide-logos/CUBE_2D_DARK.svg', '/ide-logos/CUBE_2D_LIGHT.svg'),
+        fallbackTheme('/ide-logos/CUBE_2D_DARK.svg', '/ide-logos/CUBE_2D_LIGHT.svg'),
+      ];
+    case 'windsurf':
+      return [
+        byTheme(
+          '/ide-logos/windsurf-white-symbol.svg',
+          '/ide-logos/windsurf-black-symbol.svg',
+        ),
+        fallbackTheme(
+          '/ide-logos/windsurf-white-symbol.svg',
+          '/ide-logos/windsurf-black-symbol.svg',
+        ),
+      ];
+    case 'antigravity':
+      return ['/ide-logos/Google-Antigravity-Icon-Full-Color.png'];
+    case 'zed':
+      return [
+        byTheme('/ide-logos/zed-light.svg', '/ide-logos/zed-dark.svg'),
+        fallbackTheme('/ide-logos/zed-light.svg', '/ide-logos/zed-dark.svg'),
+      ];
+    case 'intellij':
+      return ['/ide-logos/IntelliJ_icon.svg'];
+    case 'webstorm':
+      return ['/ide-logos/WebStorm_icon.svg'];
+    case 'pycharm':
+      return ['/ide-logos/PyCharm_icon.svg'];
+    case 'clion':
+      return ['/ide-logos/CLion_icon.svg'];
+    case 'goland':
+      return ['/ide-logos/GoLand_icon.svg'];
+    case 'rustrover':
+      return ['/ide-logos/RustRover_icon.svg'];
+    default:
+      return [];
+  }
+}
+
+function EditorLogo({
+  editorId,
+  isDarkTheme,
+  className,
+}: {
+  editorId: string;
+  isDarkTheme: boolean;
+  className?: string;
+}) {
+  const candidates = useMemo(
+    () => editorLogoCandidates(editorId, isDarkTheme),
+    [editorId, isDarkTheme],
+  );
+  const [logoIndex, setLogoIndex] = useState(0);
+
+  useEffect(() => {
+    setLogoIndex(0);
+  }, [editorId, isDarkTheme]);
+
+  if (candidates.length === 0 || logoIndex >= candidates.length) {
+    return <TerminalSquare className={className} />;
+  }
+
+  return (
+    <img
+      src={candidates[logoIndex]}
+      alt=""
+      className={className}
+      onError={() => setLogoIndex((current) => current + 1)}
+    />
+  );
+}
+
+function EditorQuickOpenMenu({
+  branch,
+  editors,
+  isDarkTheme,
+  onOpenEditor,
+}: {
+  branch: string;
+  editors: WorkspaceEditorInfo[];
+  isDarkTheme: boolean;
+  onOpenEditor: (branch: string, editorId: string) => Promise<void> | void;
+}) {
+  if (editors.length === 0) return null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex h-5 items-center gap-0.5 rounded-sm px-1 text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+        onClick={(event) => event.stopPropagation()}
+        title="Open in IDE"
+      >
+        <TerminalSquare className="size-3" />
+        <ChevronDown className="size-2.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+        {editors.map((editor) => (
+          <DropdownMenuItem
+            key={editor.id}
+            className="gap-2"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onOpenEditor(branch, editor.id);
+            }}
+          >
+            <EditorLogo
+              editorId={editor.id}
+              isDarkTheme={isDarkTheme}
+              className="size-3.5 rounded-sm"
+            />
+            {editor.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export default function WorkspacePanel() {
   const navigate = useNavigate();
   const workspaceUi = useWorkspace();
@@ -156,6 +283,14 @@ export default function WorkspacePanel() {
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceFileChange[]>([]);
   const [activeSession, setActiveSession] = useState<WorkspaceSessionInfo | null>(null);
   const [recentSessions, setRecentSessions] = useState<WorkspaceSessionInfo[]>([]);
+  const isDarkTheme = useMemo(() => {
+    if (workspaceUi.config.theme === 'dark') return true;
+    if (workspaceUi.config.theme === 'light') return false;
+    if (typeof document !== 'undefined') {
+      return document.documentElement.classList.contains('dark');
+    }
+    return false;
+  }, [workspaceUi.config.theme]);
 
   const load = async () => {
     setLoading(true);
@@ -711,31 +846,32 @@ export default function WorkspacePanel() {
           {filteredRows.map((row) => {
             const selected = row.branch === selectedBranch;
             return (
-              <button
+              <div
                 key={row.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 className={`w-full rounded-md border px-3 py-2 text-left transition-colors ${
                   selected
                     ? 'border-primary/50 bg-primary/10'
                     : 'border-border/60 bg-background/50 hover:bg-muted/40'
                 }`}
                 onClick={() => setSelectedBranch(row.branch)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setSelectedBranch(row.branch);
+                  }
+                }}
               >
                 <div className="flex items-start justify-between gap-2">
                   <span className="truncate text-sm font-semibold">{row.branch}</span>
                   <div className="flex items-center gap-1">
-                    {availableEditors.length > 0 && (
-                      <span
-                        className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-sm hover:bg-muted/70"
-                        title={`Open in ${availableEditors[0].name}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void openWorkspaceEditorForBranch(row.branch, availableEditors[0].id);
-                        }}
-                      >
-                        <TerminalSquare className="size-3" />
-                      </span>
-                    )}
+                    <EditorQuickOpenMenu
+                      branch={row.branch}
+                      editors={availableEditors}
+                      isDarkTheme={isDarkTheme}
+                      onOpenEditor={openWorkspaceEditorForBranch}
+                    />
                     <Badge variant={statusVariant(row.status)} className="h-5 px-1.5 text-[10px]">
                       {row.status}
                     </Badge>
@@ -752,7 +888,7 @@ export default function WorkspacePanel() {
                     {row.providers.length} provider{row.providers.length === 1 ? '' : 's'}
                   </Badge>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -944,7 +1080,9 @@ export default function WorkspacePanel() {
           {loadingEditors ? (
             <p className="text-[11px] text-muted-foreground">Discovering editors…</p>
           ) : availableEditors.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">No supported editors found in PATH (cursor, vscode, zed).</p>
+            <p className="text-[11px] text-muted-foreground">
+              No supported editors found in PATH.
+            </p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {availableEditors.map((editor) => (
@@ -956,7 +1094,11 @@ export default function WorkspacePanel() {
                   onClick={() => void openWorkspaceEditor(editor.id)}
                   disabled={openingEditorId === editor.id}
                 >
-                  <TerminalSquare className="size-3" />
+                  <EditorLogo
+                    editorId={editor.id}
+                    isDarkTheme={isDarkTheme}
+                    className="size-3.5 rounded-sm"
+                  />
                   {openingEditorId === editor.id ? 'Opening…' : editor.name}
                 </Button>
               ))}
@@ -1244,6 +1386,10 @@ export default function WorkspacePanel() {
                 selectedBranch={selectedBranch}
                 onSelectBranch={setSelectedBranch}
                 groupBy={groupBy}
+                availableEditors={availableEditors}
+                onOpenEditor={(targetBranch, editorId) =>
+                  void openWorkspaceEditorForBranch(targetBranch, editorId)
+                }
               />
             </div>
 

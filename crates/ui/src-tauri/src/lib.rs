@@ -1548,9 +1548,17 @@ fn save_permissions_cmd(
 
 const WORKSPACE_EDITOR_ALIASES_CURSOR: &[&str] = &["cursor"];
 const WORKSPACE_EDITOR_ALIASES_VSCODE: &[&str] = &["vscode", "code", "vs-code"];
+const WORKSPACE_EDITOR_ALIASES_WINDSURF: &[&str] = &["windsurf", "codeium-windsurf", "codeium"];
+const WORKSPACE_EDITOR_ALIASES_ANTIGRAVITY: &[&str] = &["antigravity", "ag"];
 const WORKSPACE_EDITOR_ALIASES_ZED: &[&str] = &["zed"];
+const WORKSPACE_EDITOR_ALIASES_INTELLIJ: &[&str] = &["intellij", "idea", "idea-ultimate"];
+const WORKSPACE_EDITOR_ALIASES_WEBSTORM: &[&str] = &["webstorm", "web"];
+const WORKSPACE_EDITOR_ALIASES_PYCHARM: &[&str] = &["pycharm", "charm"];
+const WORKSPACE_EDITOR_ALIASES_CLION: &[&str] = &["clion"];
+const WORKSPACE_EDITOR_ALIASES_GOLAND: &[&str] = &["goland", "gol"];
+const WORKSPACE_EDITOR_ALIASES_RUSTROVER: &[&str] = &["rustrover", "rust"];
 
-const SUPPORTED_WORKSPACE_EDITORS: [(&str, &str, &str, &[&str]); 3] = [
+const SUPPORTED_WORKSPACE_EDITORS: [(&str, &str, &str, &[&str]); 11] = [
     (
         "cursor",
         "Cursor",
@@ -1558,19 +1566,62 @@ const SUPPORTED_WORKSPACE_EDITORS: [(&str, &str, &str, &[&str]); 3] = [
         WORKSPACE_EDITOR_ALIASES_CURSOR,
     ),
     ("vscode", "VS Code", "code", WORKSPACE_EDITOR_ALIASES_VSCODE),
+    (
+        "windsurf",
+        "Windsurf",
+        "windsurf",
+        WORKSPACE_EDITOR_ALIASES_WINDSURF,
+    ),
+    (
+        "antigravity",
+        "Antigravity",
+        "antigravity",
+        WORKSPACE_EDITOR_ALIASES_ANTIGRAVITY,
+    ),
     ("zed", "Zed", "zed", WORKSPACE_EDITOR_ALIASES_ZED),
+    (
+        "intellij",
+        "IntelliJ IDEA",
+        "idea",
+        WORKSPACE_EDITOR_ALIASES_INTELLIJ,
+    ),
+    (
+        "webstorm",
+        "WebStorm",
+        "webstorm",
+        WORKSPACE_EDITOR_ALIASES_WEBSTORM,
+    ),
+    (
+        "pycharm",
+        "PyCharm",
+        "pycharm",
+        WORKSPACE_EDITOR_ALIASES_PYCHARM,
+    ),
+    ("clion", "CLion", "clion", WORKSPACE_EDITOR_ALIASES_CLION),
+    (
+        "goland",
+        "GoLand",
+        "goland",
+        WORKSPACE_EDITOR_ALIASES_GOLAND,
+    ),
+    (
+        "rustrover",
+        "RustRover",
+        "rustrover",
+        WORKSPACE_EDITOR_ALIASES_RUSTROVER,
+    ),
 ];
 
-fn command_exists_in_path(binary: &str) -> bool {
+fn resolve_command_in_path(binary: &str) -> Option<PathBuf> {
     let path_env = match std::env::var_os("PATH") {
         Some(value) => value,
-        None => return false,
+        None => return None,
     };
 
     for dir in std::env::split_paths(&path_env) {
         let candidate = dir.join(binary);
         if candidate.is_file() {
-            return true;
+            return Some(candidate);
         }
 
         #[cfg(windows)]
@@ -1579,14 +1630,18 @@ fn command_exists_in_path(binary: &str) -> bool {
             if exts
                 .iter()
                 .map(|ext| dir.join(format!("{}.{}", binary, ext)))
-                .any(|path| path.is_file())
+                .find(|path| path.is_file())
+                .is_some()
             {
-                return true;
+                return exts
+                    .iter()
+                    .map(|ext| dir.join(format!("{}.{}", binary, ext)))
+                    .find(|path| path.is_file());
             }
         }
     }
 
-    false
+    None
 }
 
 fn normalize_workspace_editor_id(raw: &str) -> Option<&'static str> {
@@ -1604,6 +1659,144 @@ fn normalize_workspace_editor_id(raw: &str) -> Option<&'static str> {
                     .any(|alias| alias.eq_ignore_ascii_case(&normalized))
         })
         .map(|(id, _, _, _)| *id)
+}
+
+fn supported_workspace_editor_ids() -> String {
+    SUPPORTED_WORKSPACE_EDITORS
+        .iter()
+        .map(|(id, _, _, _)| *id)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn editor_command_candidates(editor_id: &str, binary: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    candidates.push(binary.to_string());
+    match editor_id {
+        "vscode" => {
+            candidates.extend(["code-insiders"].iter().map(|value| value.to_string()));
+        }
+        "windsurf" => {
+            candidates.extend(
+                ["windsurf-cli", "codeium"]
+                    .iter()
+                    .map(|value| value.to_string()),
+            );
+        }
+        "antigravity" => {
+            candidates.extend(["ag"].iter().map(|value| value.to_string()));
+        }
+        "intellij" => {
+            candidates.extend(
+                ["idea-ultimate", "idea-community", "idea64"]
+                    .iter()
+                    .map(|value| value.to_string()),
+            );
+        }
+        "webstorm" => {
+            candidates.extend(["webstorm64"].iter().map(|value| value.to_string()));
+        }
+        "pycharm" => {
+            candidates.extend(
+                ["pycharm-professional", "pycharm-community", "pycharm64"]
+                    .iter()
+                    .map(|value| value.to_string()),
+            );
+        }
+        "goland" => {
+            candidates.extend(["goland64"].iter().map(|value| value.to_string()));
+        }
+        "rustrover" => {
+            candidates.extend(["rustrover64"].iter().map(|value| value.to_string()));
+        }
+        _ => {}
+    }
+    candidates
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_editor_binary(editor_id: &str, binary: &str) -> Option<PathBuf> {
+    for candidate in editor_command_candidates(editor_id, binary) {
+        if let Some(path) = resolve_command_in_path(&candidate) {
+            return Some(path);
+        }
+    }
+
+    let common_paths = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/opt/local/bin",
+        "/usr/bin",
+    ];
+    for candidate in editor_command_candidates(editor_id, binary) {
+        for dir in common_paths {
+            let path = Path::new(dir).join(&candidate);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+
+    let app_bundle_bins: [(&str, &[&str]); 11] = [
+        (
+            "cursor",
+            &["/Applications/Cursor.app/Contents/Resources/app/bin/cursor"],
+        ),
+        (
+            "vscode",
+            &["/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"],
+        ),
+        (
+            "windsurf",
+            &["/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf"],
+        ),
+        (
+            "antigravity",
+            &["/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity"],
+        ),
+        ("zed", &["/Applications/Zed.app/Contents/MacOS/zed"]),
+        (
+            "intellij",
+            &["/Applications/IntelliJ IDEA.app/Contents/MacOS/idea"],
+        ),
+        (
+            "webstorm",
+            &["/Applications/WebStorm.app/Contents/MacOS/webstorm"],
+        ),
+        (
+            "pycharm",
+            &["/Applications/PyCharm.app/Contents/MacOS/pycharm"],
+        ),
+        ("clion", &["/Applications/CLion.app/Contents/MacOS/clion"]),
+        (
+            "goland",
+            &["/Applications/GoLand.app/Contents/MacOS/goland"],
+        ),
+        (
+            "rustrover",
+            &["/Applications/RustRover.app/Contents/MacOS/rustrover"],
+        ),
+    ];
+    if let Some((_, paths)) = app_bundle_bins.iter().find(|(id, _)| *id == editor_id) {
+        for path in *paths {
+            let candidate = PathBuf::from(path);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn resolve_editor_binary(editor_id: &str, binary: &str) -> Option<PathBuf> {
+    for candidate in editor_command_candidates(editor_id, binary) {
+        if let Some(path) = resolve_command_in_path(&candidate) {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn resolve_workspace_target_dir(ship_dir: &Path, workspace: Option<&Workspace>) -> PathBuf {
@@ -1625,11 +1818,12 @@ fn resolve_workspace_target_dir(ship_dir: &Path, workspace: Option<&Workspace>) 
 fn list_workspace_editors_cmd() -> Result<Vec<WorkspaceEditorInfo>, String> {
     let installed = SUPPORTED_WORKSPACE_EDITORS
         .iter()
-        .filter(|(_, _, binary, _)| command_exists_in_path(binary))
-        .map(|(id, name, binary, _)| WorkspaceEditorInfo {
-            id: (*id).to_string(),
-            name: (*name).to_string(),
-            binary: (*binary).to_string(),
+        .filter_map(|(id, name, binary, _)| {
+            resolve_editor_binary(id, binary).map(|path| WorkspaceEditorInfo {
+                id: (*id).to_string(),
+                name: (*name).to_string(),
+                binary: path.to_string_lossy().to_string(),
+            })
         })
         .collect::<Vec<_>>();
 
@@ -1861,8 +2055,9 @@ async fn open_workspace_editor_cmd(
 
         let normalized_editor_id = normalize_workspace_editor_id(&editor).ok_or_else(|| {
             format!(
-                "Unknown editor '{}'. Use one of: cursor, vscode, zed",
-                editor
+                "Unknown editor '{}'. Use one of: {}",
+                editor,
+                supported_workspace_editor_ids()
             )
         })?;
 
@@ -1871,14 +2066,15 @@ async fn open_workspace_editor_cmd(
             .find(|(id, _, _, _)| *id == normalized_editor_id)
             .ok_or_else(|| format!("Editor '{}' is not supported", normalized_editor_id))?;
 
-        if !command_exists_in_path(binary) {
-            return Err(format!(
-                "Editor '{}' is not available in PATH on this machine",
-                normalized_editor_id
-            ));
-        }
+        let resolved_binary =
+            resolve_editor_binary(normalized_editor_id, binary).ok_or_else(|| {
+                format!(
+                    "Editor '{}' is not available on this machine",
+                    normalized_editor_id
+                )
+            })?;
 
-        std::process::Command::new(binary)
+        std::process::Command::new(resolved_binary)
             .arg(target_dir)
             .spawn()
             .map_err(|e| e.to_string())?;
