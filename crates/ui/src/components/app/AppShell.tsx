@@ -1,10 +1,9 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useMemo, useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useUpdateChecker } from '@/lib/hooks/useUpdateChecker';
 import Sidebar from '@/components/app/Sidebar';
 import { PageChromeProvider, PageChromeContextValue } from '@ship/ui';
 import AgentModeControl from '@/features/agents/AgentModeControl.tsx';
-import ProjectOnboarding from '@/features/planning/common/ProjectOnboarding';
 import { SearchModal } from '@/components/app/SearchModal';
 import { Button } from '@ship/ui';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
@@ -26,6 +25,9 @@ import {
 import { SHIP_NAV_SECTIONS } from '@/lib/modules/ship';
 import { cn } from '@/lib/utils';
 import RouteLoadingOverlay from '@/components/app/RouteLoadingOverlay';
+import RouteFallback from '@/components/app/RouteFallback';
+
+const ProjectOnboarding = lazy(() => import('@/features/planning/common/ProjectOnboarding'));
 
 const DEFAULT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 220;
@@ -245,18 +247,20 @@ export default function App() {
             {workspace.error}
           </div>
         )}
-        <ProjectOnboarding
-          detectedProject={workspace.detectedProject}
-          detectingProject={workspace.detectingProject}
-          creatingProject={workspace.creatingProject}
-          recentProjects={workspace.recentProjects}
-          onRefreshDetection={workspace.refreshDetectedProject}
-          onOpenProject={workspace.handleOpenProject}
-          onCreateProject={workspace.handleCreateProjectFromForm}
-          onPickDirectory={workspace.handlePickProjectDirectory}
-          onSelectProject={handleSelectProject}
-          onOpenSettings={() => navigateTo(SETTINGS_ROUTE)}
-        />
+        <Suspense fallback={<RouteFallback label="Loading onboarding..." />}>
+          <ProjectOnboarding
+            detectedProject={workspace.detectedProject}
+            detectingProject={workspace.detectingProject}
+            creatingProject={workspace.creatingProject}
+            recentProjects={workspace.recentProjects}
+            onRefreshDetection={workspace.refreshDetectedProject}
+            onOpenProject={workspace.handleOpenProject}
+            onCreateProject={workspace.handleCreateProjectFromForm}
+            onPickDirectory={workspace.handlePickProjectDirectory}
+            onSelectProject={handleSelectProject}
+            onOpenSettings={() => navigateTo(SETTINGS_ROUTE)}
+          />
+        </Suspense>
       </main>
     );
   }
@@ -354,7 +358,9 @@ export default function App() {
               value={activeChrome}
               onUpdate={handleUpdateChrome}
             >
-              <Outlet />
+              <div key={location.pathname} className="route-enter h-full min-h-0">
+                <Outlet />
+              </div>
             </PageChromeProvider>
           </main>
 
