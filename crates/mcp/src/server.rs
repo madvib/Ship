@@ -27,9 +27,11 @@ use runtime::{
         create_workspace as runtime_create_workspace,
         end_workspace_session as runtime_end_workspace_session,
         get_active_workspace_session as runtime_get_active_workspace_session,
+        get_workspace_provider_matrix as runtime_get_workspace_provider_matrix,
         get_workspace as runtime_get_workspace,
         list_workspace_sessions as runtime_list_workspace_sessions,
         list_workspaces as runtime_list_workspaces, set_workspace_active_mode,
+        repair_workspace as runtime_repair_workspace,
         start_workspace_session as runtime_start_workspace_session,
         sync_workspace as runtime_sync_workspace,
     },
@@ -130,8 +132,10 @@ impl ShipServer {
             "set_mode",
             "list_workspaces",
             "get_workspace",
+            "get_workspace_provider_matrix",
             "activate_workspace",
             "sync_workspace",
+            "repair_workspace",
             "start_workspace_session",
             "end_workspace_session",
             "get_workspace_session_status",
@@ -1321,6 +1325,30 @@ impl ShipServer {
         }
     }
 
+    /// Resolve provider policy matrix for a workspace/mode combination
+    #[tool(
+        description = "Resolve provider policy for a workspace (allowed providers, source, and resolution errors)."
+    )]
+    async fn get_workspace_provider_matrix(
+        &self,
+        Parameters(req): Parameters<WorkspaceProviderMatrixRequest>,
+    ) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(project_dir) => project_dir,
+            Err(err) => return err,
+        };
+        let branch =
+            match Self::resolve_workspace_branch_for_project(&project_dir, req.branch.as_deref()) {
+                Ok(branch) => branch,
+                Err(err) => return format!("Error: {}", err),
+            };
+        match runtime_get_workspace_provider_matrix(&project_dir, &branch, req.mode_id.as_deref()) {
+            Ok(matrix) => serde_json::to_string_pretty(&matrix)
+                .unwrap_or_else(|e| format!("Error serializing provider matrix: {}", e)),
+            Err(err) => format!("Error: {}", err),
+        }
+    }
+
     /// Create or update a workspace record
     #[tool(
         description = "Create or update a workspace runtime record (feature/refactor/experiment/hotfix)."
@@ -1417,9 +1445,33 @@ impl ShipServer {
         }
     }
 
-    /// Start a workspace session (compiles provider context)
+    /// Repair workspace compile/config drift and report actions taken
     #[tool(
-        description = "Start a workspace session and compile provider context for the selected provider."
+        description = "Repair workspace compile/config drift. Defaults to dry-run unless dry_run=false."
+    )]
+    async fn repair_workspace(
+        &self,
+        Parameters(req): Parameters<RepairWorkspaceRequest>,
+    ) -> String {
+        let project_dir = match self.get_effective_project_dir().await {
+            Ok(project_dir) => project_dir,
+            Err(err) => return err,
+        };
+        let branch =
+            match Self::resolve_workspace_branch_for_project(&project_dir, req.branch.as_deref()) {
+                Ok(branch) => branch,
+                Err(err) => return format!("Error: {}", err),
+            };
+        match runtime_repair_workspace(&project_dir, &branch, req.dry_run.unwrap_or(true)) {
+            Ok(report) => serde_json::to_string_pretty(&report)
+                .unwrap_or_else(|e| format!("Error serializing workspace repair report: {}", e)),
+            Err(err) => format!("Error: {}", err),
+        }
+    }
+
+    /// Start a workspace session against the current compiled workspace context.
+    #[tool(
+        description = "Start a workspace session for the active compiled context and selected provider."
     )]
     async fn start_workspace_session(
         &self,
@@ -2173,6 +2225,10 @@ mod tests {
         ShipServer::enforce_mode_tool_gate(&project_dir, "list_notes").expect("list_notes allowed");
         ShipServer::enforce_mode_tool_gate(&project_dir, "ship_list_notes_tool")
             .expect("prefixed note tool allowed");
+        ShipServer::enforce_mode_tool_gate(&project_dir, "get_workspace_provider_matrix")
+            .expect("workspace provider matrix must remain control-plane allowed");
+        ShipServer::enforce_mode_tool_gate(&project_dir, "repair_workspace")
+            .expect("workspace repair must remain control-plane allowed");
 
         let blocked = ShipServer::enforce_mode_tool_gate(&project_dir, "create_issue")
             .expect_err("create_issue should be blocked");
