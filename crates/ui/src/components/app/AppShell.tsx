@@ -209,10 +209,10 @@ export default function App() {
     );
   }
 
-  // Settings: full-viewport with its own sidebar, skip main shell chrome
-  if (routePath === SETTINGS_ROUTE) {
+  // Settings or Focus Mode: full-viewport, skip main shell chrome
+  if (routePath === SETTINGS_ROUTE || workspace.isWorkspaceFocusMode) {
     return (
-      <div className="h-full">
+      <div className="h-full bg-background overflow-hidden">
         <SearchModal />
         <PageChromeProvider value={activeChrome} onUpdate={handleUpdateChrome}>
           <Outlet />

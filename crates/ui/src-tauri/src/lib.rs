@@ -1,3 +1,4 @@
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use runtime::config::{
     add_mcp_server, add_mode, generate_gitignore, get_active_mode, get_config,
     get_effective_config, list_mcp_servers, remove_mcp_server, remove_mode, save_config,
@@ -9,14 +10,16 @@ use runtime::project::{
 };
 use runtime::{
     activate_workspace, create_skill, create_user_skill, create_workspace, delete_skill,
-    delete_user_skill, delete_workspace, get_active_workspace_session, get_effective_skill,
-    get_skill, get_user_skill, get_workspace, ingest_external_events, list_catalog,
-    list_catalog_by_kind, list_effective_skills, list_events_since, list_models, list_providers,
-    list_skills, list_user_skills, list_workspace_sessions, list_workspaces, log_action,
-    read_log_entries, resolve_agent_config, search_catalog, sync_workspace,
-    transition_workspace_status, update_skill, update_user_skill, AgentConfig, CatalogEntry,
-    CatalogKind, CreateWorkspaceRequest, EventRecord, LogEntry, ModelInfo, ProviderInfo, Skill,
-    Workspace, WorkspaceSession, WorkspaceStatus, WorkspaceType,
+    delete_user_skill, delete_workspace, end_workspace_session, get_active_workspace_session,
+    get_effective_skill, get_skill, get_user_skill, get_workspace, get_workspace_provider_matrix,
+    ingest_external_events, list_catalog, list_catalog_by_kind, list_effective_skills,
+    list_events_since, list_models, list_providers, list_skills, list_user_skills,
+    list_workspace_sessions, list_workspaces, log_action, read_log_entries, repair_workspace,
+    resolve_agent_config, search_catalog, set_workspace_active_mode, start_workspace_session,
+    sync_workspace, transition_workspace_status, update_skill, update_user_skill, AgentConfig,
+    CatalogEntry, CatalogKind, CreateWorkspaceRequest, EndWorkspaceSessionRequest, EventRecord,
+    LogEntry, ModelInfo, ProviderInfo, Skill, Workspace, WorkspaceProviderMatrix,
+    WorkspaceRepairReport, WorkspaceSession, WorkspaceStatus, WorkspaceType,
 };
 use serde::{Deserialize, Serialize};
 use ship_module_project::{
@@ -30,11 +33,13 @@ use ship_module_project::{
     ReleaseEntry as ProjectReleaseEntry, Spec, SpecEntry, ADR,
 };
 use specta::Type;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::State;
@@ -75,11 +80,141 @@ struct ProjectPoller {
     handle: thread::JoinHandle<()>,
 }
 
+struct PtySession {
+    id: String,
+    branch: String,
+    provider: String,
+    cwd: String,
+    cols: Mutex<u16>,
+    rows: Mutex<u16>,
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    child: Mutex<Box<dyn Child + Send>>,
+    output_rx: Mutex<mpsc::Receiver<Vec<u8>>>,
+    reader_handle: Mutex<Option<thread::JoinHandle<()>>>,
+    closed: AtomicBool,
+    exit_code: Mutex<Option<u32>>,
+}
+
+impl PtySession {
+    fn mark_closed(&self, exit_code: Option<u32>) {
+        self.closed.store(true, Ordering::SeqCst);
+        if let Some(code_value) = exit_code {
+            if let Ok(mut code) = self.exit_code.lock() {
+                *code = Some(code_value);
+            }
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::SeqCst)
+    }
+
+    fn exit_code(&self) -> Option<u32> {
+        self.exit_code.lock().ok().and_then(|code| *code)
+    }
+
+    fn refresh_exit_state(&self) -> Result<bool, String> {
+        if self.is_closed() {
+            return Ok(true);
+        }
+        let mut child = self
+            .child
+            .lock()
+            .map_err(|_| "PTY child lock poisoned".to_string())?;
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                self.mark_closed(Some(status.exit_code()));
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Err(error) => {
+                self.mark_closed(None);
+                Err(error.to_string())
+            }
+        }
+    }
+
+    fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+        let size = PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+        let master = self
+            .master
+            .lock()
+            .map_err(|_| "PTY session lock poisoned".to_string())?;
+        master.resize(size).map_err(|e| e.to_string())?;
+        drop(master);
+        if let Ok(mut current_cols) = self.cols.lock() {
+            *current_cols = cols;
+        }
+        if let Ok(mut current_rows) = self.rows.lock() {
+            *current_rows = rows;
+        }
+        Ok(())
+    }
+
+    fn write_input(&self, input: &str) -> Result<(), String> {
+        let mut writer = self
+            .writer
+            .lock()
+            .map_err(|_| "PTY writer lock poisoned".to_string())?;
+        writer
+            .write_all(input.as_bytes())
+            .map_err(|e| e.to_string())?;
+        writer.flush().map_err(|e| e.to_string())
+    }
+
+    fn drain_output(&self, max_bytes: usize) -> Result<String, String> {
+        let rx = self
+            .output_rx
+            .lock()
+            .map_err(|_| "PTY output lock poisoned".to_string())?;
+        let mut output = Vec::new();
+        while output.len() < max_bytes {
+            match rx.try_recv() {
+                Ok(chunk) => {
+                    let remaining = max_bytes.saturating_sub(output.len());
+                    if chunk.len() <= remaining {
+                        output.extend_from_slice(&chunk);
+                    } else {
+                        output.extend_from_slice(&chunk[..remaining]);
+                        break;
+                    }
+                }
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        Ok(String::from_utf8_lossy(&output).to_string())
+    }
+
+    fn stop(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.kill();
+            if let Ok(status) = child.wait() {
+                self.mark_closed(Some(status.exit_code()));
+            } else {
+                self.mark_closed(None);
+            }
+        }
+        if let Ok(mut handle) = self.reader_handle.lock() {
+            if let Some(join_handle) = handle.take() {
+                let _ = join_handle.join();
+            }
+        }
+        self.mark_closed(self.exit_code());
+    }
+}
+
 /// Holds the currently active project directory (the `.ship` dir path).
 #[derive(Default)]
 pub struct AppState {
     active_project: Mutex<Option<PathBuf>>,
     project_watcher: Mutex<Option<ProjectPoller>>,
+    terminal_sessions: Mutex<HashMap<String, Arc<PtySession>>>,
 }
 
 // ─── Project Info ─────────────────────────────────────────────────────────────
@@ -180,6 +315,18 @@ pub struct WorkspaceEditorInfo {
 pub struct WorkspaceFileChange {
     pub status: String,
     pub path: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct WorkspaceTerminalSessionInfo {
+    pub session_id: String,
+    pub branch: String,
+    pub provider: String,
+    pub cwd: String,
+    pub cols: u16,
+    pub rows: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_error: Option<String>,
 }
 
 fn get_active_dir(state: &State<AppState>) -> Result<PathBuf, String> {
@@ -886,6 +1033,8 @@ fn start_project_watcher(
     state: &State<AppState>,
     ship_dir: &PathBuf,
 ) -> Result<(), String> {
+    clear_terminal_sessions(state)?;
+
     let app_handle = app.clone();
     let ship_root = ship_dir.clone();
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -1813,6 +1962,56 @@ fn resolve_workspace_target_dir(ship_dir: &Path, workspace: Option<&Workspace>) 
     ship_dir.parent().unwrap_or(ship_dir).to_path_buf()
 }
 
+fn normalize_terminal_provider(provider: Option<String>) -> String {
+    provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("shell")
+        .to_ascii_lowercase()
+}
+
+fn resolve_terminal_command(provider: &str) -> String {
+    match provider {
+        "claude" => "claude".to_string(),
+        "codex" => "codex".to_string(),
+        "gemini" => "gemini".to_string(),
+        "shell" => std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),
+        other => other.to_string(),
+    }
+}
+
+fn load_terminal_session(
+    state: &State<'_, AppState>,
+    session_id: &str,
+) -> Result<Arc<PtySession>, String> {
+    let sessions = state
+        .terminal_sessions
+        .lock()
+        .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+    sessions
+        .get(session_id)
+        .cloned()
+        .ok_or_else(|| format!("Terminal session '{}' not found", session_id))
+}
+
+fn clear_terminal_sessions(state: &State<'_, AppState>) -> Result<(), String> {
+    let sessions = {
+        let mut guard = state
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+        guard
+            .drain()
+            .map(|(_, session)| session)
+            .collect::<Vec<_>>()
+    };
+    for session in sessions {
+        session.stop();
+    }
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 fn list_workspace_editors_cmd() -> Result<Vec<WorkspaceEditorInfo>, String> {
@@ -1896,6 +2095,7 @@ async fn create_workspace_cmd(
     feature_id: Option<String>,
     spec_id: Option<String>,
     release_id: Option<String>,
+    mode_id: Option<String>,
     activate: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<Workspace, String> {
@@ -1922,6 +2122,7 @@ async fn create_workspace_cmd(
                 feature_id,
                 spec_id,
                 release_id,
+                active_mode: mode_id,
                 ..CreateWorkspaceRequest::default()
             },
         )
@@ -1940,6 +2141,22 @@ async fn activate_workspace_cmd(
     let project_dir = get_active_dir(&state)?;
     tauri::async_runtime::spawn_blocking(move || {
         activate_workspace(&project_dir, &branch).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn set_workspace_mode_cmd(
+    branch: String,
+    mode_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Workspace, String> {
+    let project_dir = get_active_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        set_workspace_active_mode(&project_dir, &branch, mode_id.as_deref())
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1982,6 +2199,81 @@ async fn list_workspace_sessions_cmd(
     tauri::async_runtime::spawn_blocking(move || {
         list_workspace_sessions(&project_dir, branch.as_deref(), clamped_limit)
             .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn get_workspace_provider_matrix_cmd(
+    branch: String,
+    mode_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceProviderMatrix, String> {
+    let project_dir = get_active_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        get_workspace_provider_matrix(&project_dir, &branch, mode_id.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn repair_workspace_cmd(
+    branch: String,
+    dry_run: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceRepairReport, String> {
+    let project_dir = get_active_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        repair_workspace(&project_dir, &branch, dry_run.unwrap_or(true)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn start_workspace_session_cmd(
+    branch: String,
+    goal: Option<String>,
+    mode_id: Option<String>,
+    provider: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceSession, String> {
+    let project_dir = get_active_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        start_workspace_session(&project_dir, &branch, goal, mode_id, provider)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn end_workspace_session_cmd(
+    branch: String,
+    summary: Option<String>,
+    updated_feature_ids: Option<Vec<String>>,
+    updated_spec_ids: Option<Vec<String>>,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceSession, String> {
+    let project_dir = get_active_dir(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        end_workspace_session(
+            &project_dir,
+            &branch,
+            EndWorkspaceSessionRequest {
+                summary,
+                updated_feature_ids: updated_feature_ids.unwrap_or_default(),
+                updated_spec_ids: updated_spec_ids.unwrap_or_default(),
+            },
+        )
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2083,6 +2375,244 @@ async fn open_workspace_editor_cmd(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn start_workspace_terminal_cmd(
+    branch: String,
+    provider: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    state: State<'_, AppState>,
+) -> Result<WorkspaceTerminalSessionInfo, String> {
+    let project_dir = get_active_dir(&state)?;
+    let resolved_cols = cols.unwrap_or(120).clamp(40, 400);
+    let resolved_rows = rows.unwrap_or(32).clamp(12, 240);
+    let normalized_provider = normalize_terminal_provider(provider);
+    let branch_for_spawn = branch.clone();
+    let provider_for_spawn = normalized_provider.clone();
+    let project_dir_for_spawn = project_dir.clone();
+
+    let (session, activation_error) = tauri::async_runtime::spawn_blocking(
+        move || -> Result<(Arc<PtySession>, Option<String>), String> {
+            let workspace = get_workspace(&project_dir_for_spawn, &branch_for_spawn)
+                .map_err(|e| e.to_string())?;
+            let target_dir =
+                resolve_workspace_target_dir(&project_dir_for_spawn, workspace.as_ref());
+
+            let activation_error = activate_workspace(&project_dir_for_spawn, &branch_for_spawn)
+                .err()
+                .map(|e| e.to_string());
+
+            let pty_system = native_pty_system();
+            let pty_pair = pty_system
+                .openpty(PtySize {
+                    rows: resolved_rows,
+                    cols: resolved_cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| e.to_string())?;
+
+            let command = resolve_terminal_command(&provider_for_spawn);
+            let mut cmd = CommandBuilder::new(command);
+            cmd.cwd(&target_dir);
+            let child = pty_pair
+                .slave
+                .spawn_command(cmd)
+                .map_err(|e| e.to_string())?;
+            let mut reader = pty_pair
+                .master
+                .try_clone_reader()
+                .map_err(|e| e.to_string())?;
+            let writer = pty_pair.master.take_writer().map_err(|e| e.to_string())?;
+            let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+            let session = Arc::new(PtySession {
+                id: runtime::gen_nanoid(),
+                branch: branch_for_spawn,
+                provider: provider_for_spawn,
+                cwd: target_dir.to_string_lossy().to_string(),
+                cols: Mutex::new(resolved_cols),
+                rows: Mutex::new(resolved_rows),
+                master: Mutex::new(pty_pair.master),
+                writer: Mutex::new(writer),
+                child: Mutex::new(child),
+                output_rx: Mutex::new(output_rx),
+                reader_handle: Mutex::new(None),
+                closed: AtomicBool::new(false),
+                exit_code: Mutex::new(None),
+            });
+
+            let session_for_reader = Arc::clone(&session);
+            let reader_handle = thread::spawn(move || {
+                let mut buffer = [0u8; 8192];
+                loop {
+                    match reader.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(read) => {
+                            if output_tx.send(buffer[..read].to_vec()).is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            if error.kind() == std::io::ErrorKind::Interrupted {
+                                continue;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if session_for_reader.refresh_exit_state().is_err()
+                    && !session_for_reader.is_closed()
+                {
+                    session_for_reader.mark_closed(None);
+                }
+            });
+            if let Ok(mut handle) = session.reader_handle.lock() {
+                *handle = Some(reader_handle);
+            }
+
+            Ok((session, activation_error))
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let info = WorkspaceTerminalSessionInfo {
+        session_id: session.id.clone(),
+        branch: session.branch.clone(),
+        provider: session.provider.clone(),
+        cwd: session.cwd.clone(),
+        cols: *session
+            .cols
+            .lock()
+            .map_err(|_| "Terminal session size lock poisoned".to_string())?,
+        rows: *session
+            .rows
+            .lock()
+            .map_err(|_| "Terminal session size lock poisoned".to_string())?,
+        activation_error,
+    };
+
+    let replaced_sessions = {
+        let mut sessions = state
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+        let replaced_ids = sessions
+            .iter()
+            .filter(|(_, existing)| existing.branch == info.branch)
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let mut removed = Vec::new();
+        for id in replaced_ids {
+            if let Some(existing) = sessions.remove(&id) {
+                removed.push(existing);
+            }
+        }
+        sessions.insert(session.id.clone(), session);
+        removed
+    };
+    for existing in replaced_sessions {
+        existing.stop();
+    }
+    Ok(info)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn read_workspace_terminal_cmd(
+    session_id: String,
+    max_bytes: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let session = load_terminal_session(&state, &session_id)?;
+    let _ = session.refresh_exit_state();
+    let output = session.drain_output(max_bytes.unwrap_or(65_536).clamp(1, 262_144))?;
+
+    if session.is_closed() && output.is_empty() {
+        let removed = {
+            let mut sessions = state
+                .terminal_sessions
+                .lock()
+                .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+            sessions.remove(&session_id)
+        };
+        if let Some(closed_session) = removed {
+            closed_session.stop();
+        }
+        return Err(match session.exit_code() {
+            Some(code) => format!(
+                "Terminal session '{}' closed (exit code {})",
+                session_id, code
+            ),
+            None => format!("Terminal session '{}' closed", session_id),
+        });
+    }
+
+    Ok(output)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn write_workspace_terminal_cmd(
+    session_id: String,
+    input: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let session = load_terminal_session(&state, &session_id)?;
+    let _ = session.refresh_exit_state();
+    if session.is_closed() {
+        return Err(match session.exit_code() {
+            Some(code) => format!(
+                "Terminal session '{}' closed (exit code {})",
+                session_id, code
+            ),
+            None => format!("Terminal session '{}' closed", session_id),
+        });
+    }
+    session.write_input(&input)
+}
+
+#[tauri::command]
+#[specta::specta]
+fn resize_workspace_terminal_cmd(
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let session = load_terminal_session(&state, &session_id)?;
+    let _ = session.refresh_exit_state();
+    if session.is_closed() {
+        return Err(match session.exit_code() {
+            Some(code) => format!(
+                "Terminal session '{}' closed (exit code {})",
+                session_id, code
+            ),
+            None => format!("Terminal session '{}' closed", session_id),
+        });
+    }
+    session.resize(cols.clamp(40, 400), rows.clamp(12, 240))
+}
+
+#[tauri::command]
+#[specta::specta]
+fn stop_workspace_terminal_cmd(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let session = {
+        let mut sessions = state
+            .terminal_sessions
+            .lock()
+            .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+        sessions.remove(&session_id)
+    }
+    .ok_or_else(|| format!("Terminal session '{}' not found", session_id))?;
+    session.stop();
+    Ok(())
 }
 
 #[tauri::command]
@@ -2553,11 +3083,21 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             sync_workspace_cmd,
             create_workspace_cmd,
             activate_workspace_cmd,
+            set_workspace_mode_cmd,
             delete_workspace_cmd,
             get_active_workspace_session_cmd,
             list_workspace_sessions_cmd,
+            get_workspace_provider_matrix_cmd,
+            repair_workspace_cmd,
+            start_workspace_session_cmd,
+            end_workspace_session_cmd,
             list_workspace_changes_cmd,
             open_workspace_editor_cmd,
+            start_workspace_terminal_cmd,
+            read_workspace_terminal_cmd,
+            write_workspace_terminal_cmd,
+            resize_workspace_terminal_cmd,
+            stop_workspace_terminal_cmd,
             transition_workspace_cmd,
             get_current_branch_cmd,
             // Log
@@ -2654,6 +3194,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn ai_cli_attempts_codex_prefers_exec_then_prompt() {
@@ -2690,5 +3231,56 @@ mod tests {
 
         let none = ai_cli_success_text(b"", b"");
         assert!(none.is_none());
+    }
+
+    #[test]
+    fn terminal_provider_normalizes_and_defaults() {
+        assert_eq!(normalize_terminal_provider(None), "shell");
+        assert_eq!(
+            normalize_terminal_provider(Some("  CoDeX  ".to_string())),
+            "codex"
+        );
+        assert_eq!(normalize_terminal_provider(Some("".to_string())), "shell");
+    }
+
+    #[test]
+    fn terminal_command_resolves_shell_and_named_providers() {
+        assert_eq!(resolve_terminal_command("claude"), "claude");
+        assert_eq!(resolve_terminal_command("codex"), "codex");
+        assert_eq!(resolve_terminal_command("gemini"), "gemini");
+        assert_eq!(resolve_terminal_command("custom-bin"), "custom-bin");
+
+        let shell = resolve_terminal_command("shell");
+        assert!(!shell.trim().is_empty());
+    }
+
+    #[test]
+    fn workspace_target_dir_prefers_worktree_path() {
+        let ship_dir = Path::new("/tmp/project/.ship");
+        let workspace = Workspace {
+            id: "ws_123".to_string(),
+            branch: "feature/test".to_string(),
+            workspace_type: WorkspaceType::Feature,
+            status: WorkspaceStatus::Active,
+            feature_id: None,
+            spec_id: None,
+            release_id: None,
+            active_mode: None,
+            providers: Vec::new(),
+            resolved_at: "2026-03-06T00:00:00Z".parse().expect("valid timestamp"),
+            is_worktree: true,
+            worktree_path: Some("/tmp/worktrees/feature-test".to_string()),
+            last_activated_at: None,
+            context_hash: None,
+            config_generation: 1,
+            compiled_at: None,
+            compile_error: None,
+        };
+
+        let resolved = resolve_workspace_target_dir(ship_dir, Some(&workspace));
+        assert_eq!(resolved, Path::new("/tmp/worktrees/feature-test"));
+
+        let fallback = resolve_workspace_target_dir(ship_dir, None);
+        assert_eq!(fallback, Path::new("/tmp/project"));
     }
 }

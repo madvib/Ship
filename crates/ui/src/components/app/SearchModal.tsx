@@ -61,6 +61,7 @@ export function SearchModal() {
 
     const {
         setNotesScope,
+        setError: setWorkspaceError,
     } = workspace;
 
     const {
@@ -153,6 +154,23 @@ export function SearchModal() {
             }
         });
     }, [knownWorkspaceBranches, runWorkspaceMutation, runtimeBranch]);
+
+    const openSpecContext = React.useCallback(async (spec: typeof specs[number]) => {
+        const relatedFeature = features.find(
+            (feature) => feature.spec_id === spec.id || feature.spec_id === spec.file_name
+        );
+        if (relatedFeature) {
+            await navigate({ to: FEATURES_ROUTE });
+            await handleSelectFeature(relatedFeature);
+            return;
+        }
+
+        await navigate({ to: FEATURES_ROUTE });
+        await ship.handleSelectSpec(spec);
+        const message = `Spec "${spec.spec.metadata.title || spec.id}" is not linked to a feature yet.`;
+        setWorkspaceError(message);
+        throw new Error(message);
+    }, [features, handleSelectFeature, navigate, setWorkspaceError, ship]);
 
     const openSettingsSection = React.useCallback((section: 'providers' | 'mcp' | 'skills' | 'rules' | 'permissions') => {
         const routeBySection = {
@@ -318,14 +336,18 @@ export function SearchModal() {
                             <CommandItem
                                 key={`spec-${spec.file_name}`}
                                 onSelect={() =>
-                                    runCommand(() => {
-                                        void navigate({ to: FEATURES_ROUTE });
-                                        void ship.handleSelectSpec(spec);
-                                    })
+                                    runCommand(() => openSpecContext(spec))
                                 }
                             >
                                 <FileText className="mr-2 h-4 w-4" />
-                                <span>{spec.spec.metadata.title || spec.id}</span>
+                                <div className="flex min-w-0 flex-1 items-center gap-2">
+                                    <span className="truncate">
+                                        {spec.spec.metadata.title || spec.id}
+                                    </span>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                                        {spec.id}
+                                    </span>
+                                </div>
                             </CommandItem>
                         ))}
                     </CommandGroup>
