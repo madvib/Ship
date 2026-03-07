@@ -2,9 +2,9 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { useUpdateChecker } from '@/lib/hooks/useUpdateChecker';
 import Sidebar from '@/components/app/Sidebar';
-import { PageChromeProvider, PageChromeContextValue } from '@/components/app/PageFrame';
-import AgentModeControl from '@/features/agents/AgentModeControl';
-import ProjectOnboarding from '@/features/planning/ProjectOnboarding';
+import { PageChromeProvider, PageChromeContextValue } from '@ship/ui';
+import AgentModeControl from '@/features/agents/AgentModeControl.tsx';
+import ProjectOnboarding from '@/features/planning/common/ProjectOnboarding';
 import { SearchModal } from '@/components/app/SearchModal';
 import { Button } from '@ship/ui';
 import { useWorkspace } from '@/lib/hooks/workspace/WorkspaceContext';
@@ -144,7 +144,7 @@ export default function App() {
         aiProvider={workspace.aiProvider}
         aiModel={workspace.aiModel}
         switchingMode={workspace.switchingMode}
-        onSetMode={(modeId) => {
+        onSetMode={(modeId: string | null) => {
           void workspace.handleSetActiveMode(modeId);
         }}
         onOpenAgents={() => {
