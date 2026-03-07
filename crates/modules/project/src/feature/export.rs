@@ -34,6 +34,7 @@ impl Feature {
                     created: now.clone(),
                     updated: now,
                     release_id: None,
+                    active_target_id: None,
                     spec_id: None,
                     branch: None,
                     agent: None,

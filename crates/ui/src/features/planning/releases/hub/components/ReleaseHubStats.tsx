@@ -9,8 +9,8 @@ interface ReleaseHubStatsProps {
   activeBlockers: number;
   shippedCount: number;
   totalReleases: number;
-  linkedFeatureCount: number;
-  linkedReleaseCount: number;
+  activeTargetFeatureCount: number;
+  activeTargetReleaseCount: number;
   avgProgress: number;
 }
 
@@ -53,8 +53,8 @@ export default function ReleaseHubStats({
   activeBlockers,
   shippedCount,
   totalReleases,
-  linkedFeatureCount,
-  linkedReleaseCount,
+  activeTargetFeatureCount,
+  activeTargetReleaseCount,
   avgProgress,
 }: ReleaseHubStatsProps) {
   const activeReleaseLabel = activeRelease?.version ?? 'None';
@@ -88,9 +88,9 @@ export default function ReleaseHubStats({
         tone={shippedCount > 0 ? 'success' : 'default'}
       />
       <StatChip
-        label="Linked Features"
-        value={`${linkedFeatureCount}`}
-        tooltip="Total features with a release link."
+        label="Active Targets"
+        value={`${activeTargetFeatureCount}`}
+        tooltip="Total features currently targeted to a release."
         icon={<Rocket className="size-4 text-sky-500" />}
       />
       <StatChip
@@ -101,9 +101,9 @@ export default function ReleaseHubStats({
       />
       <StatChip
         label="Coverage"
-        value={`${linkedReleaseCount}/${Math.max(totalReleases, 1)}`}
-        hint="releases linked"
-        tooltip="Releases that have at least one linked feature."
+        value={`${activeTargetReleaseCount}/${Math.max(totalReleases, 1)}`}
+        hint="targets covered"
+        tooltip="Releases that have at least one active target."
         icon={<Link2 className="size-3.5 text-primary" />}
       />
     </div>

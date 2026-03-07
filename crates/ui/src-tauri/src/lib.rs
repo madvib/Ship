@@ -330,6 +330,8 @@ pub struct FeatureInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_target_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
@@ -347,6 +349,8 @@ pub struct FeatureDocument {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub release_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_target_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -595,6 +599,7 @@ fn map_feature_info(project_dir: &Path, entry: &ProjectFeatureEntry) -> FeatureI
         title: entry.feature.metadata.title.clone(),
         status: entry.status.to_string(),
         release_id: entry.feature.metadata.release_id.clone(),
+        active_target_id: entry.feature.metadata.active_target_id.clone(),
         spec_id: entry.feature.metadata.spec_id.clone(),
         branch: entry.feature.metadata.branch.clone(),
         description: entry.feature.metadata.description.clone(),
@@ -614,6 +619,7 @@ fn map_feature_document(project_dir: &Path, entry: &ProjectFeatureEntry) -> Feat
         title: info.title,
         status: info.status,
         release_id: info.release_id,
+        active_target_id: info.active_target_id,
         spec_id: info.spec_id,
         branch: info.branch,
         description: info.description,
