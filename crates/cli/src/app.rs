@@ -13,9 +13,9 @@ use runtime::{
 use ship_module_git::{install_hooks, on_post_checkout, write_root_gitignore};
 use ship_module_project::ops::adr::{create_adr, find_adr_path, list_adrs, move_adr};
 use ship_module_project::ops::feature::{
-    create_feature, ensure_feature_documentation, feature_done, feature_start, get_feature_by_id,
-    get_feature_documentation, list_features, sync_feature_docs_after_session, update_feature,
-    update_feature_documentation,
+    create_feature, delete_feature, ensure_feature_documentation, feature_done, feature_start,
+    get_feature_by_id, get_feature_documentation, list_features, sync_feature_docs_after_session,
+    update_feature, update_feature_documentation,
 };
 use ship_module_project::ops::issue::{
     create_issue, get_issue_by_id, list_issues, move_issue_with_from,
@@ -555,6 +555,10 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 FeatureCommands::Done { id } => {
                     feature_done(&project_dir, &id)?;
                     println!("Feature marked as implemented: {}", id);
+                }
+                FeatureCommands::Delete { id } => {
+                    delete_feature(&project_dir, &id)?;
+                    println!("Feature deleted: {}", id);
                 }
                 FeatureCommands::Docs { action } => match action {
                     FeatureDocCommands::EnsureAll => {

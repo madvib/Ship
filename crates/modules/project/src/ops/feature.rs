@@ -141,6 +141,18 @@ pub fn feature_done(ship_dir: &Path, id: &str) -> OpsResult<FeatureEntry> {
     Ok(entry)
 }
 
+pub fn delete_feature(ship_dir: &Path, id: &str) -> OpsResult<()> {
+    // Resolve first so logs include canonical ID.
+    let existing = crate::feature::get_feature_by_id(ship_dir, id).map_err(OpsError::from)?;
+    crate::feature::delete_feature(ship_dir, id).map_err(OpsError::from)?;
+    append_project_log(
+        ship_dir,
+        "feature delete",
+        &format!("Deleted feature: {}", existing.id),
+    )?;
+    Ok(())
+}
+
 pub fn sync_feature_docs_after_session(
     ship_dir: &Path,
     feature_ids: &[String],

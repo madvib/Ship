@@ -29,6 +29,49 @@ fn feature_file_path(ship_dir: &Path, status: &FeatureStatus, title: &str) -> Pa
     }
 }
 
+fn find_feature_file_by_id(ship_dir: &Path, id: &str) -> Option<PathBuf> {
+    let features_dir = runtime::project::features_dir(ship_dir);
+    let mut scan_dirs = vec![features_dir.clone()];
+    for status in &["planned", "in-progress", "implemented", "deprecated"] {
+        scan_dirs.push(features_dir.join(status));
+    }
+
+    for dir in scan_dirs {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if file_name == "README.md" || file_name == "TEMPLATE.md" {
+                continue;
+            }
+            let content = match std::fs::read_to_string(&path) {
+                Ok(content) => content,
+                Err(_) => continue,
+            };
+            let legacy_marker = format!("id = \"{}\"", id);
+            let generated_marker = format!("ship:feature id={}", id);
+            if content.contains(&legacy_marker) || content.contains(&generated_marker) {
+                return Some(path);
+            }
+        }
+    }
+
+    None
+}
+
+fn load_feature_body_from_file(ship_dir: &Path, id: &str) -> Option<String> {
+    let path = find_feature_file_by_id(ship_dir, id)?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let feature = Feature::from_markdown(&content).ok()?;
+    Some(feature.body)
+}
+
 fn resolve_feature_id(ship_dir: &Path, reference: &str) -> Result<Option<String>> {
     let reference = reference.trim();
     if reference.is_empty() {
@@ -276,7 +319,14 @@ pub fn create_feature(
 
 pub fn get_feature_by_id(ship_dir: &Path, id: &str) -> Result<FeatureEntry> {
     let resolved_id = require_feature_id(ship_dir, id)?;
-    get_feature_db(ship_dir, &resolved_id)?.ok_or_else(|| anyhow!("Feature not found: {}", id))
+    let mut entry =
+        get_feature_db(ship_dir, &resolved_id)?.ok_or_else(|| anyhow!("Feature not found: {}", id))?;
+    if entry.feature.body.trim().is_empty()
+        && let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id)
+    {
+        entry.feature.body = body;
+    }
+    Ok(entry)
 }
 
 pub fn update_feature(ship_dir: &Path, id: &str, mut feature: Feature) -> Result<FeatureEntry> {
@@ -284,6 +334,12 @@ pub fn update_feature(ship_dir: &Path, id: &str, mut feature: Feature) -> Result
     let existing = get_feature_db(ship_dir, &resolved_id)?
         .ok_or_else(|| anyhow!("Feature not found: {}", id))?;
     feature.metadata.updated = Utc::now().to_rfc3339();
+    if feature.body.trim().is_empty() {
+        if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {
+            feature.body = body;
+        }
+    }
+    feature.extract_structured_data();
 
     upsert_feature_db(ship_dir, &feature, &existing.status)?;
     // Ensure updates replace the existing exported markdown file instead of
@@ -319,9 +375,16 @@ pub fn move_feature(ship_dir: &Path, id: &str, new_status: FeatureStatus) -> Res
     let existing = get_feature_db(ship_dir, &resolved_id)?
         .ok_or_else(|| anyhow!("Feature not found: {}", id))?;
 
-    upsert_feature_db(ship_dir, &existing.feature, &new_status)?;
+    let mut feature = existing.feature.clone();
+    if feature.body.trim().is_empty() {
+        if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {
+            feature.body = body;
+        }
+    }
+    feature.extract_structured_data();
+    upsert_feature_db(ship_dir, &feature, &new_status)?;
     remove_feature_files(ship_dir, &resolved_id, &existing.feature.metadata.title);
-    write_feature_file(ship_dir, &existing.feature, &new_status)?;
+    write_feature_file(ship_dir, &feature, &new_status)?;
 
     runtime::append_event(
         ship_dir,

@@ -36,6 +36,9 @@ export default function FeatureHubRow({
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-sm font-semibold">{feature.title}</p>
           <Badge variant="outline">{formatStatusLabel(feature.status)}</Badge>
+          {feature.docs_status && (
+            <Badge variant="outline">Docs: {feature.docs_status}</Badge>
+          )}
           {isBlocking && <Badge variant="secondary">Blocking</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">

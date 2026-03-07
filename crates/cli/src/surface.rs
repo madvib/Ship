@@ -567,6 +567,11 @@ pub enum FeatureCommands {
         /// Feature ID
         id: String,
     },
+    /// Delete a feature record (DB + exported markdown)
+    Delete {
+        /// Feature ID
+        id: String,
+    },
     /// Manage feature documentation (DB-canonical)
     Docs {
         #[command(subcommand)]

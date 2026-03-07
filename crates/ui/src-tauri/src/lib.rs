@@ -25,13 +25,13 @@ use runtime::{
 use serde::{Deserialize, Serialize};
 use ship_module_project::{
     create_adr, create_feature, create_issue, create_note, create_release, create_spec, delete_adr,
-    delete_issue, delete_spec, get_adr_by_id, get_feature_by_id, get_issue_by_id, get_note_by_id,
-    get_project_name, get_release_by_id, get_spec_by_id, init_project, list_adrs, list_features,
-    list_issues, list_notes, list_registered_projects, list_releases, list_specs, move_adr,
-    move_issue, read_template, register_project, rename_project, update_adr, update_feature,
-    update_issue, update_note_content, update_release, update_spec, AdrEntry, AdrStatus,
-    FeatureEntry as ProjectFeatureEntry, Issue, IssueEntry, IssueStatus, NoteScope,
-    ReleaseEntry as ProjectReleaseEntry, Spec, SpecEntry, ADR,
+    delete_issue, delete_spec, get_adr_by_id, get_feature_by_id, get_feature_documentation,
+    get_issue_by_id, get_note_by_id, get_project_name, get_release_by_id, get_spec_by_id,
+    init_project, list_adrs, list_features, list_issues, list_notes, list_registered_projects,
+    list_releases, list_specs, move_adr, move_issue, read_template, register_project,
+    rename_project, update_adr, update_issue, update_note_content, update_release, update_spec,
+    update_feature_content, AdrEntry, AdrStatus, FeatureEntry as ProjectFeatureEntry, Issue,
+    IssueEntry, IssueStatus, NoteScope, ReleaseEntry as ProjectReleaseEntry, Spec, SpecEntry, ADR,
 };
 use specta::Type;
 use std::collections::{HashMap, HashSet};
@@ -337,6 +337,8 @@ pub struct FeatureInfo {
     pub branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs_status: Option<String>,
     pub path: String,
     pub updated: String,
 }
@@ -360,6 +362,32 @@ pub struct FeatureDocument {
     pub path: String,
     pub updated: String,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs_revision: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs_updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub docs_content: Option<String>,
+    #[serde(default)]
+    pub todos: Vec<FeatureTodoItem>,
+    #[serde(default)]
+    pub acceptance_criteria: Vec<FeatureCriterionItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct FeatureTodoItem {
+    pub id: String,
+    pub text: String,
+    pub completed: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct FeatureCriterionItem {
+    pub id: String,
+    pub text: String,
+    pub met: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -499,7 +527,9 @@ fn find_markdown_file_by_id(root: &Path, id: &str) -> Option<PathBuf> {
     if !root.exists() {
         return None;
     }
-    let needle = format!("id = \"{}\"", id);
+    let legacy_needle = format!("id = \"{}\"", id);
+    let feature_needle = format!("ship:feature id={}", id);
+    let release_needle = format!("ship:release id={}", id);
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = fs::read_dir(&dir) else {
@@ -517,12 +547,39 @@ fn find_markdown_file_by_id(root: &Path, id: &str) -> Option<PathBuf> {
             let Ok(content) = fs::read_to_string(&path) else {
                 continue;
             };
-            if content.contains(&needle) {
+            if content.contains(&legacy_needle)
+                || content.contains(&feature_needle)
+                || content.contains(&release_needle)
+            {
                 return Some(path);
             }
         }
     }
     None
+}
+
+fn strip_generated_export_header(content: String) -> String {
+    let mut lines = content.lines();
+    if let Some(first) = lines.next() {
+        let trimmed = first.trim();
+        if trimmed.starts_with("<!-- ship:feature ") || trimmed.starts_with("<!-- ship:release ") {
+            return lines.collect::<Vec<_>>().join("\n").trim_start_matches('\n').to_string();
+        }
+    }
+    if let Some(stripped) = strip_legacy_toml_frontmatter(&content) {
+        return stripped;
+    }
+    content
+}
+
+fn strip_legacy_toml_frontmatter(content: &str) -> Option<String> {
+    if !content.starts_with("+++\n") {
+        return None;
+    }
+    let rest = &content[4..];
+    let end = rest.find("\n+++")?;
+    let body = rest[end + 4..].trim_start_matches('\n').to_string();
+    Some(body)
 }
 
 fn resolve_feature_markdown_path(
@@ -593,6 +650,9 @@ fn resolve_release_markdown_path(
 fn map_feature_info(project_dir: &Path, entry: &ProjectFeatureEntry) -> FeatureInfo {
     let path = resolve_feature_markdown_path(project_dir, entry)
         .unwrap_or_else(|| features_dir(project_dir).join(&entry.file_name));
+    let docs_status = get_feature_documentation(project_dir, &entry.id)
+        .ok()
+        .map(|doc| doc.status.to_string());
     FeatureInfo {
         id: entry.id.clone(),
         file_name: entry.file_name.clone(),
@@ -603,6 +663,7 @@ fn map_feature_info(project_dir: &Path, entry: &ProjectFeatureEntry) -> FeatureI
         spec_id: entry.feature.metadata.spec_id.clone(),
         branch: entry.feature.metadata.branch.clone(),
         description: entry.feature.metadata.description.clone(),
+        docs_status,
         path: path.to_string_lossy().to_string(),
         updated: entry.feature.metadata.updated.clone(),
     }
@@ -612,7 +673,9 @@ fn map_feature_document(project_dir: &Path, entry: &ProjectFeatureEntry) -> Feat
     let info = map_feature_info(project_dir, entry);
     let content = resolve_feature_markdown_path(project_dir, entry)
         .and_then(|path| fs::read_to_string(path).ok())
+        .map(strip_generated_export_header)
         .unwrap_or_else(|| entry.feature.body.clone());
+    let docs = get_feature_documentation(project_dir, &entry.id).ok();
     FeatureDocument {
         id: info.id,
         file_name: info.file_name,
@@ -626,6 +689,30 @@ fn map_feature_document(project_dir: &Path, entry: &ProjectFeatureEntry) -> Feat
         path: info.path,
         updated: info.updated,
         content,
+        docs_status: info.docs_status,
+        docs_revision: docs.as_ref().map(|doc| doc.revision),
+        docs_updated_at: docs.as_ref().map(|doc| doc.updated_at.clone()),
+        docs_content: docs.as_ref().map(|doc| doc.content.clone()),
+        todos: entry
+            .feature
+            .todos
+            .iter()
+            .map(|todo| FeatureTodoItem {
+                id: todo.id.clone(),
+                text: todo.text.clone(),
+                completed: todo.completed,
+            })
+            .collect(),
+        acceptance_criteria: entry
+            .feature
+            .criteria
+            .iter()
+            .map(|criterion| FeatureCriterionItem {
+                id: criterion.id.clone(),
+                text: criterion.text.clone(),
+                met: criterion.met,
+            })
+            .collect(),
     }
 }
 
@@ -646,6 +733,7 @@ fn map_release_document(project_dir: &Path, entry: &ProjectReleaseEntry) -> Rele
     let info = map_release_info(project_dir, entry);
     let content = resolve_release_markdown_path(project_dir, entry)
         .and_then(|path| fs::read_to_string(path).ok())
+        .map(strip_generated_export_header)
         .unwrap_or_else(|| entry.release.body.clone());
     ReleaseDocument {
         id: info.id,
@@ -1633,14 +1721,7 @@ fn update_feature_cmd(
 ) -> Result<FeatureDocument, String> {
     let project_dir = get_active_dir(&state)?;
     let id = file_name.trim_end_matches(".md");
-    // Get existing feature to update its content
-    let feature_entry = get_feature_by_id(&project_dir, id).map_err(|e| e.to_string())?;
-    let _entry =
-        update_feature(&project_dir, id, feature_entry.feature).map_err(|e| e.to_string())?;
-    let refreshed = get_feature_by_id(&project_dir, id).map_err(|e| e.to_string())?;
-    let path = resolve_feature_markdown_path(&project_dir, &refreshed)
-        .unwrap_or_else(|| features_dir(&project_dir).join(&file_name));
-    fs::write(&path, &content).map_err(|e| e.to_string())?;
+    let _ = update_feature_content(&project_dir, id, &content).map_err(|e| e.to_string())?;
     log_action(
         &project_dir,
         "feature update",
