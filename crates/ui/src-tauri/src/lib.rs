@@ -1,47 +1,52 @@
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use runtime::config::{
-    AiConfig, McpServerConfig, ModeConfig, ProjectConfig, ProjectDiscovery, add_mcp_server,
-    add_mode, generate_gitignore, get_active_mode, get_config, get_effective_config,
-    list_mcp_servers, remove_mcp_server, remove_mode, save_config, set_active_mode,
+    add_mcp_server, add_mode, generate_gitignore, get_active_mode, get_config,
+    get_effective_config, list_mcp_servers, remove_mcp_server, remove_mode, save_config,
+    set_active_mode, AiConfig, McpServerConfig, ModeConfig, ProjectConfig, ProjectDiscovery,
 };
 use runtime::project::{
-    SHIP_DIR_NAME, adrs_dir, features_dir, get_active_project_global, get_project_dir, issues_dir,
-    releases_dir, resolve_project_ship_dir, set_active_project_global, specs_dir,
+    adrs_dir, features_dir, get_active_project_global, get_project_dir, issues_dir, notes_dir,
+    releases_dir, resolve_project_ship_dir, set_active_project_global, specs_dir, SHIP_DIR_NAME,
 };
 use runtime::{
-    AgentConfig, CatalogEntry, CatalogKind, CreateWorkspaceRequest, EndWorkspaceSessionRequest,
-    EventRecord, LogEntry, ModelInfo, ProviderInfo, Skill, Workspace, WorkspaceProviderMatrix,
-    WorkspaceRepairReport, WorkspaceSession, WorkspaceStatus, WorkspaceType, activate_workspace,
-    autodetect_providers, create_skill, create_user_skill, create_workspace, delete_skill,
-    delete_user_skill, delete_workspace, end_workspace_session, get_active_workspace_session,
-    get_effective_skill, get_skill, get_user_skill, get_workspace, get_workspace_provider_matrix,
-    ingest_external_events, list_catalog, list_catalog_by_kind, list_effective_skills,
-    list_events_since, list_models, list_providers, list_skills, list_user_skills,
-    list_workspace_sessions, list_workspaces, log_action, read_log_entries, repair_workspace,
-    resolve_agent_config, search_catalog, set_workspace_active_mode, start_workspace_session,
-    sync_workspace, transition_workspace_status, update_skill, update_user_skill,
+    activate_workspace, autodetect_providers, create_skill, create_user_skill, create_workspace,
+    delete_skill, delete_user_skill, delete_workspace, end_workspace_session,
+    get_active_workspace_session, get_effective_skill, get_skill, get_user_skill, get_workspace,
+    get_workspace_provider_matrix, ingest_external_events, list_catalog, list_catalog_by_kind,
+    list_effective_skills, list_events_since, list_models, list_providers, list_skills,
+    list_user_skills, list_workspace_sessions, list_workspaces, log_action, read_log_entries,
+    repair_workspace, resolve_agent_config, search_catalog, set_workspace_active_mode,
+    start_workspace_session, sync_workspace, transition_workspace_status, update_skill,
+    update_user_skill, AgentConfig, CatalogEntry, CatalogKind, CreateWorkspaceRequest,
+    EndWorkspaceSessionRequest, EventRecord, LogEntry, ModelInfo, ProviderInfo, Skill, Workspace,
+    WorkspaceProviderMatrix, WorkspaceRepairReport, WorkspaceSession, WorkspaceStatus,
+    WorkspaceType,
 };
 use serde::{Deserialize, Serialize};
 use ship_module_project::{
-    ADR, AdrEntry, AdrStatus, FeatureEntry as ProjectFeatureEntry, Issue, IssueEntry, IssueStatus,
-    NoteScope, ReleaseEntry as ProjectReleaseEntry, Spec, SpecEntry, create_adr, create_feature,
-    create_issue, create_note, create_release, create_spec, delete_adr, delete_issue, delete_spec,
-    get_adr_by_id, get_feature_by_id, get_issue_by_id, get_note_by_id, get_project_name,
-    get_release_by_id, get_spec_by_id, init_project, list_adrs, list_features, list_issues,
-    list_notes, list_registered_projects, list_releases, list_specs, move_adr, move_issue,
-    read_template, register_project, rename_project, update_adr, update_feature, update_issue,
-    update_note_content, update_release, update_spec,
+    create_adr, create_feature, create_issue, create_note, create_release, create_spec, delete_adr,
+    delete_issue, delete_spec, get_adr_by_id, get_feature_by_id, get_issue_by_id, get_note_by_id,
+    get_project_name, get_release_by_id, get_spec_by_id, init_project, list_adrs, list_features,
+    list_issues, list_notes, list_registered_projects, list_releases, list_specs, move_adr,
+    move_issue, read_template, register_project, rename_project, update_adr, update_feature,
+    update_issue, update_note_content, update_release, update_spec, AdrEntry, AdrStatus,
+    FeatureEntry as ProjectFeatureEntry, Issue, IssueEntry, IssueStatus, NoteScope,
+    ReleaseEntry as ProjectReleaseEntry, Spec, SpecEntry, ADR,
 };
 use specta::Type;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
+use notify::{
+    Config as NotifyConfig, Event as NotifyEvent, EventKind as NotifyEventKind,
+    RecommendedWatcher, RecursiveMode, Watcher,
+};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 use tauri_specta::Event;
@@ -77,7 +82,55 @@ pub enum ShipEvent {
 
 struct ProjectPoller {
     stop_tx: mpsc::Sender<()>,
-    handle: thread::JoinHandle<()>,
+    handle: thread::JoinHandle<Result<(), String>>,
+}
+
+#[derive(Default)]
+struct RuntimePerfCounters {
+    terminal_start_calls: AtomicU64,
+    terminal_start_errors: AtomicU64,
+    terminal_start_last_micros: AtomicU64,
+    terminal_read_calls: AtomicU64,
+    terminal_read_bytes: AtomicU64,
+    terminal_read_errors: AtomicU64,
+    terminal_last_read_micros: AtomicU64,
+    terminal_write_calls: AtomicU64,
+    terminal_write_errors: AtomicU64,
+    terminal_write_last_micros: AtomicU64,
+    terminal_resize_calls: AtomicU64,
+    terminal_resize_errors: AtomicU64,
+    terminal_resize_last_micros: AtomicU64,
+    terminal_stop_calls: AtomicU64,
+    terminal_stop_errors: AtomicU64,
+    terminal_stop_last_micros: AtomicU64,
+    watcher_fs_events: AtomicU64,
+    watcher_flushes: AtomicU64,
+    watcher_ingest_runs: AtomicU64,
+    watcher_last_ingest_micros: AtomicU64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RuntimePerfSnapshot {
+    pub terminal_start_calls: u64,
+    pub terminal_start_errors: u64,
+    pub terminal_start_last_micros: u64,
+    pub terminal_read_calls: u64,
+    pub terminal_read_bytes: u64,
+    pub terminal_read_errors: u64,
+    pub terminal_last_read_micros: u64,
+    pub terminal_write_calls: u64,
+    pub terminal_write_errors: u64,
+    pub terminal_write_last_micros: u64,
+    pub terminal_resize_calls: u64,
+    pub terminal_resize_errors: u64,
+    pub terminal_resize_last_micros: u64,
+    pub terminal_stop_calls: u64,
+    pub terminal_stop_errors: u64,
+    pub terminal_stop_last_micros: u64,
+    pub watcher_fs_events: u64,
+    pub watcher_flushes: u64,
+    pub watcher_ingest_runs: u64,
+    pub watcher_last_ingest_micros: u64,
 }
 
 struct PtySession {
@@ -215,6 +268,7 @@ pub struct AppState {
     active_project: Mutex<Option<PathBuf>>,
     project_watcher: Mutex<Option<ProjectPoller>>,
     terminal_sessions: Mutex<HashMap<String, Arc<PtySession>>>,
+    perf: Arc<RuntimePerfCounters>,
 }
 
 // ─── Project Info ─────────────────────────────────────────────────────────────
@@ -429,42 +483,12 @@ fn project_display_name(ship_path: &Path) -> String {
     get_project_name(ship_path)
 }
 
-fn timestamp_nanos(time: SystemTime) -> u128 {
-    time.duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
-}
-
-fn file_signature(path: &Path) -> Option<u128> {
-    fs::metadata(path)
-        .ok()
-        .and_then(|meta| meta.modified().ok())
-        .map(timestamp_nanos)
-}
-
-fn issues_signature(dir: &Path) -> (u64, u128) {
-    let mut count = 0_u64;
-    let mut latest = 0_u128;
-
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let (nested_count, nested_latest) = issues_signature(&path);
-                count += nested_count;
-                latest = latest.max(nested_latest);
-                continue;
-            }
-            if path.extension().map(|ext| ext == "md").unwrap_or(false) {
-                count += 1;
-                if let Some(sig) = file_signature(&path) {
-                    latest = latest.max(sig);
-                }
-            }
-        }
+fn u128_to_u64_saturating(value: u128) -> u64 {
+    if value > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        value as u64
     }
-
-    (count, latest)
 }
 
 fn find_markdown_file_by_id(root: &Path, id: &str) -> Option<PathBuf> {
@@ -1060,100 +1084,201 @@ fn start_project_watcher(
 
     let app_handle = app.clone();
     let ship_root = ship_dir.clone();
+    let perf = Arc::clone(&state.perf);
     let (stop_tx, stop_rx) = mpsc::channel::<()>();
 
-    let poller = thread::spawn(move || {
+    let poller = thread::spawn(move || -> Result<(), String> {
+        #[derive(Default)]
+        struct PendingWatchChanges {
+            issues: bool,
+            specs: bool,
+            adrs: bool,
+            features: bool,
+            releases: bool,
+            notes: bool,
+            config: bool,
+            tracked_content: bool,
+            events_db: bool,
+        }
+
+        impl PendingWatchChanges {
+            fn any(&self) -> bool {
+                self.issues
+                    || self.specs
+                    || self.adrs
+                    || self.features
+                    || self.releases
+                    || self.notes
+                    || self.config
+                    || self.events_db
+            }
+
+            fn clear(&mut self) {
+                *self = Self::default();
+            }
+        }
+
         let issues_dir = issues_dir(&ship_root);
         let specs_dir = specs_dir(&ship_root);
         let adrs_dir = adrs_dir(&ship_root);
         let features_dir = features_dir(&ship_root);
         let releases_dir = releases_dir(&ship_root);
+        let notes_dir = notes_dir(&ship_root);
         let events_db = runtime::state_db::project_db_path(&ship_root).ok();
         let config_file = ship_root.join(runtime::config::PRIMARY_CONFIG_FILE);
+        let (event_tx, event_rx) = mpsc::channel::<notify::Result<NotifyEvent>>();
 
-        let mut last_issues = issues_signature(&issues_dir);
-        let mut last_specs = issues_signature(&specs_dir);
-        let mut last_adrs = issues_signature(&adrs_dir);
-        let mut last_features = issues_signature(&features_dir);
-        let mut last_releases = issues_signature(&releases_dir);
-        let mut last_events = events_db.as_ref().and_then(|path| file_signature(path));
-        let mut last_config = file_signature(&config_file);
+        let mut watcher = RecommendedWatcher::new(
+            move |result| {
+                let _ = event_tx.send(result);
+            },
+            NotifyConfig::default(),
+        )
+        .map_err(|e| e.to_string())?;
 
-        loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
+        watcher
+            .watch(&ship_root, RecursiveMode::Recursive)
+            .map_err(|e| e.to_string())?;
+
+        if let Some(events_db) = events_db.as_ref() {
+            if let Some(parent) = events_db.parent() {
+                let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
             }
-            thread::sleep(Duration::from_millis(250));
+        }
 
-            let mut tracked_files_changed = false;
+        let mut pending = PendingWatchChanges::default();
+        let mut last_flush = Instant::now();
 
-            let next_issues = issues_signature(&issues_dir);
-            if next_issues != last_issues {
+        let flush = |pending: &mut PendingWatchChanges| {
+            if pending.issues {
                 let _ = ShipEvent::IssuesChanged.emit(&app_handle);
-                last_issues = next_issues;
-                tracked_files_changed = true;
             }
-
-            let next_specs = issues_signature(&specs_dir);
-            if next_specs != last_specs {
+            if pending.specs {
                 let _ = ShipEvent::SpecsChanged.emit(&app_handle);
-                last_specs = next_specs;
-                tracked_files_changed = true;
             }
-
-            let next_adrs = issues_signature(&adrs_dir);
-            if next_adrs != last_adrs {
+            if pending.adrs {
                 let _ = ShipEvent::AdrsChanged.emit(&app_handle);
-                last_adrs = next_adrs;
-                tracked_files_changed = true;
             }
-
-            let next_features = issues_signature(&features_dir);
-            if next_features != last_features {
-                last_features = next_features;
+            if pending.features {
                 let _ = ShipEvent::FeaturesChanged.emit(&app_handle);
-                tracked_files_changed = true;
             }
-
-            let next_releases = issues_signature(&releases_dir);
-            if next_releases != last_releases {
-                last_releases = next_releases;
+            if pending.releases {
                 let _ = ShipEvent::ReleasesChanged.emit(&app_handle);
-                tracked_files_changed = true;
             }
-
-            let next_config = file_signature(&config_file);
-            if next_config != last_config {
+            if pending.notes {
+                let _ = ShipEvent::NotesChanged.emit(&app_handle);
+            }
+            if pending.config {
                 let _ = ShipEvent::ConfigChanged.emit(&app_handle);
-                last_config = next_config;
-                tracked_files_changed = true;
             }
 
-            if tracked_files_changed {
+            if pending.tracked_content {
+                perf.watcher_ingest_runs.fetch_add(1, Ordering::Relaxed);
+                let ingest_started = Instant::now();
                 if let Ok(emitted) = ingest_external_events(&ship_root) {
                     if !emitted.is_empty() {
                         let _ = ShipEvent::EventsChanged.emit(&app_handle);
                     }
                 }
+                perf.watcher_last_ingest_micros.store(
+                    u128_to_u64_saturating(ingest_started.elapsed().as_micros()),
+                    Ordering::Relaxed,
+                );
             }
 
-            if let Some(events_db) = events_db.as_ref() {
-                let next_events = file_signature(events_db);
-                if next_events != last_events {
-                    let _ = ShipEvent::IssuesChanged.emit(&app_handle);
-                    let _ = ShipEvent::SpecsChanged.emit(&app_handle);
-                    let _ = ShipEvent::EventsChanged.emit(&app_handle);
-                    let _ = ShipEvent::LogChanged.emit(&app_handle);
-                    last_events = next_events;
+            if pending.events_db {
+                let _ = ShipEvent::EventsChanged.emit(&app_handle);
+                let _ = ShipEvent::LogChanged.emit(&app_handle);
+            }
+
+            perf.watcher_flushes.fetch_add(1, Ordering::Relaxed);
+            pending.clear();
+        };
+
+        loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+
+            match event_rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(Ok(event)) => {
+                    perf.watcher_fs_events.fetch_add(1, Ordering::Relaxed);
+                    if matches!(event.kind, NotifyEventKind::Access(_)) {
+                        continue;
+                    }
+                    for path in event.paths {
+                        if path.starts_with(&issues_dir) {
+                            pending.issues = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path.starts_with(&specs_dir) {
+                            pending.specs = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path.starts_with(&adrs_dir) {
+                            pending.adrs = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path.starts_with(&features_dir) {
+                            pending.features = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path.starts_with(&releases_dir) {
+                            pending.releases = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path.starts_with(&notes_dir) {
+                            pending.notes = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if path == config_file {
+                            pending.config = true;
+                            pending.tracked_content = true;
+                            continue;
+                        }
+                        if let Some(events_db) = events_db.as_ref() {
+                            if path == *events_db {
+                                pending.events_db = true;
+                            }
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    eprintln!("Project watcher error: {}", error);
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
                 }
             }
+
+            if pending.any() && last_flush.elapsed() >= Duration::from_millis(180) {
+                flush(&mut pending);
+                last_flush = Instant::now();
+            }
         }
+
+        if pending.any() {
+            flush(&mut pending);
+        }
+
+        Ok(())
     });
 
     let mut guard = state.project_watcher.lock().unwrap();
     if let Some(old) = guard.take() {
         let _ = old.stop_tx.send(());
-        let _ = old.handle.join();
+        match old.handle.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => eprintln!("Project watcher exited with error: {}", error),
+            Err(_) => eprintln!("Project watcher thread panicked"),
+        }
     }
     *guard = Some(ProjectPoller {
         stop_tx,
@@ -2304,7 +2429,7 @@ async fn end_workspace_session_cmd(
 ) -> Result<WorkspaceSession, String> {
     let project_dir = get_active_dir(&state)?;
     tauri::async_runtime::spawn_blocking(move || {
-        end_workspace_session(
+        let session = end_workspace_session(
             &project_dir,
             &branch,
             EndWorkspaceSessionRequest {
@@ -2313,7 +2438,17 @@ async fn end_workspace_session_cmd(
                 updated_spec_ids: updated_spec_ids.unwrap_or_default(),
             },
         )
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+        if !session.updated_feature_ids.is_empty() {
+            let _ = ship_module_project::ops::feature::sync_feature_docs_after_session(
+                &project_dir,
+                &session.updated_feature_ids,
+                session.summary.as_deref(),
+            );
+        }
+
+        Ok(session)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2426,137 +2561,155 @@ async fn start_workspace_terminal_cmd(
     rows: Option<u16>,
     state: State<'_, AppState>,
 ) -> Result<WorkspaceTerminalSessionInfo, String> {
-    let project_dir = get_active_dir(&state)?;
-    let resolved_cols = cols.unwrap_or(120).clamp(40, 400);
-    let resolved_rows = rows.unwrap_or(32).clamp(12, 240);
-    let normalized_provider = normalize_terminal_provider(provider);
-    let branch_for_spawn = branch.clone();
-    let provider_for_spawn = normalized_provider.clone();
-    let project_dir_for_spawn = project_dir.clone();
+    state.perf.terminal_start_calls.fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
+    let result: Result<WorkspaceTerminalSessionInfo, String> = async {
+        let project_dir = get_active_dir(&state)?;
+        let resolved_cols = cols.unwrap_or(120).clamp(40, 400);
+        let resolved_rows = rows.unwrap_or(32).clamp(12, 240);
+        let normalized_provider = normalize_terminal_provider(provider);
+        let branch_for_spawn = branch.clone();
+        let provider_for_spawn = normalized_provider.clone();
+        let project_dir_for_spawn = project_dir.clone();
 
-    let (session, activation_error) = tauri::async_runtime::spawn_blocking(
-        move || -> Result<(Arc<PtySession>, Option<String>), String> {
-            let workspace = get_workspace(&project_dir_for_spawn, &branch_for_spawn)
-                .map_err(|e| e.to_string())?;
-            let target_dir =
-                resolve_workspace_target_dir(&project_dir_for_spawn, workspace.as_ref());
+        let (session, activation_error) = tauri::async_runtime::spawn_blocking(
+            move || -> Result<(Arc<PtySession>, Option<String>), String> {
+                let workspace = get_workspace(&project_dir_for_spawn, &branch_for_spawn)
+                    .map_err(|e| e.to_string())?;
+                let target_dir =
+                    resolve_workspace_target_dir(&project_dir_for_spawn, workspace.as_ref());
 
-            let activation_error = activate_workspace(&project_dir_for_spawn, &branch_for_spawn)
-                .err()
-                .map(|e| e.to_string());
+                let activation_error = activate_workspace(&project_dir_for_spawn, &branch_for_spawn)
+                    .err()
+                    .map(|e| e.to_string());
 
-            let pty_system = native_pty_system();
-            let pty_pair = pty_system
-                .openpty(PtySize {
-                    rows: resolved_rows,
-                    cols: resolved_cols,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                })
-                .map_err(|e| e.to_string())?;
+                let pty_system = native_pty_system();
+                let pty_pair = pty_system
+                    .openpty(PtySize {
+                        rows: resolved_rows,
+                        cols: resolved_cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    })
+                    .map_err(|e| e.to_string())?;
 
-            let command = resolve_terminal_command(&provider_for_spawn);
-            let mut cmd = CommandBuilder::new(command.as_str());
-            cmd.cwd(&target_dir);
-            let child = pty_pair.slave.spawn_command(cmd).map_err(|e| {
-                friendly_terminal_spawn_error(&provider_for_spawn, command.as_str(), &e.to_string())
-            })?;
-            let mut reader = pty_pair
-                .master
-                .try_clone_reader()
-                .map_err(|e| e.to_string())?;
-            let writer = pty_pair.master.take_writer().map_err(|e| e.to_string())?;
-            let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
-            let session = Arc::new(PtySession {
-                id: runtime::gen_nanoid(),
-                branch: branch_for_spawn,
-                provider: provider_for_spawn,
-                cwd: target_dir.to_string_lossy().to_string(),
-                cols: Mutex::new(resolved_cols),
-                rows: Mutex::new(resolved_rows),
-                master: Mutex::new(pty_pair.master),
-                writer: Mutex::new(writer),
-                child: Mutex::new(child),
-                output_rx: Mutex::new(output_rx),
-                reader_handle: Mutex::new(None),
-                closed: AtomicBool::new(false),
-                exit_code: Mutex::new(None),
-            });
+                let command = resolve_terminal_command(&provider_for_spawn);
+                let mut cmd = CommandBuilder::new(command.as_str());
+                cmd.cwd(&target_dir);
+                let child = pty_pair.slave.spawn_command(cmd).map_err(|e| {
+                    friendly_terminal_spawn_error(
+                        &provider_for_spawn,
+                        command.as_str(),
+                        &e.to_string(),
+                    )
+                })?;
+                let mut reader = pty_pair
+                    .master
+                    .try_clone_reader()
+                    .map_err(|e| e.to_string())?;
+                let writer = pty_pair.master.take_writer().map_err(|e| e.to_string())?;
+                let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+                let session = Arc::new(PtySession {
+                    id: runtime::gen_nanoid(),
+                    branch: branch_for_spawn,
+                    provider: provider_for_spawn,
+                    cwd: target_dir.to_string_lossy().to_string(),
+                    cols: Mutex::new(resolved_cols),
+                    rows: Mutex::new(resolved_rows),
+                    master: Mutex::new(pty_pair.master),
+                    writer: Mutex::new(writer),
+                    child: Mutex::new(child),
+                    output_rx: Mutex::new(output_rx),
+                    reader_handle: Mutex::new(None),
+                    closed: AtomicBool::new(false),
+                    exit_code: Mutex::new(None),
+                });
 
-            let session_for_reader = Arc::clone(&session);
-            let reader_handle = thread::spawn(move || {
-                let mut buffer = [0u8; 8192];
-                loop {
-                    match reader.read(&mut buffer) {
-                        Ok(0) => break,
-                        Ok(read) => {
-                            if output_tx.send(buffer[..read].to_vec()).is_err() {
+                let session_for_reader = Arc::clone(&session);
+                let reader_handle = thread::spawn(move || {
+                    let mut buffer = [0u8; 8192];
+                    loop {
+                        match reader.read(&mut buffer) {
+                            Ok(0) => break,
+                            Ok(read) => {
+                                if output_tx.send(buffer[..read].to_vec()).is_err() {
+                                    break;
+                                }
+                            }
+                            Err(error) => {
+                                if error.kind() == std::io::ErrorKind::Interrupted {
+                                    continue;
+                                }
                                 break;
                             }
                         }
-                        Err(error) => {
-                            if error.kind() == std::io::ErrorKind::Interrupted {
-                                continue;
-                            }
-                            break;
-                        }
                     }
+                    if session_for_reader.refresh_exit_state().is_err()
+                        && !session_for_reader.is_closed()
+                    {
+                        session_for_reader.mark_closed(None);
+                    }
+                });
+                if let Ok(mut handle) = session.reader_handle.lock() {
+                    *handle = Some(reader_handle);
                 }
-                if session_for_reader.refresh_exit_state().is_err()
-                    && !session_for_reader.is_closed()
-                {
-                    session_for_reader.mark_closed(None);
+
+                Ok((session, activation_error))
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())??;
+
+        let info = WorkspaceTerminalSessionInfo {
+            session_id: session.id.clone(),
+            branch: session.branch.clone(),
+            provider: session.provider.clone(),
+            cwd: session.cwd.clone(),
+            cols: *session
+                .cols
+                .lock()
+                .map_err(|_| "Terminal session size lock poisoned".to_string())?,
+            rows: *session
+                .rows
+                .lock()
+                .map_err(|_| "Terminal session size lock poisoned".to_string())?,
+            activation_error,
+        };
+
+        let replaced_sessions = {
+            let mut sessions = state
+                .terminal_sessions
+                .lock()
+                .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+            let replaced_ids = sessions
+                .iter()
+                .filter(|(_, existing)| existing.branch == info.branch)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            let mut removed = Vec::new();
+            for id in replaced_ids {
+                if let Some(existing) = sessions.remove(&id) {
+                    removed.push(existing);
                 }
-            });
-            if let Ok(mut handle) = session.reader_handle.lock() {
-                *handle = Some(reader_handle);
             }
-
-            Ok((session, activation_error))
-        },
-    )
-    .await
-    .map_err(|e| e.to_string())??;
-
-    let info = WorkspaceTerminalSessionInfo {
-        session_id: session.id.clone(),
-        branch: session.branch.clone(),
-        provider: session.provider.clone(),
-        cwd: session.cwd.clone(),
-        cols: *session
-            .cols
-            .lock()
-            .map_err(|_| "Terminal session size lock poisoned".to_string())?,
-        rows: *session
-            .rows
-            .lock()
-            .map_err(|_| "Terminal session size lock poisoned".to_string())?,
-        activation_error,
-    };
-
-    let replaced_sessions = {
-        let mut sessions = state
-            .terminal_sessions
-            .lock()
-            .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
-        let replaced_ids = sessions
-            .iter()
-            .filter(|(_, existing)| existing.branch == info.branch)
-            .map(|(id, _)| id.clone())
-            .collect::<Vec<_>>();
-        let mut removed = Vec::new();
-        for id in replaced_ids {
-            if let Some(existing) = sessions.remove(&id) {
-                removed.push(existing);
-            }
+            sessions.insert(session.id.clone(), session);
+            removed
+        };
+        for existing in replaced_sessions {
+            existing.stop();
         }
-        sessions.insert(session.id.clone(), session);
-        removed
-    };
-    for existing in replaced_sessions {
-        existing.stop();
+        Ok(info)
     }
-    Ok(info)
+    .await;
+
+    state.perf.terminal_start_last_micros.store(
+        u128_to_u64_saturating(started.elapsed().as_micros()),
+        Ordering::Relaxed,
+    );
+    if result.is_err() {
+        state.perf.terminal_start_errors.fetch_add(1, Ordering::Relaxed);
+    }
+    result
 }
 
 #[tauri::command]
@@ -2566,11 +2719,22 @@ fn read_workspace_terminal_cmd(
     max_bytes: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    state.perf.terminal_read_calls.fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
     let session = load_terminal_session(&state, &session_id)?;
     let _ = session.refresh_exit_state();
     let output = session.drain_output(max_bytes.unwrap_or(65_536).clamp(1, 262_144))?;
+    state.perf.terminal_read_bytes.fetch_add(
+        u128_to_u64_saturating(output.len() as u128),
+        Ordering::Relaxed,
+    );
+    state.perf.terminal_last_read_micros.store(
+        u128_to_u64_saturating(started.elapsed().as_micros()),
+        Ordering::Relaxed,
+    );
 
     if session.is_closed() && output.is_empty() {
+        state.perf.terminal_read_errors.fetch_add(1, Ordering::Relaxed);
         let removed = {
             let mut sessions = state
                 .terminal_sessions
@@ -2600,18 +2764,30 @@ fn write_workspace_terminal_cmd(
     input: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let session = load_terminal_session(&state, &session_id)?;
-    let _ = session.refresh_exit_state();
-    if session.is_closed() {
-        return Err(match session.exit_code() {
-            Some(code) => format!(
-                "Terminal session '{}' closed (exit code {})",
-                session_id, code
-            ),
-            None => format!("Terminal session '{}' closed", session_id),
-        });
+    state.perf.terminal_write_calls.fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
+    let result = (|| -> Result<(), String> {
+        let session = load_terminal_session(&state, &session_id)?;
+        let _ = session.refresh_exit_state();
+        if session.is_closed() {
+            return Err(match session.exit_code() {
+                Some(code) => format!(
+                    "Terminal session '{}' closed (exit code {})",
+                    session_id, code
+                ),
+                None => format!("Terminal session '{}' closed", session_id),
+            });
+        }
+        session.write_input(&input)
+    })();
+    state.perf.terminal_write_last_micros.store(
+        u128_to_u64_saturating(started.elapsed().as_micros()),
+        Ordering::Relaxed,
+    );
+    if result.is_err() {
+        state.perf.terminal_write_errors.fetch_add(1, Ordering::Relaxed);
     }
-    session.write_input(&input)
+    result
 }
 
 #[tauri::command]
@@ -2622,18 +2798,36 @@ fn resize_workspace_terminal_cmd(
     rows: u16,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let session = load_terminal_session(&state, &session_id)?;
-    let _ = session.refresh_exit_state();
-    if session.is_closed() {
-        return Err(match session.exit_code() {
-            Some(code) => format!(
-                "Terminal session '{}' closed (exit code {})",
-                session_id, code
-            ),
-            None => format!("Terminal session '{}' closed", session_id),
-        });
+    state
+        .perf
+        .terminal_resize_calls
+        .fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
+    let result = (|| -> Result<(), String> {
+        let session = load_terminal_session(&state, &session_id)?;
+        let _ = session.refresh_exit_state();
+        if session.is_closed() {
+            return Err(match session.exit_code() {
+                Some(code) => format!(
+                    "Terminal session '{}' closed (exit code {})",
+                    session_id, code
+                ),
+                None => format!("Terminal session '{}' closed", session_id),
+            });
+        }
+        session.resize(cols.clamp(40, 400), rows.clamp(12, 240))
+    })();
+    state.perf.terminal_resize_last_micros.store(
+        u128_to_u64_saturating(started.elapsed().as_micros()),
+        Ordering::Relaxed,
+    );
+    if result.is_err() {
+        state
+            .perf
+            .terminal_resize_errors
+            .fetch_add(1, Ordering::Relaxed);
     }
-    session.resize(cols.clamp(40, 400), rows.clamp(12, 240))
+    result
 }
 
 #[tauri::command]
@@ -2642,16 +2836,28 @@ fn stop_workspace_terminal_cmd(
     session_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let session = {
-        let mut sessions = state
-            .terminal_sessions
-            .lock()
-            .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
-        sessions.remove(&session_id)
+    state.perf.terminal_stop_calls.fetch_add(1, Ordering::Relaxed);
+    let started = Instant::now();
+    let result = (|| -> Result<(), String> {
+        let session = {
+            let mut sessions = state
+                .terminal_sessions
+                .lock()
+                .map_err(|_| "Terminal session registry lock poisoned".to_string())?;
+            sessions.remove(&session_id)
+        }
+        .ok_or_else(|| format!("Terminal session '{}' not found", session_id))?;
+        session.stop();
+        Ok(())
+    })();
+    state.perf.terminal_stop_last_micros.store(
+        u128_to_u64_saturating(started.elapsed().as_micros()),
+        Ordering::Relaxed,
+    );
+    if result.is_err() {
+        state.perf.terminal_stop_errors.fetch_add(1, Ordering::Relaxed);
     }
-    .ok_or_else(|| format!("Terminal session '{}' not found", session_id))?;
-    session.stop();
-    Ok(())
+    result
 }
 
 #[tauri::command]
@@ -2723,6 +2929,42 @@ fn ingest_events_cmd(state: State<AppState>) -> Result<usize, String> {
 fn get_log(state: State<AppState>) -> Result<Vec<LogEntry>, String> {
     let project_dir = get_active_dir(&state)?;
     read_log_entries(&project_dir).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+fn get_runtime_perf_cmd(state: State<AppState>) -> Result<RuntimePerfSnapshot, String> {
+    Ok(RuntimePerfSnapshot {
+        terminal_start_calls: state.perf.terminal_start_calls.load(Ordering::Relaxed),
+        terminal_start_errors: state.perf.terminal_start_errors.load(Ordering::Relaxed),
+        terminal_start_last_micros: state
+            .perf
+            .terminal_start_last_micros
+            .load(Ordering::Relaxed),
+        terminal_read_calls: state.perf.terminal_read_calls.load(Ordering::Relaxed),
+        terminal_read_bytes: state.perf.terminal_read_bytes.load(Ordering::Relaxed),
+        terminal_read_errors: state.perf.terminal_read_errors.load(Ordering::Relaxed),
+        terminal_last_read_micros: state.perf.terminal_last_read_micros.load(Ordering::Relaxed),
+        terminal_write_calls: state.perf.terminal_write_calls.load(Ordering::Relaxed),
+        terminal_write_errors: state.perf.terminal_write_errors.load(Ordering::Relaxed),
+        terminal_write_last_micros: state
+            .perf
+            .terminal_write_last_micros
+            .load(Ordering::Relaxed),
+        terminal_resize_calls: state.perf.terminal_resize_calls.load(Ordering::Relaxed),
+        terminal_resize_errors: state.perf.terminal_resize_errors.load(Ordering::Relaxed),
+        terminal_resize_last_micros: state
+            .perf
+            .terminal_resize_last_micros
+            .load(Ordering::Relaxed),
+        terminal_stop_calls: state.perf.terminal_stop_calls.load(Ordering::Relaxed),
+        terminal_stop_errors: state.perf.terminal_stop_errors.load(Ordering::Relaxed),
+        terminal_stop_last_micros: state.perf.terminal_stop_last_micros.load(Ordering::Relaxed),
+        watcher_fs_events: state.perf.watcher_fs_events.load(Ordering::Relaxed),
+        watcher_flushes: state.perf.watcher_flushes.load(Ordering::Relaxed),
+        watcher_ingest_runs: state.perf.watcher_ingest_runs.load(Ordering::Relaxed),
+        watcher_last_ingest_micros: state.perf.watcher_last_ingest_micros.load(Ordering::Relaxed),
+    })
 }
 
 #[tauri::command]
@@ -3143,6 +3385,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             list_events_cmd,
             ingest_events_cmd,
             get_log,
+            get_runtime_perf_cmd,
             // Settings
             get_app_settings,
             get_project_config,
