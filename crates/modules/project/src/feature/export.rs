@@ -5,9 +5,19 @@ use chrono::Utc;
 impl Feature {
     pub fn to_markdown(&self) -> Result<String> {
         let body = self.body.trim_start_matches('\n');
+        // Include title as H1 so the file can be re-imported (e.g. after git clone)
+        let body_section = if !self.metadata.title.is_empty() && !body.starts_with("# ") {
+            if body.is_empty() {
+                format!("# {}", self.metadata.title)
+            } else {
+                format!("# {}\n\n{}", self.metadata.title, body)
+            }
+        } else {
+            body.to_string()
+        };
         Ok(format!(
             "<!-- ship:feature id={} -->\n\n{}",
-            self.metadata.id, body
+            self.metadata.id, body_section
         ))
     }
 

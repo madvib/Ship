@@ -6,6 +6,7 @@ import {
   Settings2,
   Sparkles,
   Plus,
+  RotateCcw,
 } from 'lucide-react';
 import { ProjectDiscovery as Project, StatusConfig } from '@/bindings';
 import { DEFAULT_STATUSES } from '@/lib/workspace-ui';
@@ -22,6 +23,16 @@ import {
 import { Input } from '@ship/ui';
 import { Textarea } from '@ship/ui';
 import { PageFrame, PageHeader } from '@ship/ui';
+
+const STATUS_COLORS: Record<string, { dot: string; chip: string; active: string }> = {
+  gray:   { dot: 'bg-gray-400',   chip: 'border-gray-200 bg-gray-50 text-gray-600',         active: 'border-gray-400 bg-gray-100 text-gray-800' },
+  blue:   { dot: 'bg-blue-500',   chip: 'border-blue-200 bg-blue-50 text-blue-700',          active: 'border-blue-400 bg-blue-100 text-blue-900' },
+  yellow: { dot: 'bg-yellow-400', chip: 'border-yellow-200 bg-yellow-50 text-yellow-700',    active: 'border-yellow-400 bg-yellow-100 text-yellow-900' },
+  red:    { dot: 'bg-red-500',    chip: 'border-red-200 bg-red-50 text-red-700',             active: 'border-red-400 bg-red-100 text-red-900' },
+  green:  { dot: 'bg-green-500',  chip: 'border-green-200 bg-green-50 text-green-700',       active: 'border-green-400 bg-green-100 text-green-900' },
+  orange: { dot: 'bg-orange-400', chip: 'border-orange-200 bg-orange-50 text-orange-700',    active: 'border-orange-400 bg-orange-100 text-orange-900' },
+  purple: { dot: 'bg-purple-500', chip: 'border-purple-200 bg-purple-50 text-purple-700',    active: 'border-purple-400 bg-purple-100 text-purple-900' },
+};
 
 export interface CreateProjectInput {
   name: string;
@@ -60,7 +71,6 @@ export default function ProjectOnboarding({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [directory, setDirectory] = useState('');
-  const [useDefaults, setUseDefaults] = useState(true);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(
     DEFAULT_STATUSES.map((status: StatusConfig) => status.id)
   );
@@ -82,10 +92,15 @@ export default function ProjectOnboarding({
   const toggleStatus = (statusId: string) => {
     setSelectedStatuses((prev) => {
       if (prev.includes(statusId)) {
+        if (prev.length === 1) return prev; // keep at least one
         return prev.filter((id) => id !== statusId);
       }
       return [...prev, statusId];
     });
+  };
+
+  const resetStatuses = () => {
+    setSelectedStatuses(DEFAULT_STATUSES.map((s: StatusConfig) => s.id));
   };
 
   const pickDirectory = async () => {
@@ -110,23 +125,17 @@ export default function ProjectOnboarding({
       return;
     }
 
-    if (!useDefaults && selectedStatuses.length === 0) {
-      setFormError('Select at least one status or use defaults.');
-      return;
-    }
-
     try {
       await onCreateProject({
         name: cleanName,
         description: description.trim() || undefined,
         directory,
-        useDefaults,
+        useDefaults: false,
         selectedStatuses,
       });
       setName('');
       setDescription('');
       setDirectory('');
-      setUseDefaults(true);
       setSelectedStatuses(DEFAULT_STATUSES.map((status: StatusConfig) => status.id));
       setCreateDialogOpen(false);
     } catch (error) {
@@ -176,13 +185,14 @@ export default function ProjectOnboarding({
                 <AlertDialogHeader className="place-items-start text-left">
                   <AlertDialogTitle>Create New Project</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Choose a directory, then initialize `.ship` with defaults or custom statuses.
+                    Initialize a <code>.ship/</code> workspace in your project directory.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
 
-                <form onSubmit={submitCreateProject} className="space-y-4">
+                <form onSubmit={submitCreateProject} className="space-y-5">
+                  {/* Name + Directory */}
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <label className="text-sm font-medium">Project Name</label>
                       <Input
                         value={name}
@@ -192,62 +202,73 @@ export default function ProjectOnboarding({
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       <label className="text-sm font-medium">Directory</label>
                       <div className="flex gap-2">
-                        <Input value={directory} readOnly placeholder="Choose a folder" />
+                        <Input value={directory} readOnly placeholder="Choose a folder…" />
                         <Button type="button" variant="outline" onClick={pickDirectory} disabled={creatingProject}>
-                          Browse
+                          <FolderOpen className="size-4" />
                         </Button>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Description (optional)</label>
+                  {/* Description */}
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">
+                      Description <span className="text-muted-foreground font-normal">(optional)</span>
+                    </label>
                     <Textarea
                       value={description}
                       onChange={(event) => setDescription(event.target.value)}
                       placeholder="What is this project for?"
-                      className="min-h-20"
+                      className="min-h-[72px] resize-none"
                       disabled={creatingProject}
                     />
                   </div>
 
-                  <div className="space-y-2 rounded-md border p-3">
+                  {/* Workflow Statuses */}
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium">Project Settings</label>
-                      <label className="text-muted-foreground inline-flex items-center gap-2 text-xs">
-                        <input
-                          type="checkbox"
-                          checked={useDefaults}
-                          onChange={(event) => setUseDefaults(event.target.checked)}
-                          className="accent-primary"
-                          disabled={creatingProject}
-                        />
-                        Use defaults
-                      </label>
+                      <div>
+                        <p className="text-sm font-medium">Workflow Statuses</p>
+                        <p className="text-muted-foreground text-xs">
+                          Issue statuses used to track work across this project.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={resetStatuses}
+                        disabled={creatingProject}
+                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <RotateCcw className="size-3" />
+                        Reset
+                      </button>
                     </div>
 
-                    {!useDefaults && (
-                      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                        {DEFAULT_STATUSES.map((status) => (
-                          <label
+                    <div className="flex flex-wrap gap-2">
+                      {DEFAULT_STATUSES.map((status) => {
+                        const active = selectedStatuses.includes(status.id);
+                        const colors = STATUS_COLORS[status.color] ?? STATUS_COLORS['gray'];
+                        return (
+                          <button
                             key={status.id}
-                            className="text-muted-foreground inline-flex items-center gap-2 text-xs"
+                            type="button"
+                            onClick={() => toggleStatus(status.id)}
+                            disabled={creatingProject}
+                            className={[
+                              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all',
+                              'disabled:pointer-events-none disabled:opacity-50',
+                              active ? colors.active : `${colors.chip} opacity-50`,
+                            ].join(' ')}
                           >
-                            <input
-                              type="checkbox"
-                              checked={selectedStatuses.includes(status.id)}
-                              onChange={() => toggleStatus(status.id)}
-                              className="accent-primary"
-                              disabled={creatingProject}
-                            />
+                            <span className={['size-2 rounded-full', colors.dot].join(' ')} />
                             {status.name}
-                          </label>
-                        ))}
-                      </div>
-                    )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {formError && (
@@ -259,7 +280,7 @@ export default function ProjectOnboarding({
                   <AlertDialogFooter className="pt-1">
                     <AlertDialogCancel disabled={creatingProject}>Cancel</AlertDialogCancel>
                     <Button type="submit" disabled={creatingProject}>
-                      {creatingProject ? 'Creating Project...' : 'Create Project'}
+                      {creatingProject ? 'Creating…' : 'Create Project'}
                     </Button>
                   </AlertDialogFooter>
                 </form>

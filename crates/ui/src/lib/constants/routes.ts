@@ -12,7 +12,6 @@ export const AGENTS_MCP_ROUTE = '/project/agents/mcp' as const;
 export const AGENTS_SKILLS_ROUTE = '/project/agents/skills' as const;
 export const AGENTS_RULES_ROUTE = '/project/agents/rules' as const;
 export const AGENTS_PERMISSIONS_ROUTE = '/project/agents/permissions' as const;
-export const AGENTS_PROMPTS_ROUTE = '/project/agents/prompts' as const;
 export const AGENTS_V0_ROUTE = '/project/agents/v0' as const;
 export const SETTINGS_ROUTE = '/project/settings' as const;
 

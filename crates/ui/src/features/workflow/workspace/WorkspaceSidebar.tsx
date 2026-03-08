@@ -1,9 +1,68 @@
+import { memo, useCallback, useRef, useState } from 'react';
 import { Search, RefreshCw, ChevronDown, Home } from 'lucide-react';
 import { Button, Input, Badge, Tooltip, TooltipTrigger, TooltipContent } from '@ship/ui';
 import { EditorQuickOpenMenu } from './IDEComponents';
 import { type WorkspaceEditorInfo } from '@/lib/platform/tauri/commands';
 import { WorkspaceRow } from './types';
 import { WorkspaceGraphStatus } from '../components/WorkspaceLifecycleGraph';
+
+interface WorkspaceRowItemProps {
+    row: WorkspaceRow;
+    selected: boolean;
+    availableEditors: WorkspaceEditorInfo[];
+    isDarkTheme: boolean;
+    onSelectBranch: (branch: string) => void;
+    onOpenEditor: (branch: string, editorId: string) => void;
+    statusVariant: (status: WorkspaceGraphStatus) => 'default' | 'secondary' | 'outline';
+}
+
+const WorkspaceRowItem = memo(function WorkspaceRowItem({
+    row, selected, availableEditors, isDarkTheme, onSelectBranch, onOpenEditor, statusVariant,
+}: WorkspaceRowItemProps) {
+    return (
+        <div
+            role="button"
+            tabIndex={0}
+            className={`group/ws-item w-full rounded-xl border px-3 py-2.5 text-left transition-all ${selected
+                ? 'border-primary/50 bg-primary/10 shadow-inner'
+                : 'border-border/40 bg-card/40 hover:bg-muted/40 hover:border-border/60'
+                }`}
+            onClick={() => onSelectBranch(row.branch)}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectBranch(row.branch);
+                }
+            }}
+        >
+            <div className="flex items-start justify-between gap-2">
+                <span className={`truncate text-sm font-bold tracking-tight ${selected ? 'text-foreground' : 'text-muted-foreground group-hover/ws-item:text-foreground'}`}>{row.branch}</span>
+                <div className="flex items-center gap-1.5">
+                    <EditorQuickOpenMenu
+                        branch={row.branch}
+                        editors={availableEditors}
+                        isDarkTheme={isDarkTheme}
+                        onOpenEditor={onOpenEditor}
+                    />
+                    <Badge variant={statusVariant(row.status)} className="h-5 px-1.5 text-[9px] font-black uppercase tracking-tighter shadow-none">
+                        {row.status}
+                    </Badge>
+                </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1">
+                <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] border-border/40 bg-background/50 text-muted-foreground">
+                    {row.workspaceType}
+                </Badge>
+                <Badge variant="secondary" className="h-4.5 px-1.5 text-[9px]">
+                    {row.activeMode ?? 'default'}
+                </Badge>
+                <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] border-border/40 bg-background/50 text-muted-foreground">
+                    {row.providers.length}
+                </Badge>
+            </div>
+        </div>
+    );
+});
 
 interface WorkspaceSidebarProps {
     filteredRows: WorkspaceRow[];
@@ -36,6 +95,19 @@ export function WorkspaceSidebar({
     onCollapse,
     statusVariant,
 }: WorkspaceSidebarProps) {
+    // Local display value updates immediately; debounce propagates to parent
+    const [localSearch, setLocalSearch] = useState(searchQuery);
+    const searchTimer = useRef<number | undefined>(undefined);
+    const handleSearchChange = useCallback((value: string) => {
+        setLocalSearch(value);
+        window.clearTimeout(searchTimer.current);
+        searchTimer.current = window.setTimeout(() => onSearchChange(value), 200);
+    }, [onSearchChange]);
+
+    const stableOnSelectBranch = useCallback(onSelectBranch, [onSelectBranch]);
+    const stableOnOpenEditor = useCallback(onOpenEditor, [onOpenEditor]);
+    const stableStatusVariant = useCallback(statusVariant, [statusVariant]);
+
     return (
         <div className="flex flex-col h-full bg-sidebar border-r border-sidebar-border overflow-hidden">
             {/* Header */}
@@ -90,8 +162,8 @@ export function WorkspaceSidebar({
                 <div className="relative w-full overflow-hidden">
                     <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/40 transition-colors group-focus-within:text-primary" />
                     <Input
-                        value={searchQuery}
-                        onChange={(e) => onSearchChange(e.target.value)}
+                        value={localSearch}
+                        onChange={(e) => handleSearchChange(e.target.value)}
                         placeholder="Filter list..."
                         className="h-8 border-none bg-transparent pl-8 text-[11px] font-bold text-foreground placeholder:font-medium placeholder:text-muted-foreground/40 focus-visible:ring-0"
                     />
@@ -105,53 +177,18 @@ export function WorkspaceSidebar({
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-2.5 custom-scrollbar">
                     <div className="space-y-2">
-                        {filteredRows.map((row) => {
-                            const selected = row.branch === selectedBranch;
-                            return (
-                                <div
-                                    key={row.id}
-                                    role="button"
-                                    tabIndex={0}
-                                    className={`group/ws-item w-full rounded-xl border px-3 py-2.5 text-left transition-all ${selected
-                                        ? 'border-primary/50 bg-primary/10 shadow-inner'
-                                        : 'border-border/40 bg-card/40 hover:bg-muted/40 hover:border-border/60'
-                                        }`}
-                                    onClick={() => onSelectBranch(row.branch)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' || event.key === ' ') {
-                                            event.preventDefault();
-                                            onSelectBranch(row.branch);
-                                        }
-                                    }}
-                                >
-                                    <div className="flex items-start justify-between gap-2">
-                                        <span className={`truncate text-sm font-bold tracking-tight ${selected ? 'text-foreground' : 'text-muted-foreground group-hover/ws-item:text-foreground'}`}>{row.branch}</span>
-                                        <div className="flex items-center gap-1.5">
-                                            <EditorQuickOpenMenu
-                                                branch={row.branch}
-                                                editors={availableEditors}
-                                                isDarkTheme={isDarkTheme}
-                                                onOpenEditor={onOpenEditor}
-                                            />
-                                            <Badge variant={statusVariant(row.status)} className="h-5 px-1.5 text-[9px] font-black uppercase tracking-tighter shadow-none">
-                                                {row.status}
-                                            </Badge>
-                                        </div>
-                                    </div>
-                                    <div className="mt-2 flex flex-wrap gap-1">
-                                        <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] border-border/40 bg-background/50 text-muted-foreground">
-                                            {row.workspaceType}
-                                        </Badge>
-                                        <Badge variant="secondary" className="h-4.5 px-1.5 text-[9px]">
-                                            {row.activeMode ?? 'default'}
-                                        </Badge>
-                                        <Badge variant="outline" className="h-4.5 px-1.5 text-[9px] border-border/40 bg-background/50 text-muted-foreground">
-                                            {row.providers.length}
-                                        </Badge>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        {filteredRows.map((row) => (
+                            <WorkspaceRowItem
+                                key={row.id}
+                                row={row}
+                                selected={row.branch === selectedBranch}
+                                availableEditors={availableEditors}
+                                isDarkTheme={isDarkTheme}
+                                onSelectBranch={stableOnSelectBranch}
+                                onOpenEditor={stableOnOpenEditor}
+                                statusVariant={stableStatusVariant}
+                            />
+                        ))}
                     </div>
                 </div>
             </div>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     getCurrentBranchCmd,
     listWorkspacesCmd,
@@ -34,6 +34,7 @@ export function useWorkspaceState(workspaceUi: any, _ship: any) {
     const [activeSession, setActiveSession] = useState<WorkspaceSessionInfo | null>(null);
     const [recentSessions, setRecentSessions] = useState<WorkspaceSessionInfo[]>([]);
     const [providerMatrix, setProviderMatrix] = useState<WorkspaceProviderMatrix | null>(null);
+    const contextLoadTimer = useRef<number | undefined>(undefined);
     const [startingSession, setStartingSession] = useState(false);
     const [endingSession, setEndingSession] = useState(false);
     const [sessionGoalInput, setSessionGoalInput] = useState('');
@@ -159,11 +160,14 @@ export function useWorkspaceState(workspaceUi: any, _ship: any) {
 
     useEffect(() => {
         if (!detail) {
+            window.clearTimeout(contextLoadTimer.current);
             setActiveSession(null); setRecentSessions([]); setProviderMatrix(null);
             return;
         }
         let cancelled = false;
-        const loadContext = async () => {
+        window.clearTimeout(contextLoadTimer.current);
+        contextLoadTimer.current = window.setTimeout(async () => {
+            if (cancelled) return;
             const snapshot = await fetchSessionSnapshot(detail.branch);
             if (cancelled) return;
             setActiveSession(snapshot.active); setRecentSessions(snapshot.sessions);
@@ -171,9 +175,11 @@ export function useWorkspaceState(workspaceUi: any, _ship: any) {
             const modeForMatrix = detail.activeMode ?? workspaceUi.activeModeId ?? null;
             const matrixRes = await getWorkspaceProviderMatrixCmd(detail.branch, modeForMatrix);
             if (!cancelled && matrixRes.status === 'ok') setProviderMatrix(matrixRes.data);
+        }, 150);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(contextLoadTimer.current);
         };
-        void loadContext();
-        return () => { cancelled = true; };
     }, [detail?.branch, detail?.activeMode, detail?.configGeneration, workspaceUi.activeModeId]);
 
     return {

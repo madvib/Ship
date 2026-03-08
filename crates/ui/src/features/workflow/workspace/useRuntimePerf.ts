@@ -27,7 +27,7 @@ export function useRuntimePerf(enabled: boolean, intervalMs = 1200) {
 
     void tick();
     const timer = window.setInterval(() => {
-      void tick();
+      if (document.visibilityState !== 'hidden') void tick();
     }, intervalMs);
 
     return () => {

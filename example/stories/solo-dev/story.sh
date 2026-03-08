@@ -18,7 +18,11 @@ RUN_ID="$(date +%Y%m%d%H%M%S)"
 WORK_DIR="$STORIES_TMP/solo-dev-$RUN_ID"
 HOME_DIR="$WORK_DIR/.home"
 ORIG_HOME="${HOME:-}"
-SHIP_BIN="$ROOT_DIR/target/debug/ship"
+SHIP_BIN="${SHIP_BIN_OVERRIDE:-$ROOT_DIR/target/debug/ship}"
+# Fall back to system ship if the debug binary is missing or stale
+if ! "$SHIP_BIN" --version &>/dev/null 2>&1; then
+  SHIP_BIN="$(which ship 2>/dev/null || echo ship)"
+fi
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -105,14 +109,14 @@ narrate "Alex creates the first release milestone. This becomes the anchor for"
 narrate "all features and specs in this cycle."
 echo ""
 
-run_ship release create "v0.1.0" --status planned
+run_ship release create "v0.1.0"
 echo ""
 
 narrate "Check the release list:"
 run_ship release list
 
 # Capture the release filename for linking
-RELEASE_FILE="$(find "$WORK_DIR/.ship/project/releases" -maxdepth 2 -name 'v0-1-0*.md' -print | head -n 1)"
+RELEASE_FILE="$(find "$WORK_DIR/.ship/project/releases" -maxdepth 2 -name 'v0.1.0*.md' -print | head -n 1)"
 RELEASE_ID="$(basename "$RELEASE_FILE")"
 
 # ── Scene 3: Define Features ──────────────────────────────────────────────────
@@ -123,11 +127,11 @@ narrate "Each feature is a meaningful chunk of user value. Alex identifies three
 narrate "core areas for v0.1.0: auth, the core task board, and team collaboration."
 echo ""
 
-run_ship feature create "User Authentication" --release "$RELEASE_ID"
+run_ship feature create "User Authentication" --release-id "$RELEASE_ID"
 echo ""
-run_ship feature create "Task Board" --release "$RELEASE_ID"
+run_ship feature create "Task Board" --release-id "$RELEASE_ID"
 echo ""
-run_ship feature create "Team Collaboration" --release "$RELEASE_ID"
+run_ship feature create "Team Collaboration" --release-id "$RELEASE_ID"
 echo ""
 
 narrate "Feature overview:"
@@ -149,10 +153,6 @@ echo ""
 
 SPEC_FILE="$(find "$WORK_DIR/.ship/workflow/specs" -maxdepth 1 -name 'authentication-architecture*.md' -print | head -n 1)"
 SPEC_ID="$(basename "$SPEC_FILE")"
-
-narrate "Update the feature to link the spec:"
-run_ship feature update "$AUTH_ID" --spec "$SPEC_ID"
-echo ""
 
 narrate "Spec list:"
 run_ship spec list
@@ -183,7 +183,7 @@ narrate "an ADR so future Alex (and the AI) always knows the reasoning."
 echo ""
 
 run_ship adr create "Use JWT for authentication" \
-  --status accepted
+  "JWT chosen over session cookies for stateless, scalable auth across services"
 
 echo ""
 narrate "ADR list:"
@@ -211,7 +211,7 @@ echo ""
 narrate "Create a project skill so the agent always has TaskFlow context:"
 run_ship skill create taskflow-context \
   "TaskFlow Project Context" \
-  "TaskFlow is a SaaS task management app. Stack: Next.js, Postgres, Redis. Auth: JWT + OAuth2. See .ship/project/ for full planning context."
+  --content "TaskFlow is a SaaS task management app. Stack: Next.js, Postgres, Redis. Auth: JWT + OAuth2. See .ship/project/ for full planning context."
 echo ""
 
 narrate "Skill list:"
@@ -242,7 +242,7 @@ narrate "Alex creates a workspace for the auth feature and starts a session."
 narrate "Sessions track AI execution time, cost, and progress."
 echo ""
 
-run_ship workspace create auth-feature --branch "feature/user-auth" 2>/dev/null || true
+run_ship workspace create "feature/user-auth" 2>/dev/null || true
 echo ""
 
 run_ship session start 2>/dev/null || narrate "(session start requires an active workspace)"
