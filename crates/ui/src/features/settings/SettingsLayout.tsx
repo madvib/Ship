@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   ArrowLeft,
   Bot,
@@ -8,6 +9,7 @@ import {
   Globe2,
   Package,
   Settings,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@ship/ui';
@@ -70,9 +72,40 @@ export default function SettingsLayout({
   onSaveGlobalAgentConfig,
   onDone,
 }: SettingsLayoutProps) {
+  const [saving, setSaving] = useState(false);
   const isAgentSection = AGENT_SECTIONS.includes(activeSection);
-  const generalItems = SETTINGS_ITEMS.filter(i => i.group === 'general');
-  const agentItems = SETTINGS_ITEMS.filter(i => i.group === 'agents');
+  const generalItems = SETTINGS_ITEMS.filter((i) => i.group === 'general');
+  const agentItems = SETTINGS_ITEMS.filter((i) => i.group === 'agents');
+
+  const handleSave = async (c: Config) => {
+    setSaving(true);
+    try {
+      await onSave(c);
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveProject = async (c: ProjectConfig) => {
+    setSaving(true);
+    try {
+      await onSaveProject(c);
+      if (!isAgentSection) onDone();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveGlobalAgentConfig = async (c: ProjectConfig) => {
+    setSaving(true);
+    try {
+      await onSaveGlobalAgentConfig(c);
+      if (!isAgentSection) onDone();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="flex h-full">
@@ -147,13 +180,22 @@ export default function SettingsLayout({
       </aside>
 
       {/* Content Area */}
-      <div className="flex-1 min-w-0 overflow-y-auto">
+      <div key={activeSection} className="relative flex-1 min-w-0 overflow-y-auto route-enter">
+        {saving && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/20 backdrop-blur-[1px]">
+            <div className="flex items-center gap-2 rounded-full border bg-background px-4 py-2 shadow-lg">
+              <RefreshCw className="size-4 animate-spin text-primary" />
+              <span className="text-sm font-medium">Saving changes...</span>
+            </div>
+          </div>
+        )}
+
         {isAgentSection ? (
           <AgentsPanel
             projectConfig={projectConfig}
             globalAgentConfig={globalAgentConfig}
-            onSaveProject={onSaveProject}
-            onSaveGlobalAgentConfig={onSaveGlobalAgentConfig}
+            onSaveProject={handleSaveProject}
+            onSaveGlobalAgentConfig={handleSaveGlobalAgentConfig}
             initialSection={activeSection as AgentSection}
           />
         ) : (
@@ -164,18 +206,9 @@ export default function SettingsLayout({
             panelMode="settings-only"
             initialTab={activeSection === 'project' ? 'project' : 'global'}
             onThemePreview={onThemePreview}
-            onSave={async (c) => {
-              await onSave(c);
-              onDone();
-            }}
-            onSaveProject={async (c) => {
-              await onSaveProject(c);
-              onDone();
-            }}
-            onSaveGlobalAgentConfig={async (c) => {
-              await onSaveGlobalAgentConfig(c);
-              onDone();
-            }}
+            onSave={handleSave}
+            onSaveProject={handleSaveProject}
+            onSaveGlobalAgentConfig={handleSaveGlobalAgentConfig}
             onOpenAgentsModule={() => onSectionChange('providers')}
           />
         )}

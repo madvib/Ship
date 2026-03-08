@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@ship/ui';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, RefreshCw, Trash2, Archive } from 'lucide-react';
 import { ModeConfig } from '@/bindings';
 import { WorkspaceRow } from './types';
 
@@ -37,9 +37,11 @@ interface WorkspaceHeaderActionsProps {
   modeOptions: ModeConfig[];
   creatingWorkspace: boolean;
   deletingWorkspace: boolean;
+  archivingWorkspace: boolean;
   updatingWorkspaceMode: boolean;
   onCreateWorkspace: (input: CreateWorkspaceInput) => Promise<void>;
   onDeleteWorkspace: (branch: string) => Promise<void>;
+  onArchiveWorkspace: (branch: string) => Promise<void>;
   onUpdateWorkspaceMode: (modeId: string | null) => Promise<void>;
 }
 
@@ -48,9 +50,11 @@ export function WorkspaceHeaderActions({
   modeOptions,
   creatingWorkspace,
   deletingWorkspace,
+  archivingWorkspace,
   updatingWorkspaceMode,
   onCreateWorkspace,
   onDeleteWorkspace,
+  onArchiveWorkspace,
   onUpdateWorkspaceMode,
 }: WorkspaceHeaderActionsProps) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -81,10 +85,19 @@ export function WorkspaceHeaderActions({
   const handleDelete = async () => {
     if (!detail) return;
     const confirmed = window.confirm(
-      `Delete workspace '${detail.branch}'? This removes runtime workspace/session state for this branch.`
+      `Delete workspace '${detail.branch}'? This removes ALL runtime state and history for this branch.`
     );
     if (!confirmed) return;
     await onDeleteWorkspace(detail.branch);
+  };
+
+  const handleArchive = async () => {
+    if (!detail) return;
+    const confirmed = window.confirm(
+      `Archive workspace '${detail.branch}'? This marks the workspace as archived and moves it out of the active roster.`
+    );
+    if (!confirmed) return;
+    await onArchiveWorkspace(detail.branch);
   };
 
   const handleCreate = async () => {
@@ -145,15 +158,20 @@ export function WorkspaceHeaderActions({
       )}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 gap-1.5"
-          onClick={() => setCreateDialogOpen(true)}
-        >
-          <Plus className="size-3.5" />
-          New Workspace
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5"
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              New Workspace
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Create a new branch-based workspace.</TooltipContent>
+        </Tooltip>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Workspace</DialogTitle>
@@ -236,20 +254,45 @@ export function WorkspaceHeaderActions({
         </DialogContent>
       </Dialog>
 
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 gap-1.5 text-status-red"
-        onClick={() => void handleDelete()}
-        disabled={!detail || deletingWorkspace}
-      >
-        {deletingWorkspace ? (
-          <RefreshCw className="size-3.5 animate-spin" />
-        ) : (
-          <Trash2 className="size-3.5" />
-        )}
-        Delete
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5"
+            onClick={() => void handleArchive()}
+            disabled={!detail || archivingWorkspace || detail.status === 'archived'}
+          >
+            {archivingWorkspace ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : (
+              <Archive className="size-3.5" />
+            )}
+            Archive
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Mark workspace as archived. Moves it out of active view.</TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-status-red"
+            onClick={() => void handleDelete()}
+            disabled={!detail || deletingWorkspace}
+          >
+            {deletingWorkspace ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="size-3.5" />
+            )}
+            Delete
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Permanently delete workspace and its runtime state.</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
