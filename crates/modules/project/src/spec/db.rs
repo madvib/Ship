@@ -24,13 +24,12 @@ pub fn upsert_spec_db(ship_dir: &Path, spec: &Spec, status: &SpecStatus) -> Resu
     runtime::state_db::block_on(async {
         sqlx::query(
             "INSERT INTO spec
-               (id, title, body, status, author, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (id, title, body, status, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                title      = excluded.title,
                body       = excluded.body,
                status     = excluded.status,
-               author     = excluded.author,
                branch     = excluded.branch,
                workspace_id = excluded.workspace_id,
                feature_id = excluded.feature_id,
@@ -42,7 +41,6 @@ pub fn upsert_spec_db(ship_dir: &Path, spec: &Spec, status: &SpecStatus) -> Resu
         .bind(&spec.metadata.title)
         .bind(&spec.body)
         .bind(status.to_string())
-        .bind(&spec.metadata.author)
         .bind(&spec.metadata.branch)
         .bind(&spec.metadata.workspace_id)
         .bind(&spec.metadata.feature_id)
@@ -61,7 +59,7 @@ pub fn get_spec_db(ship_dir: &Path, id: &str) -> Result<Option<SpecEntry>> {
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let row_opt = sqlx::query(
-            "SELECT id, title, body, status, author, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at
+            "SELECT id, title, body, status, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at
              FROM spec WHERE id = ?",
         )
         .bind(id)
@@ -73,14 +71,13 @@ pub fn get_spec_db(ship_dir: &Path, id: &str) -> Result<Option<SpecEntry>> {
             let title: String = r.get(1);
             let body: String = r.get(2);
             let status_str: String = r.get(3);
-            let author: Option<String> = r.get(4);
-            let branch: Option<String> = r.get(5);
-            let workspace_id: Option<String> = r.get(6);
-            let feature_id: Option<String> = r.get(7);
-            let release_id: Option<String> = r.get(8);
-            let tags_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let branch: Option<String> = r.get(4);
+            let workspace_id: Option<String> = r.get(5);
+            let feature_id: Option<String> = r.get(6);
+            let release_id: Option<String> = r.get(7);
+            let tags_json: String = r.get(8);
+            let created: String = r.get(9);
+            let updated: String = r.get(10);
 
             let status = SpecStatus::from_str(&status_str).ok().unwrap_or_default();
             let tags = serde_json::from_str(&tags_json).unwrap_or_default();
@@ -98,7 +95,6 @@ pub fn get_spec_db(ship_dir: &Path, id: &str) -> Result<Option<SpecEntry>> {
                         title,
                         created,
                         updated,
-                        author,
                         branch,
                         workspace_id,
                         feature_id,
@@ -118,7 +114,7 @@ pub fn list_specs_db(ship_dir: &Path) -> Result<Vec<SpecEntry>> {
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let rows = sqlx::query(
-            "SELECT id, title, body, status, author, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at
+            "SELECT id, title, body, status, branch, workspace_id, feature_id, release_id, tags_json, created_at, updated_at
              FROM spec ORDER BY updated_at DESC",
         )
         .fetch_all(&mut conn)
@@ -130,14 +126,13 @@ pub fn list_specs_db(ship_dir: &Path) -> Result<Vec<SpecEntry>> {
             let title: String = r.get(1);
             let body: String = r.get(2);
             let status_str: String = r.get(3);
-            let author: Option<String> = r.get(4);
-            let branch: Option<String> = r.get(5);
-            let workspace_id: Option<String> = r.get(6);
-            let feature_id: Option<String> = r.get(7);
-            let release_id: Option<String> = r.get(8);
-            let tags_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let branch: Option<String> = r.get(4);
+            let workspace_id: Option<String> = r.get(5);
+            let feature_id: Option<String> = r.get(6);
+            let release_id: Option<String> = r.get(7);
+            let tags_json: String = r.get(8);
+            let created: String = r.get(9);
+            let updated: String = r.get(10);
 
             let status = SpecStatus::from_str(&status_str).ok().unwrap_or_default();
             let tags = serde_json::from_str(&tags_json).unwrap_or_default();
@@ -155,7 +150,6 @@ pub fn list_specs_db(ship_dir: &Path) -> Result<Vec<SpecEntry>> {
                         title,
                         created,
                         updated,
-                        author,
                         branch,
                         workspace_id,
                         feature_id,

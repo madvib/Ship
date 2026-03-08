@@ -321,10 +321,15 @@ pub fn get_feature_by_id(ship_dir: &Path, id: &str) -> Result<FeatureEntry> {
     let resolved_id = require_feature_id(ship_dir, id)?;
     let mut entry =
         get_feature_db(ship_dir, &resolved_id)?.ok_or_else(|| anyhow!("Feature not found: {}", id))?;
-    if entry.feature.body.trim().is_empty()
-        && let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id)
-    {
-        entry.feature.body = body;
+    // Fallback: if SQLite body is empty, try loading from legacy markdown file (migration on read)
+    if entry.feature.body.trim().is_empty() {
+        if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {
+            entry.feature.body = body.clone();
+            // Back-fill SQLite so the fallback only runs once
+            let mut updated = entry.feature.clone();
+            updated.body = body;
+            let _ = upsert_feature_db(ship_dir, &updated, &entry.status);
+        }
     }
     Ok(entry)
 }
@@ -335,9 +340,8 @@ pub fn update_feature(ship_dir: &Path, id: &str, mut feature: Feature) -> Result
         .ok_or_else(|| anyhow!("Feature not found: {}", id))?;
     feature.metadata.updated = Utc::now().to_rfc3339();
     if feature.body.trim().is_empty() {
-        if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {
-            feature.body = body;
-        }
+        // Preserve existing body rather than blanking it
+        feature.body = existing.feature.body.clone();
     }
     feature.extract_structured_data();
 
@@ -376,11 +380,6 @@ pub fn move_feature(ship_dir: &Path, id: &str, new_status: FeatureStatus) -> Res
         .ok_or_else(|| anyhow!("Feature not found: {}", id))?;
 
     let mut feature = existing.feature.clone();
-    if feature.body.trim().is_empty() {
-        if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {
-            feature.body = body;
-        }
-    }
     feature.extract_structured_data();
     upsert_feature_db(ship_dir, &feature, &new_status)?;
     remove_feature_files(ship_dir, &resolved_id, &existing.feature.metadata.title);

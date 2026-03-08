@@ -49,6 +49,7 @@ impl Default for GitConfig {
                 "agents".to_string(),
                 "ship.toml".to_string(),
                 "templates".to_string(),
+                "vision".to_string(),
             ],
         }
     }
@@ -268,6 +269,10 @@ pub struct McpSection {
 pub struct ProjectConfig {
     #[serde(default = "default_version")]
     pub version: String,
+    /// Stable project identity. Generated on `ship init`, used as the SQLite state directory key.
+    /// Never changes after creation — rename the project by changing `name`, not `id`.
+    #[serde(default)]
+    pub id: String,
     pub name: Option<String>,
     pub description: Option<String>,
     #[serde(default = "default_statuses")]
@@ -337,6 +342,7 @@ impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
             version: default_version(),
+            id: String::new(),
             name: None,
             description: None,
             statuses: default_statuses(),

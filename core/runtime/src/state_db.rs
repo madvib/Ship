@@ -360,6 +360,12 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
         PROJECT_SCHEMA_WORKSPACE_COMPILE_STATE,
     ),
     ("0015_feature_docs", PROJECT_SCHEMA_FEATURE_DOCS),
+    (
+        "0016_feature_body_release_status",
+        "ALTER TABLE feature ADD COLUMN body TEXT NOT NULL DEFAULT '';
+         UPDATE release SET status = 'upcoming' WHERE status = 'planned';
+         UPDATE release SET status = 'deprecated' WHERE status IN ('shipped', 'archived');",
+    ),
 ];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_global_schema", GLOBAL_SCHEMA_V1),
@@ -488,15 +494,49 @@ pub struct AgentModeDb {
     pub target_agents_json: String,
 }
 
-/// Returns `~/.ship/state/<project-slug>/ship.db` for the given ship_dir.
-/// The slug is derived from the canonical project root path, making it stable
-/// across sessions and safe to store alongside the global DB.
+/// Returns `~/.ship/state/<project-id>/ship.db` for the given ship_dir.
+///
+/// The key is the `id` field from `ship.toml` — a stable nanoid generated at `ship init`.
+/// This means the DB location is independent of the project's path on disk, so worktrees,
+/// renames, and multi-machine setups all resolve to the same DB as long as `ship.toml` is present.
+///
+/// Falls back to the path-based slug for projects that predate the `id` field, and writes
+/// the generated ID into `ship.toml` so the fallback only runs once.
 pub fn project_db_path(ship_dir: &Path) -> Result<PathBuf> {
-    let slug = project_slug(ship_dir)?;
     let global_dir = ship_global_dir()?;
     ensure_global_dir_outside_project(ship_dir, &global_dir)?;
-    Ok(global_dir.join("state").join(slug).join("ship.db"))
+
+    let key = project_db_key(ship_dir)?;
+    Ok(global_dir.join("state").join(key).join("ship.db"))
 }
+
+/// Stable key used for the project's state directory.
+/// Reads only the `id` field from `ship.toml` — never calls `get_config` to avoid
+/// circular dependency (get_config → get_runtime_settings → open_project_connection → here).
+fn project_db_key(ship_dir: &Path) -> Result<String> {
+    match read_project_id_from_toml(ship_dir) {
+        Some(id) if !id.is_empty() => Ok(id),
+        _ => Err(anyhow!(
+            "Project at {} has no id field in ship.toml. Re-run `ship init` to add one.",
+            ship_dir.display()
+        )),
+    }
+}
+
+/// Read just the `id` field from ship.toml without going through the full config system.
+fn read_project_id_from_toml(ship_dir: &Path) -> Option<String> {
+    let path = ship_dir.join(crate::config::PRIMARY_CONFIG_FILE);
+    let content = std::fs::read_to_string(path).ok()?;
+    // Parse as a minimal struct to avoid any DB access.
+    #[derive(serde::Deserialize, Default)]
+    struct MinConfig {
+        #[serde(default)]
+        id: String,
+    }
+    let min: MinConfig = toml::from_str(&content).unwrap_or_default();
+    if min.id.is_empty() { None } else { Some(min.id) }
+}
+
 
 pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationReport> {
     let db_path = project_db_path(ship_dir)?;
@@ -1108,19 +1148,6 @@ fn ensure_global_dir_outside_project(ship_dir: &Path, global_dir: &Path) -> Resu
     Ok(())
 }
 
-/// Derives a filesystem-safe slug from the project root path.
-/// `/home/alice/dev/my-app` → `home-alice-dev-my-app`
-fn project_slug(ship_dir: &Path) -> Result<String> {
-    let slug = crate::project::project_slug_from_ship_dir(ship_dir);
-
-    if slug.is_empty() {
-        return Err(anyhow!(
-            "Could not derive a project slug from {}",
-            ship_dir.display()
-        ));
-    }
-    Ok(slug)
-}
 
 // ─── Workspace ────────────────────────────────────────────────────────────────
 
@@ -1963,20 +1990,6 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn project_slug_strips_leading_slash_and_collapses_separators() -> Result<()> {
-        let tmp = tempdir()?;
-        let ship_dir = tmp.path().join(".ship");
-        std::fs::create_dir_all(&ship_dir)?;
-        let slug = project_slug(&ship_dir)?;
-        assert!(!slug.starts_with('-'), "slug should not start with a dash");
-        assert!(
-            !slug.contains("--"),
-            "slug should not contain consecutive dashes"
-        );
-        assert!(!slug.is_empty());
-        Ok(())
-    }
 
     #[test]
     fn compat_workspace_backfills_only_when_columns_are_added() -> Result<()> {

@@ -9,10 +9,6 @@ fn init_creates_namespace_structure() {
     let p = TestProject::new().unwrap();
 
     // workflow/
-    p.assert_ship_file("workflow/issues/backlog");
-    p.assert_ship_file("workflow/issues/in-progress");
-    p.assert_ship_file("workflow/issues/blocked");
-    p.assert_ship_file("workflow/issues/done");
     p.assert_ship_file("workflow/specs");
     p.assert_ship_file("project/features");
 
@@ -34,7 +30,6 @@ fn init_creates_namespace_structure() {
     p.assert_ship_file("ship.toml");
     p.assert_ship_file("README.md");
     p.assert_ship_file("workflow/README.md");
-    p.assert_ship_file("workflow/issues/TEMPLATE.md");
     p.assert_ship_file("workflow/specs/TEMPLATE.md");
     p.assert_ship_file("project/features/TEMPLATE.md");
 }
@@ -68,27 +63,8 @@ fn core_loop_paths_resolve_correctly() {
 
     let spec = crate::helpers::create_spec(p.ship_dir.clone(), "Auth Spec", "", "draft").unwrap();
     assert!(spec.starts_with(specs_dir(&p.ship_dir)));
-
-    let issue =
-        crate::helpers::create_issue(p.ship_dir.clone(), "Implement login", "", "backlog").unwrap();
-    assert!(issue.starts_with(issues_dir(&p.ship_dir).join("backlog")));
 }
 
-/// Issues move between statuses (folder rename), path reflects new status.
-#[test]
-fn issue_move_updates_path() {
-    let p = TestProject::new().unwrap();
-
-    let path = crate::helpers::create_issue(p.ship_dir.clone(), "My Issue", "", "backlog").unwrap();
-    assert!(path.to_string_lossy().contains("backlog"));
-
-    let new_path =
-        crate::helpers::move_issue(p.ship_dir.clone(), path, "backlog", "in-progress").unwrap();
-    assert!(new_path.to_string_lossy().contains("in-progress"));
-    let reference = new_path.file_name().unwrap().to_string_lossy().to_string();
-    let moved = ship_module_project::get_issue_by_id(&p.ship_dir, &reference).unwrap();
-    assert_eq!(moved.status, ship_module_project::IssueStatus::InProgress);
-}
 
 /// ADRs land in project/adrs/.
 #[test]
@@ -121,22 +97,20 @@ fn gitignore_uses_namespace_paths() {
     let p = TestProject::new().unwrap();
     let gitignore = std::fs::read_to_string(p.ship_dir.join(".gitignore")).unwrap();
 
-    // Issues local by default
-    assert!(
-        gitignore.contains("workflow/issues"),
-        "issues should be gitignored"
-    );
     assert!(gitignore.contains("generated/"));
     assert!(!gitignore.contains("events.ndjson"));
     // ship.db lives at ~/.ship/state/<slug>/ship.db — outside the project, not gitignored here
 
-    // These are committed by default — must NOT appear in gitignore
-    assert!(!gitignore.contains("project/adrs"));
-    assert!(!gitignore.contains("project/notes"));
+    // Committed by default — must NOT appear in gitignore
     assert!(!gitignore.contains("agents"));
-    assert!(!gitignore.contains("project/features"));
-    assert!(!gitignore.contains("project/releases"));
-    assert!(!gitignore.contains("workflow/specs"));
+    assert!(!gitignore.contains("ship.toml"));
+
+    // Optional (local by default) — must appear in gitignore
+    assert!(gitignore.contains("project/adrs"));
+    assert!(gitignore.contains("project/notes"));
+    assert!(gitignore.contains("project/features"));
+    assert!(gitignore.contains("project/releases"));
+    assert!(gitignore.contains("workflow/specs"));
 }
 
 /// Events track creates in both workflow/ and project/ namespaces.

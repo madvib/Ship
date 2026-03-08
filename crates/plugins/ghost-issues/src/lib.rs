@@ -4,7 +4,6 @@ use ignore::WalkBuilder;
 use regex::Regex;
 use runtime::Plugin;
 use serde::{Deserialize, Serialize};
-use ship_module_project::IssuePlugin;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -80,8 +79,6 @@ pub struct ScanResult {
 // ─── Plugin Implementation ────────────────────────────────────────────────────
 
 pub struct GhostIssues;
-
-impl IssuePlugin for GhostIssues {}
 
 impl Plugin for GhostIssues {
     fn name(&self) -> &str {

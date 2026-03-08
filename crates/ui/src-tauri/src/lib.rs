@@ -58,8 +58,6 @@ use tauri_specta::Event;
 #[derive(Clone, Serialize, Type, tauri_specta::Event)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ShipEvent {
-    /// One or more issue files changed (created, moved, deleted).
-    IssuesChanged,
     /// Spec files changed.
     SpecsChanged,
     /// ADR files changed.
@@ -1150,6 +1148,7 @@ fn create_project_with_options(
 #[tauri::command]
 #[specta::specta]
 fn rename_project_cmd(
+    app_handle: tauri::AppHandle,
     path: String,
     name: String,
     state: State<'_, AppState>,
@@ -1161,6 +1160,7 @@ fn rename_project_cmd(
         *state.active_project.lock().unwrap() = Some(ship_path.clone());
     }
 
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
     let issues = list_issues(&ship_path).unwrap_or_default();
     Ok(ProjectInfo {
         name: project_display_name(&ship_path),
@@ -1184,27 +1184,13 @@ fn start_project_watcher(
     let poller = thread::spawn(move || -> Result<(), String> {
         #[derive(Default)]
         struct PendingWatchChanges {
-            issues: bool,
-            specs: bool,
-            adrs: bool,
-            features: bool,
-            releases: bool,
-            notes: bool,
             config: bool,
-            tracked_content: bool,
             events_db: bool,
         }
 
         impl PendingWatchChanges {
             fn any(&self) -> bool {
-                self.issues
-                    || self.specs
-                    || self.adrs
-                    || self.features
-                    || self.releases
-                    || self.notes
-                    || self.config
-                    || self.events_db
+                self.config || self.events_db
             }
 
             fn clear(&mut self) {
@@ -1212,12 +1198,6 @@ fn start_project_watcher(
             }
         }
 
-        let issues_dir = issues_dir(&ship_root);
-        let specs_dir = specs_dir(&ship_root);
-        let adrs_dir = adrs_dir(&ship_root);
-        let features_dir = features_dir(&ship_root);
-        let releases_dir = releases_dir(&ship_root);
-        let notes_dir = notes_dir(&ship_root);
         let events_db = runtime::state_db::project_db_path(&ship_root).ok();
         let config_file = ship_root.join(runtime::config::PRIMARY_CONFIG_FILE);
         let (event_tx, event_rx) = mpsc::channel::<notify::Result<NotifyEvent>>();
@@ -1230,10 +1210,12 @@ fn start_project_watcher(
         )
         .map_err(|e| e.to_string())?;
 
-        watcher
-            .watch(&ship_root, RecursiveMode::Recursive)
-            .map_err(|e| e.to_string())?;
+        // Only watch ship.toml for external config changes (non-recursive).
+        if let Some(parent) = config_file.parent() {
+            let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
+        }
 
+        // Watch the events DB directory for DB writes.
         if let Some(events_db) = events_db.as_ref() {
             if let Some(parent) = events_db.parent() {
                 let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
@@ -1244,40 +1226,8 @@ fn start_project_watcher(
         let mut last_flush = Instant::now();
 
         let flush = |pending: &mut PendingWatchChanges| {
-            if pending.issues {
-                let _ = ShipEvent::IssuesChanged.emit(&app_handle);
-            }
-            if pending.specs {
-                let _ = ShipEvent::SpecsChanged.emit(&app_handle);
-            }
-            if pending.adrs {
-                let _ = ShipEvent::AdrsChanged.emit(&app_handle);
-            }
-            if pending.features {
-                let _ = ShipEvent::FeaturesChanged.emit(&app_handle);
-            }
-            if pending.releases {
-                let _ = ShipEvent::ReleasesChanged.emit(&app_handle);
-            }
-            if pending.notes {
-                let _ = ShipEvent::NotesChanged.emit(&app_handle);
-            }
             if pending.config {
                 let _ = ShipEvent::ConfigChanged.emit(&app_handle);
-            }
-
-            if pending.tracked_content {
-                perf.watcher_ingest_runs.fetch_add(1, Ordering::Relaxed);
-                let ingest_started = Instant::now();
-                if let Ok(emitted) = ingest_external_events(&ship_root) {
-                    if !emitted.is_empty() {
-                        let _ = ShipEvent::EventsChanged.emit(&app_handle);
-                    }
-                }
-                perf.watcher_last_ingest_micros.store(
-                    u128_to_u64_saturating(ingest_started.elapsed().as_micros()),
-                    Ordering::Relaxed,
-                );
             }
 
             if pending.events_db {
@@ -1301,39 +1251,8 @@ fn start_project_watcher(
                         continue;
                     }
                     for path in event.paths {
-                        if path.starts_with(&issues_dir) {
-                            pending.issues = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
-                        if path.starts_with(&specs_dir) {
-                            pending.specs = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
-                        if path.starts_with(&adrs_dir) {
-                            pending.adrs = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
-                        if path.starts_with(&features_dir) {
-                            pending.features = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
-                        if path.starts_with(&releases_dir) {
-                            pending.releases = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
-                        if path.starts_with(&notes_dir) {
-                            pending.notes = true;
-                            pending.tracked_content = true;
-                            continue;
-                        }
                         if path == config_file {
                             pending.config = true;
-                            pending.tracked_content = true;
                             continue;
                         }
                         if let Some(events_db) = events_db.as_ref() {
@@ -1488,13 +1407,16 @@ fn list_adrs_cmd(state: State<AppState>) -> Result<Vec<AdrEntry>, String> {
 #[tauri::command]
 #[specta::specta]
 fn create_new_adr(
+    app_handle: tauri::AppHandle,
     title: String,
     context: String,
     decision: String,
     state: State<AppState>,
 ) -> Result<AdrEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    create_adr(&project_dir, &title, &context, &decision, "proposed").map_err(|e| e.to_string())
+    let entry = create_adr(&project_dir, &title, &context, &decision, "proposed").map_err(|e| e.to_string())?;
+    let _ = ShipEvent::AdrsChanged.emit(&app_handle);
+    Ok(entry)
 }
 
 #[tauri::command]
@@ -1506,14 +1428,17 @@ fn get_adr_cmd(id: String, state: State<AppState>) -> Result<AdrEntry, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn update_adr_cmd(id: String, adr: ADR, state: State<AppState>) -> Result<AdrEntry, String> {
+fn update_adr_cmd(app_handle: tauri::AppHandle, id: String, adr: ADR, state: State<AppState>) -> Result<AdrEntry, String> {
     let project_dir = get_active_dir(&state)?;
-    update_adr(&project_dir, &id, adr).map_err(|e| e.to_string())
+    let entry = update_adr(&project_dir, &id, adr).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::AdrsChanged.emit(&app_handle);
+    Ok(entry)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn move_adr_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     new_status: String,
     state: State<AppState>,
@@ -1522,14 +1447,18 @@ fn move_adr_cmd(
     let status = new_status
         .parse::<AdrStatus>()
         .map_err(|_| format!("Invalid ADR status: {}", new_status))?;
-    move_adr(&project_dir, &id, status).map_err(|e| e.to_string())
+    let entry = move_adr(&project_dir, &id, status).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::AdrsChanged.emit(&app_handle);
+    Ok(entry)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn delete_adr_cmd(id: String, state: State<AppState>) -> Result<(), String> {
+fn delete_adr_cmd(app_handle: tauri::AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    delete_adr(&project_dir, &id).map_err(|e| e.to_string())
+    delete_adr(&project_dir, &id).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::AdrsChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Specs ─────────────────────────────────────────────────────────
@@ -1551,6 +1480,7 @@ fn get_spec_cmd(id: String, state: State<AppState>) -> Result<SpecEntry, String>
 #[tauri::command]
 #[specta::specta]
 fn create_spec_cmd(
+    app_handle: tauri::AppHandle,
     title: String,
     content: String,
     state: State<AppState>,
@@ -1563,12 +1493,13 @@ fn create_spec_cmd(
         &format!("Created Spec: {}", title),
     )
     .ok();
+    let _ = ShipEvent::SpecsChanged.emit(&app_handle);
     Ok(entry)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn update_spec_cmd(id: String, spec: Spec, state: State<AppState>) -> Result<SpecEntry, String> {
+fn update_spec_cmd(app_handle: tauri::AppHandle, id: String, spec: Spec, state: State<AppState>) -> Result<SpecEntry, String> {
     let project_dir = get_active_dir(&state)?;
     let entry = update_spec(&project_dir, &id, spec).map_err(|e| e.to_string())?;
     log_action(
@@ -1577,12 +1508,13 @@ fn update_spec_cmd(id: String, spec: Spec, state: State<AppState>) -> Result<Spe
         &format!("Updated Spec: {}", entry.file_name),
     )
     .ok();
+    let _ = ShipEvent::SpecsChanged.emit(&app_handle);
     Ok(entry)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn delete_spec_cmd(id: String, state: State<AppState>) -> Result<(), String> {
+fn delete_spec_cmd(app_handle: tauri::AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
     delete_spec(&project_dir, &id).map_err(|e| e.to_string())?;
     log_action(
@@ -1591,6 +1523,7 @@ fn delete_spec_cmd(id: String, state: State<AppState>) -> Result<(), String> {
         &format!("Deleted Spec: {}", id),
     )
     .ok();
+    let _ = ShipEvent::SpecsChanged.emit(&app_handle);
     Ok(())
 }
 
@@ -1619,6 +1552,7 @@ fn get_release_cmd(file_name: String, state: State<AppState>) -> Result<ReleaseD
 #[tauri::command]
 #[specta::specta]
 fn create_release_cmd(
+    app_handle: tauri::AppHandle,
     version: String,
     content: String,
     state: State<AppState>,
@@ -1631,12 +1565,14 @@ fn create_release_cmd(
         &format!("Created Release: {}", version),
     )
     .ok();
+    let _ = ShipEvent::ReleasesChanged.emit(&app_handle);
     Ok(map_release_document(&project_dir, &entry))
 }
 
 #[tauri::command]
 #[specta::specta]
 fn update_release_cmd(
+    app_handle: tauri::AppHandle,
     file_name: String,
     content: String,
     state: State<AppState>,
@@ -1656,6 +1592,7 @@ fn update_release_cmd(
     )
     .ok();
     let updated = get_release_by_id(&project_dir, id).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ReleasesChanged.emit(&app_handle);
     Ok(map_release_document(&project_dir, &updated))
 }
 
@@ -1687,6 +1624,7 @@ fn get_feature_cmd(
 #[tauri::command]
 #[specta::specta]
 fn create_feature_cmd(
+    app_handle: tauri::AppHandle,
     title: String,
     content: String,
     release: Option<String>,
@@ -1709,12 +1647,14 @@ fn create_feature_cmd(
         &format!("Created Feature: {}", title),
     )
     .ok();
+    let _ = ShipEvent::FeaturesChanged.emit(&app_handle);
     Ok(map_feature_document(&project_dir, &entry))
 }
 
 #[tauri::command]
 #[specta::specta]
 fn update_feature_cmd(
+    app_handle: tauri::AppHandle,
     file_name: String,
     content: String,
     state: State<AppState>,
@@ -1729,6 +1669,7 @@ fn update_feature_cmd(
     )
     .ok();
     let updated = get_feature_by_id(&project_dir, id).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::FeaturesChanged.emit(&app_handle);
     Ok(map_feature_document(&project_dir, &updated))
 }
 
@@ -1752,13 +1693,14 @@ fn get_vision_cmd(state: State<AppState>) -> Result<VisionDocument, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn update_vision_cmd(content: String, state: State<AppState>) -> Result<VisionDocument, String> {
+fn update_vision_cmd(app_handle: tauri::AppHandle, content: String, state: State<AppState>) -> Result<VisionDocument, String> {
     let project_dir = get_active_dir(&state)?;
     let vision_path = runtime::project::project_ns(&project_dir).join("vision.md");
     if let Some(parent) = vision_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&vision_path, &content).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
     Ok(VisionDocument { content })
 }
 
@@ -1815,6 +1757,7 @@ fn get_note_cmd(
 #[tauri::command]
 #[specta::specta]
 fn create_note_cmd(
+    app_handle: tauri::AppHandle,
     title: String,
     content: String,
     scope: Option<String>,
@@ -1823,6 +1766,7 @@ fn create_note_cmd(
     let (note_scope, project_dir) = resolve_note_scope_and_dir(&state, scope)?;
     let note = create_note(note_scope, project_dir.as_deref(), &title, &content)
         .map_err(|e| e.to_string())?;
+    let _ = ShipEvent::NotesChanged.emit(&app_handle);
     Ok(NoteDocument {
         id: note.id,
         title: note.title,
@@ -1834,6 +1778,7 @@ fn create_note_cmd(
 #[tauri::command]
 #[specta::specta]
 fn update_note_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     content: String,
     scope: Option<String>,
@@ -1842,6 +1787,7 @@ fn update_note_cmd(
     let (note_scope, project_dir) = resolve_note_scope_and_dir(&state, scope)?;
     let note = update_note_content(note_scope, project_dir.as_deref(), &id, &content)
         .map_err(|e| e.to_string())?;
+    let _ = ShipEvent::NotesChanged.emit(&app_handle);
     Ok(NoteDocument {
         id: note.id,
         title: note.title,
@@ -1853,13 +1799,16 @@ fn update_note_cmd(
 #[tauri::command]
 #[specta::specta]
 fn delete_note_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     scope: Option<String>,
     state: State<AppState>,
 ) -> Result<(), String> {
     let (note_scope, project_dir) = resolve_note_scope_and_dir(&state, scope)?;
     ship_module_project::delete_note(note_scope, project_dir.as_deref(), &id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let _ = ShipEvent::NotesChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Rules ──────────────────────────────────────────────────────────
@@ -1881,30 +1830,38 @@ fn get_rule_cmd(file_name: String, state: State<AppState>) -> Result<runtime::ru
 #[tauri::command]
 #[specta::specta]
 fn create_rule_cmd(
+    app_handle: tauri::AppHandle,
     file_name: String,
     content: String,
     state: State<AppState>,
 ) -> Result<runtime::rule::Rule, String> {
     let project_dir = get_active_dir(&state)?;
-    runtime::create_rule(project_dir, &file_name, &content).map_err(|e| e.to_string())
+    let rule = runtime::create_rule(project_dir, &file_name, &content).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(rule)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn update_rule_cmd(
+    app_handle: tauri::AppHandle,
     file_name: String,
     content: String,
     state: State<AppState>,
 ) -> Result<runtime::rule::Rule, String> {
     let project_dir = get_active_dir(&state)?;
-    runtime::update_rule(project_dir, &file_name, &content).map_err(|e| e.to_string())
+    let rule = runtime::update_rule(project_dir, &file_name, &content).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(rule)
 }
 
 #[tauri::command]
 #[specta::specta]
-fn delete_rule_cmd(file_name: String, state: State<AppState>) -> Result<(), String> {
+fn delete_rule_cmd(app_handle: tauri::AppHandle, file_name: String, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    runtime::delete_rule(project_dir, &file_name).map_err(|e| e.to_string())
+    runtime::delete_rule(project_dir, &file_name).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Permissions ────────────────────────────────────────────────────
@@ -1921,11 +1878,14 @@ fn get_permissions_cmd(
 #[tauri::command]
 #[specta::specta]
 fn save_permissions_cmd(
+    app_handle: tauri::AppHandle,
     permissions: runtime::permissions::Permissions,
     state: State<AppState>,
 ) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    runtime::save_permissions(project_dir, &permissions).map_err(|e| e.to_string())
+    runtime::save_permissions(project_dir, &permissions).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Workspace ──────────────────────────────────────────────────────
@@ -3063,9 +3023,11 @@ fn get_project_config(state: State<AppState>) -> Result<ProjectConfig, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn save_project_config(config: ProjectConfig, state: State<AppState>) -> Result<(), String> {
+fn save_project_config(app_handle: tauri::AppHandle, config: ProjectConfig, state: State<AppState>) -> Result<(), String> {
     let project_dir = get_active_dir(&state)?;
-    save_config(&config, Some(project_dir)).map_err(|e| e.to_string())
+    save_config(&config, Some(project_dir)).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Settings ───────────────────────────────────────────────────────
@@ -3078,8 +3040,10 @@ fn get_app_settings() -> Result<ProjectConfig, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn save_app_settings(config: ProjectConfig) -> Result<(), String> {
-    save_config(&config, None).map_err(|e| e.to_string())
+fn save_app_settings(app_handle: tauri::AppHandle, config: ProjectConfig) -> Result<(), String> {
+    save_config(&config, None).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Modes ──────────────────────────────────────────────────────────
@@ -3094,23 +3058,29 @@ fn list_modes_cmd(state: State<AppState>) -> Result<Vec<ModeConfig>, String> {
 
 #[tauri::command]
 #[specta::specta]
-fn add_mode_cmd(mode: ModeConfig, state: State<AppState>) -> Result<(), String> {
+fn add_mode_cmd(app_handle: tauri::AppHandle, mode: ModeConfig, state: State<AppState>) -> Result<(), String> {
     let dir = get_active_dir(&state)?;
-    add_mode(Some(dir), mode).map_err(|e| e.to_string())
+    add_mode(Some(dir), mode).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn remove_mode_cmd(id: String, state: State<AppState>) -> Result<(), String> {
+fn remove_mode_cmd(app_handle: tauri::AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
     let dir = get_active_dir(&state)?;
-    remove_mode(Some(dir), &id).map_err(|e| e.to_string())
+    remove_mode(Some(dir), &id).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn set_active_mode_cmd(id: Option<String>, state: State<AppState>) -> Result<(), String> {
+fn set_active_mode_cmd(app_handle: tauri::AppHandle, id: Option<String>, state: State<AppState>) -> Result<(), String> {
     let dir = get_active_dir(&state)?;
-    set_active_mode(Some(dir), id.as_deref()).map_err(|e| e.to_string())
+    set_active_mode(Some(dir), id.as_deref()).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 #[tauri::command]
@@ -3131,16 +3101,20 @@ fn list_mcp_servers_cmd(state: State<AppState>) -> Result<Vec<McpServerConfig>, 
 
 #[tauri::command]
 #[specta::specta]
-fn add_mcp_server_cmd(server: McpServerConfig, state: State<AppState>) -> Result<(), String> {
+fn add_mcp_server_cmd(app_handle: tauri::AppHandle, server: McpServerConfig, state: State<AppState>) -> Result<(), String> {
     let dir = get_active_dir(&state)?;
-    add_mcp_server(Some(dir), server).map_err(|e| e.to_string())
+    add_mcp_server(Some(dir), server).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 #[tauri::command]
 #[specta::specta]
-fn remove_mcp_server_cmd(id: String, state: State<AppState>) -> Result<(), String> {
+fn remove_mcp_server_cmd(app_handle: tauri::AppHandle, id: String, state: State<AppState>) -> Result<(), String> {
     let dir = get_active_dir(&state)?;
-    remove_mcp_server(Some(dir), &id).map_err(|e| e.to_string())
+    remove_mcp_server(Some(dir), &id).map_err(|e| e.to_string())?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Skills ─────────────────────────────────────────────────────────
@@ -3174,6 +3148,7 @@ fn get_skill_cmd(
 #[tauri::command]
 #[specta::specta]
 fn create_skill_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     name: String,
     content: String,
@@ -3181,15 +3156,18 @@ fn create_skill_cmd(
     state: State<AppState>,
 ) -> Result<Skill, String> {
     let dir = get_active_dir(&state)?;
-    match scope.as_deref() {
+    let skill = match scope.as_deref() {
         Some("user") => create_user_skill(&id, &name, &content).map_err(|e| e.to_string()),
         _ => create_skill(&dir, &id, &name, &content).map_err(|e| e.to_string()),
-    }
+    }?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(skill)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn update_skill_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     name: Option<String>,
     content: Option<String>,
@@ -3197,19 +3175,22 @@ fn update_skill_cmd(
     state: State<AppState>,
 ) -> Result<Skill, String> {
     let dir = get_active_dir(&state)?;
-    match scope.as_deref() {
+    let skill = match scope.as_deref() {
         Some("user") => {
             update_user_skill(&id, name.as_deref(), content.as_deref()).map_err(|e| e.to_string())
         }
         _ => {
             update_skill(&dir, &id, name.as_deref(), content.as_deref()).map_err(|e| e.to_string())
         }
-    }
+    }?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(skill)
 }
 
 #[tauri::command]
 #[specta::specta]
 fn delete_skill_cmd(
+    app_handle: tauri::AppHandle,
     id: String,
     scope: Option<String>,
     state: State<AppState>,
@@ -3218,7 +3199,9 @@ fn delete_skill_cmd(
     match scope.as_deref() {
         Some("user") => delete_user_skill(&id).map_err(|e| e.to_string()),
         _ => delete_skill(&dir, &id).map_err(|e| e.to_string()),
-    }
+    }?;
+    let _ = ShipEvent::ConfigChanged.emit(&app_handle);
+    Ok(())
 }
 
 // ─── Commands: Agents / Providers ─────────────────────────────────────────────

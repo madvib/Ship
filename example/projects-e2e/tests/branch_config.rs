@@ -37,6 +37,19 @@ fn stdio_server(id: &str) -> McpServerConfig {
 fn get_feature_id(path: &Path) -> String {
     let content = std::fs::read_to_string(path).unwrap();
     for line in content.lines() {
+        // New format: <!-- ship:feature id=ABC123 -->
+        if let Some(rest) = line.strip_prefix("<!-- ship:feature ") {
+            if let Some(id_part) = rest.split_whitespace().find(|p| p.starts_with("id=")) {
+                let id = id_part
+                    .strip_prefix("id=")
+                    .unwrap_or("")
+                    .trim_end_matches("-->");
+                if !id.is_empty() {
+                    return id.trim().to_string();
+                }
+            }
+        }
+        // Legacy TOML format: id = "ABC123"
         if line.starts_with("id = ") {
             return line.split('"').nth(1).unwrap().to_string();
         }

@@ -10,7 +10,7 @@ use runtime::project::{
     SHIP_DIR_NAME, adrs_dir as runtime_adrs_dir, agents_ns as runtime_agents_ns,
     features_dir as runtime_features_dir, generated_ns as runtime_generated_ns, get_global_dir,
     get_project_dir as runtime_get_project_dir, get_project_name as runtime_get_project_name,
-    issues_dir as runtime_issues_dir, mcp_config_path as runtime_mcp_config_path,
+    mcp_config_path as runtime_mcp_config_path,
     modes_dir as runtime_modes_dir, notes_dir as runtime_notes_dir,
     permissions_config_path as runtime_permissions_config_path, project_ns as runtime_project_ns,
     register_ship_namespace as runtime_register_ship_namespace,
@@ -29,7 +29,6 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_STATUSES: &[&str] = &["backlog", "in-progress", "blocked", "done"];
-pub const ISSUE_STATUSES: &[&str] = DEFAULT_STATUSES;
 pub const ADR_STATUSES: &[&str] = &[
     "proposed",
     "accepted",
@@ -80,10 +79,6 @@ pub fn specs_dir(ship_dir: &Path) -> PathBuf {
 
 pub fn features_dir(ship_dir: &Path) -> PathBuf {
     runtime_features_dir(ship_dir)
-}
-
-pub fn issues_dir(ship_dir: &Path) -> PathBuf {
-    runtime_issues_dir(ship_dir)
 }
 
 pub fn modes_dir(ship_dir: &Path) -> PathBuf {
@@ -459,11 +454,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         fs::create_dir_all(features.join(status))?;
     }
 
-    let issues = issues_dir(&ship_path);
-    for status in DEFAULT_STATUSES {
-        fs::create_dir_all(issues.join(status))?;
-    }
-
     let specs = specs_dir(&ship_path);
     for status in SPEC_STATUSES {
         fs::create_dir_all(specs.join(status))?;
@@ -516,10 +506,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
 }
 
 fn write_default_templates(ship_path: &Path) -> Result<()> {
-    write_if_missing(
-        &issues_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/ISSUE.md"),
-    )?;
     write_if_missing(
         &specs_dir(ship_path).join("TEMPLATE.md"),
         include_str!("../../../../core/runtime/src/templates/SPEC.md"),
@@ -581,11 +567,7 @@ fn write_directory_readmes(ship_path: &Path) -> Result<()> {
         ),
         (
             workflow_ns(ship_path),
-            "# workflow/\n\nExecution artifacts for ongoing work.\n- `issues/`\n- `specs/`\n- `features/`\n".to_string(),
-        ),
-        (
-            issues_dir(ship_path),
-            format!("# workflow/issues/\n\nGranular implementation tasks, organized by status:\n- {}\n", DEFAULT_STATUSES.join("\n- ")),
+            "# workflow/\n\nExecution artifacts for ongoing work.\n- `specs/`\n- `features/`\n".to_string(),
         ),
         (
             specs_dir(ship_path),
@@ -665,7 +647,7 @@ fn default_agent_modes() -> Vec<ModeConfig> {
             id: "planning".to_string(),
             name: "Planning".to_string(),
             description: Some(
-                "High-context planning for specs, issues, and ADR prep before coding.".to_string(),
+                "High-context planning for specs and ADR prep before coding.".to_string(),
             ),
             active_tools: vec![
                 "ship_list_notes".to_string(),
@@ -674,8 +656,6 @@ fn default_agent_modes() -> Vec<ModeConfig> {
                 "ship_get_spec".to_string(),
                 "ship_create_spec".to_string(),
                 "ship_update_spec".to_string(),
-                "ship_list_issues".to_string(),
-                "ship_create_issue".to_string(),
                 "ship_draft_adr".to_string(),
                 "ship_get_project_info".to_string(),
             ],
@@ -685,14 +665,9 @@ fn default_agent_modes() -> Vec<ModeConfig> {
             id: "code".to_string(),
             name: "Code".to_string(),
             description: Some(
-                "Execution-focused mode for implementing and moving work through issue status."
-                    .to_string(),
+                "Execution-focused mode for implementing and progressing features.".to_string(),
             ),
             active_tools: vec![
-                "ship_list_issues".to_string(),
-                "ship_get_issue".to_string(),
-                "ship_update_issue".to_string(),
-                "ship_move_issue".to_string(),
                 "ship_list_specs".to_string(),
                 "ship_get_spec".to_string(),
                 "ship_update_spec".to_string(),
@@ -931,7 +906,6 @@ fn ensure_registered_namespaces(ship_path: &Path, namespaces: &[NamespaceConfig]
 
 fn template_rel_path(kind: &str) -> Result<&'static str> {
     match kind {
-        "issue" | "issues" => Ok("workflow/issues/TEMPLATE.md"),
         "adr" | "adrs" => Ok("project/adrs/TEMPLATE.md"),
         "note" | "notes" => Ok("project/notes/TEMPLATE.md"),
         "spec" | "specs" => Ok("workflow/specs/TEMPLATE.md"),
@@ -944,7 +918,6 @@ fn template_rel_path(kind: &str) -> Result<&'static str> {
 
 fn legacy_template_file_name(kind: &str) -> Option<&'static str> {
     match kind {
-        "issue" | "issues" => Some("ISSUE.md"),
         "adr" | "adrs" => Some("ADR.md"),
         "note" | "notes" => Some("NOTE.md"),
         "spec" | "specs" => Some("SPEC.md"),
@@ -957,9 +930,6 @@ fn legacy_template_file_name(kind: &str) -> Option<&'static str> {
 
 fn template_fallback(kind: &str) -> Result<&'static str> {
     match kind {
-        "issue" | "issues" => Ok(include_str!(
-            "../../../../core/runtime/src/templates/ISSUE.md"
-        )),
         "adr" | "adrs" => Ok(include_str!(
             "../../../../core/runtime/src/templates/ADR.md"
         )),
@@ -1048,8 +1018,6 @@ pub struct ProjectDiscovery {
     pub name: String,
     #[specta(type = String)]
     pub path: PathBuf,
-    #[serde(default)]
-    pub issue_count: usize,
 }
 
 pub fn discover_projects(root: PathBuf) -> Result<Vec<ProjectDiscovery>> {
@@ -1082,7 +1050,6 @@ pub fn discover_projects(root: PathBuf) -> Result<Vec<ProjectDiscovery>> {
                 projects.push(ProjectDiscovery {
                     name: name.into_owned(),
                     path: ship_dir,
-                    issue_count: 0,
                 });
             }
         }

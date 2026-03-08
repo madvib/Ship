@@ -16,10 +16,10 @@ use rmcp::{
 };
 use runtime::project::{get_active_project_global, get_project_dir, set_active_project_global};
 use runtime::{
-    add_status, autodetect_providers, create_user_skill, delete_skill, delete_user_skill,
+    autodetect_providers, create_user_skill, delete_skill, delete_user_skill,
     disable_provider, enable_provider, get_active_mode, get_config, get_effective_skill,
     list_effective_skills, list_events_since, list_models, list_providers, log_action_by, read_log,
-    remove_status, set_active_mode, set_category_committed, update_skill, update_user_skill,
+    set_active_mode, set_category_committed, update_skill, update_user_skill,
     workspace::{
         CreateWorkspaceRequest as RuntimeCreateWorkspaceRequest,
         EndWorkspaceSessionRequest as RuntimeEndWorkspaceSessionRequest, WorkspaceType,
@@ -41,9 +41,6 @@ use ship_module_project::ops::feature::{
     create_feature, get_feature_by_id, list_features, sync_feature_docs_after_session,
     update_feature_content,
 };
-use ship_module_project::ops::issue::{
-    create_issue, delete_issue, get_issue_by_id, list_issues, move_issue_with_from, update_issue,
-};
 use ship_module_project::ops::note::{
     create_note, get_note_by_id, list_notes, update_note_content,
 };
@@ -52,7 +49,7 @@ use ship_module_project::ops::release::{
 };
 use ship_module_project::ops::spec::{create_spec, get_spec_by_id, list_specs, update_spec};
 use ship_module_project::{
-    IssueEntry, IssueStatus, NoteScope, get_project_name, list_registered_projects,
+    NoteScope, get_project_name, list_registered_projects,
 };
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
@@ -137,7 +134,7 @@ impl ShipServer {
             "create_feature",
             "get_feature",
             "update_feature",
-            "log_decision",
+            "create_adr",
             // Workspace
             "list_workspaces",
             "get_workspace",
@@ -160,13 +157,8 @@ impl ShipServer {
 
     fn is_project_workspace_tool(tool_name: &str) -> bool {
         // Tools auto-unlocked when the active workspace is type=project.
-        // These cover the PM layer: issues, specs, releases, session history, log.
+        // These cover the PM layer: specs, releases, session history, log.
         const PROJECT_TOOLS: &[&str] = &[
-            "create_issue",
-            "update_issue",
-            "move_issue",
-            "delete_issue",
-            "search_issues",
             "create_spec",
             "update_spec",
             "create_release",
@@ -289,9 +281,7 @@ impl ShipServer {
 
         let name = get_project_name(&project_dir);
         let config = get_config(Some(project_dir.clone())).unwrap_or_default();
-        let statuses: Vec<String> = config.statuses.iter().map(|s| s.id.clone()).collect();
 
-        let issues = list_issues(&project_dir).unwrap_or_default();
         let releases = list_releases(&project_dir).unwrap_or_default();
         let features = list_features(&project_dir).unwrap_or_default();
         let specs = list_specs(&project_dir).unwrap_or_default();
@@ -353,29 +343,6 @@ impl ShipServer {
             let names: Vec<_> = config.modes.iter().map(|m| m.id.as_str()).collect();
             out.push_str(&names.join(", "));
             out.push_str(")\n");
-        }
-
-        // Issue summary
-        out.push_str("\n## Open Issues\n");
-        let open: Vec<&IssueEntry> = issues
-            .iter()
-            .filter(|e| e.status != IssueStatus::Done)
-            .collect();
-        if open.is_empty() {
-            out.push_str("No open issues.\n");
-        } else {
-            for status in &statuses {
-                let in_status: Vec<_> = open
-                    .iter()
-                    .filter(|e| e.status.to_string() == *status)
-                    .collect();
-                if !in_status.is_empty() {
-                    out.push_str(&format!("\n### {}\n", status));
-                    for e in in_status {
-                        out.push_str(&format!("- {} ({})\n", e.issue.metadata.title, e.file_name));
-                    }
-                }
-            }
         }
 
         // Releases
@@ -469,66 +436,6 @@ impl ShipServer {
         }
 
         out
-    }
-
-    // ─── Issue Tools ──────────────────────────────────────────────────────────
-
-    /// Create a new issue
-    #[tool(description = "Create a new issue in the active project")]
-    async fn create_issue(&self, Parameters(req): Parameters<CreateIssueRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let status_str = req.status.as_deref().unwrap_or("backlog");
-        let status = status_str
-            .parse::<IssueStatus>()
-            .unwrap_or(IssueStatus::Backlog);
-        match create_issue(
-            &project_dir,
-            &req.title,
-            &req.description,
-            status.clone(),
-            None,
-            None,
-            None,
-            None,
-        ) {
-            Ok(file) => format!("Created issue: {} ({})", file.file_name, status),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    /// Update an issue's title or description
-    #[tool(description = "Update the title or description of an existing issue")]
-    async fn update_issue(&self, Parameters(req): Parameters<UpdateIssueRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let issues = list_issues(&project_dir).unwrap_or_default();
-        let entry = issues
-            .iter()
-            .find(|e| e.status.to_string() == req.status && e.file_name == req.file_name);
-        match entry {
-            Some(entry) => {
-                let mut issue = entry.issue.clone();
-                if let Some(title) = req.title {
-                    issue.metadata.title = title;
-                }
-                if let Some(desc) = req.description {
-                    issue.description = desc;
-                }
-                match update_issue(&project_dir, &entry.id, issue) {
-                    Ok(_) => format!("Updated: {}", req.file_name),
-                    Err(e) => format!("Error: {}", e),
-                }
-            }
-            None => format!(
-                "Error: Issue not found in status {} with filename {}",
-                req.status, req.file_name
-            ),
-        }
     }
 
     // ─── Notes Tools ────────────────────────────────────────────────────────
@@ -688,89 +595,22 @@ impl ShipServer {
         format!("Deleted skill: {}", req.id)
     }
 
-    /// Move an issue to a different status
-    #[tool(description = "Move an issue from one status to another (e.g. backlog → in-progress)")]
-    async fn move_issue(&self, Parameters(req): Parameters<MoveIssueRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let from_status = match req.from_status.parse::<IssueStatus>() {
-            Ok(s) => s,
-            Err(e) => return format!("Error: {}", e),
-        };
-        let to_status = match req.to_status.parse::<IssueStatus>() {
-            Ok(s) => s,
-            Err(e) => return format!("Error: {}", e),
-        };
-        match move_issue_with_from(&project_dir, &req.file_name, from_status, to_status) {
-            Ok(_) => format!("{}: {} → {}", req.file_name, req.from_status, req.to_status),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    /// Delete an issue
-    #[tool(description = "Delete an issue permanently")]
-    async fn delete_issue(&self, Parameters(req): Parameters<DeleteIssueRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        match delete_issue(&project_dir, &req.file_name) {
-            Ok(_) => format!("Deleted: {}", req.file_name),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    /// Search issues by text
-    #[tool(description = "Search issues by text in their title or description")]
-    async fn search_issues(&self, Parameters(req): Parameters<SearchIssuesRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        match list_issues(&project_dir) {
-            Ok(entries) => {
-                let query = req.query.to_lowercase();
-                let matches: Vec<&IssueEntry> = entries
-                    .iter()
-                    .filter(|e| {
-                        e.issue.metadata.title.to_lowercase().contains(&query)
-                            || e.issue.description.to_lowercase().contains(&query)
-                    })
-                    .collect();
-                if matches.is_empty() {
-                    return format!("No issues matching '{}'", req.query);
-                }
-                let mut out = format!("Issues matching '{}':\n", req.query);
-                for e in matches {
-                    out.push_str(&format!(
-                        "- [{}] {} ({})\n",
-                        e.status, e.issue.metadata.title, e.file_name
-                    ));
-                }
-                out
-            }
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
     // ─── ADR Tools ────────────────────────────────────────────────────────────
 
-    /// Log an architectural decision
+    /// Create a new Architecture Decision Record
     #[tool(
-        description = "Log an architectural decision (ADR). Use when committing to a technical \
-        approach, trade-off, or design choice that future contributors need to understand. \
+        description = "Create a new Architecture Decision Record (ADR). Use when committing to a \
+        technical approach, trade-off, or design choice that future contributors need to understand. \
         Captures the decision and reasoning in the project record."
     )]
-    async fn log_decision(&self, Parameters(req): Parameters<LogDecisionRequest>) -> String {
+    async fn create_adr(&self, Parameters(req): Parameters<LogDecisionRequest>) -> String {
         let project_dir = match self.get_effective_project_dir().await {
             Ok(d) => d,
             Err(e) => return e,
         };
         match create_adr(&project_dir, &req.title, "", &req.decision, "proposed") {
             Ok(entry) => format!(
-                "Logged decision '{}' (id: {})",
+                "Created ADR '{}' (id: {})",
                 entry.adr.metadata.title, entry.id
             ),
             Err(e) => format!("Error: {}", e),
@@ -1048,41 +888,7 @@ impl ShipServer {
             return format!("Error: {}", e);
         }
         match ghost_issues::mark_promoted(&project_dir, &req.file, req.line) {
-            Ok(true) => {
-                if let Ok(Some(scan)) = ghost_issues::load_last_scan(&project_dir) {
-                    if let Some(g) = scan
-                        .issues
-                        .iter()
-                        .find(|g| g.file == req.file && g.line == req.line)
-                    {
-                        let title = g.suggested_title();
-                        let desc = format!(
-                            "Promoted from `{}:{}` ({}).\n\nOriginal comment: {}",
-                            g.file,
-                            g.line,
-                            g.kind.as_str(),
-                            g.text.trim()
-                        );
-                        match create_issue(
-                            &project_dir,
-                            &title,
-                            &desc,
-                            IssueStatus::Backlog,
-                            None,
-                            None,
-                            None,
-                            None,
-                        ) {
-                            Ok(file) => format!("Created issue: {}", file.file_name),
-                            Err(e) => format!("Marked promoted but failed to create issue: {}", e),
-                        }
-                    } else {
-                        "Marked as promoted.".to_string()
-                    }
-                } else {
-                    "Marked as promoted.".to_string()
-                }
-            }
+            Ok(true) => "Marked as promoted.".to_string(),
             Ok(false) => format!(
                 "Ghost issue not found at {}:{}. Run ghost_scan first.",
                 req.file, req.line
@@ -1091,52 +897,7 @@ impl ShipServer {
         }
     }
 
-    // ─── Status / Category Tools ─────────────────────────────────────────────
-
-    /// Add or remove an issue status/category
-    #[tool(
-        description = "Add or remove an issue status/category. action: 'add' or 'remove'. Existing issues are not affected when removing."
-    )]
-    async fn manage_status(&self, Parameters(req): Parameters<ManageStatusRequest>) -> String {
-        let project_dir = self.get_effective_project_dir().await.ok();
-        match req.action.as_str() {
-            "add" => match add_status(project_dir, &req.name) {
-                Ok(_) => format!(
-                    "Added status: {}",
-                    req.name.to_lowercase().replace(' ', "-")
-                ),
-                Err(e) => format!("Error: {}", e),
-            },
-            "remove" => match remove_status(project_dir, &req.name) {
-                Ok(_) => format!("Removed status: {}", req.name),
-                Err(e) => format!("Error: {}", e),
-            },
-            _ => "Error: action must be 'add' or 'remove'".to_string(),
-        }
-    }
-
     // ─── AI Generation Tools ─────────────────────────────────────────────────
-
-    /// Generate a detailed issue description from a title using AI
-    #[tool(
-        description = "Generate a detailed, actionable issue description from a title. Uses MCP sampling (Claude Code) or direct Anthropic API."
-    )]
-    async fn generate_issue_description(
-        &self,
-        peer: Peer<RoleServer>,
-        Parameters(req): Parameters<GenerateIssueRequest>,
-    ) -> String {
-        let system = "You are a project management assistant. Generate clear, concise, actionable issue descriptions in markdown. Include: what needs to be done, why it matters, and acceptance criteria. Be specific but not verbose. 2-4 paragraphs max.";
-        let prompt = match &req.context {
-            Some(ctx) => format!(
-                "Generate an issue description for:\n\nTitle: {}\n\nContext: {}",
-                req.title, ctx
-            ),
-            None => format!("Generate an issue description for:\n\nTitle: {}", req.title),
-        };
-        self.generate_with_sampling(peer, system, &prompt, 800)
-            .await
-    }
 
     /// Generate an Architecture Decision Record from a problem statement
     #[tool(
@@ -1156,23 +917,6 @@ impl ShipServer {
             None => format!("Generate an ADR for:\n\nProblem: {}", req.problem),
         };
         self.generate_with_sampling(peer, system, &prompt, 1000)
-            .await
-    }
-
-    /// Brainstorm issue ideas for a topic
-    #[tool(description = "Brainstorm a list of issue suggestions for a given topic using AI")]
-    async fn brainstorm_issues(
-        &self,
-        peer: Peer<RoleServer>,
-        Parameters(req): Parameters<BrainstormRequest>,
-    ) -> String {
-        let count = req.count.unwrap_or(5);
-        let system = "You are a product and engineering planning assistant. Generate specific, actionable issue titles with one-sentence descriptions. Format as a numbered list.";
-        let prompt = format!(
-            "Brainstorm {} issue ideas for: {}\n\nFormat each as:\n1. **Title** — one sentence description",
-            count, req.topic
-        );
-        self.generate_with_sampling(peer, system, &prompt, 600)
             .await
     }
 
@@ -1768,10 +1512,7 @@ impl ShipServer {
         if let Err(e) = ensure_builtin_plugin_namespaces(&project_dir) {
             return format!("Error: {}", e);
         }
-        // Try to resolve title from issue file
-        let issue_title = get_issue_by_id(&project_dir, &req.issue_file)
-            .map(|entry| entry.issue.metadata.title)
-            .unwrap_or_else(|_| req.issue_file.clone());
+        let issue_title = req.issue_file.clone();
         match time_tracker::start_timer(&project_dir, &req.issue_file, &issue_title, req.note) {
             Ok(t) => format!(
                 "Timer started: {} at {}",
@@ -1850,42 +1591,6 @@ impl ShipServer {
 
     /// Resolve a `ship://` URI to its text content, or `None` if not found.
     async fn resolve_resource_uri(&self, uri: &str, dir: &PathBuf) -> Option<String> {
-        // ship://issues
-        if uri == "ship://issues" {
-            let entries = list_issues(dir).ok()?;
-            if entries.is_empty() {
-                return Some("No issues found.".to_string());
-            }
-            let mut out = String::from("Issues:\n");
-            for e in &entries {
-                out.push_str(&format!(
-                    "- [{}] {} ({})\n",
-                    e.status, e.issue.metadata.title, e.file_name
-                ));
-            }
-            return Some(out);
-        }
-        // ship://issues/{status}/{file}
-        if let Some(rest) = uri.strip_prefix("ship://issues/") {
-            let parts: Vec<&str> = rest.splitn(2, '/').collect();
-            if parts.len() == 2 {
-                let (status, file) = (parts[0], parts[1]);
-                return get_issue_by_id(dir, file).ok().and_then(|entry| {
-                    if entry.status.to_string() != status {
-                        return None;
-                    }
-                    format!(
-                        "Title: {}\nStatus: {}\nCreated: {}\nUpdated: {}\n\n{}",
-                        entry.issue.metadata.title,
-                        status,
-                        entry.issue.metadata.created,
-                        entry.issue.metadata.updated,
-                        entry.issue.description
-                    )
-                    .into()
-                });
-            }
-        }
         // ship://features
         if uri == "ship://features" {
             let entries = list_features(&dir).ok()?;
@@ -2074,7 +1779,7 @@ impl ServerHandler for ShipServer {
             },
             instructions: Some(
                 "Ship project intelligence — three-stage workflow:\n\n\
-                 PLANNING: get_project_info → create_note / create_feature / update_feature / log_decision\n\
+                 PLANNING: get_project_info → create_note / create_feature / update_feature / create_adr\n\
                  WORKSPACE: list_workspaces → activate_workspace → set_mode\n\
                  SESSION: start_session → (work) → log_progress → end_session\n\n\
                  By default only core workflow tools are visible. To access extended tools \
@@ -2157,7 +1862,6 @@ impl ServerHandler for ShipServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
         Ok(ListResourcesResult::with_all_items(vec![
-            RawResource::new("ship://issues", "Issues").no_annotation(),
             RawResource::new("ship://features", "Features").no_annotation(),
             RawResource::new("ship://releases", "Releases").no_annotation(),
             RawResource::new("ship://specs", "Specs").no_annotation(),
@@ -2173,15 +1877,6 @@ impl ServerHandler for ShipServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         Ok(ListResourceTemplatesResult::with_all_items(vec![
-            RawResourceTemplate {
-                uri_template: "ship://issues/{status}/{file}".to_string(),
-                name: "Issue".to_string(),
-                title: Some("Issue by status and filename".to_string()),
-                description: None,
-                mime_type: Some("text/markdown".to_string()),
-                icons: None,
-            }
-            .no_annotation(),
             RawResourceTemplate {
                 uri_template: "ship://features/{file}".to_string(),
                 name: "Feature".to_string(),
@@ -2386,46 +2081,6 @@ mod tests {
         assert!(mcp_json.exists(), ".mcp.json should be written");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn mcp_move_issue_rejects_from_status_mismatch() {
-        let tmp = tempdir().expect("tempdir");
-        let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
-
-        let server = ShipServer::new();
-        *server.active_project.lock().await = Some(project_dir.clone());
-
-        let created = server
-            .create_issue(Parameters(CreateIssueRequest {
-                title: "Ops guard".to_string(),
-                description: "ensure from-status check".to_string(),
-                status: Some("backlog".to_string()),
-            }))
-            .await;
-        assert!(
-            created.contains("Created issue:"),
-            "unexpected create response: {}",
-            created
-        );
-
-        let issues = list_issues(&project_dir).expect("list issues");
-        assert_eq!(issues.len(), 1);
-        let file_name = issues[0].file_name.clone();
-
-        let moved = server
-            .move_issue(Parameters(MoveIssueRequest {
-                file_name,
-                from_status: "in-progress".to_string(),
-                to_status: "done".to_string(),
-            }))
-            .await;
-
-        assert!(
-            moved.contains("Invalid status transition"),
-            "unexpected move response: {}",
-            moved
-        );
-    }
-
     #[test]
     fn mode_gate_normalizes_and_blocks_disallowed_tools() {
         let tmp = tempdir().expect("tempdir");
@@ -2452,8 +2107,8 @@ mod tests {
         ShipServer::enforce_mode_tool_gate(&project_dir, "repair_workspace")
             .expect("workspace repair must remain control-plane allowed");
 
-        let blocked = ShipServer::enforce_mode_tool_gate(&project_dir, "create_issue")
-            .expect_err("create_issue should be blocked");
+        let blocked = ShipServer::enforce_mode_tool_gate(&project_dir, "create_spec")
+            .expect_err("create_spec should be blocked");
         assert!(
             blocked.contains("blocked by active mode"),
             "unexpected mode gate message: {}",

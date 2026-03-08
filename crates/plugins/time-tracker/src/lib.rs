@@ -2,7 +2,6 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Duration, Utc};
 use runtime::Plugin;
 use serde::{Deserialize, Serialize};
-use ship_module_project::{Issue, IssuePlugin};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,26 +37,6 @@ impl TimeEntry {
 }
 
 pub struct TimeTracker;
-
-impl IssuePlugin for TimeTracker {
-    /// Auto-stop the timer when an issue is moved to done.
-    fn on_issue_moved(
-        &self,
-        project_dir: &Path,
-        issue: &Issue,
-        _from: &str,
-        to: &str,
-    ) -> Result<()> {
-        if to == "done" {
-            if let Ok(Some(active)) = get_active_timer(project_dir) {
-                if active.issue_title == issue.metadata.title {
-                    stop_timer(project_dir, None)?;
-                }
-            }
-        }
-        Ok(())
-    }
-}
 
 impl Plugin for TimeTracker {
     fn name(&self) -> &str {

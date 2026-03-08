@@ -236,6 +236,8 @@ impl TestProject {
         Ok(Command::new("git")
             .args(["checkout", "-b", branch])
             .env("PATH", path_env)
+            .env("SHIP_DIR", &self.ship_dir)
+            .env("SHIP_GLOBAL_DIR", &self.global_dir)
             .current_dir(self.dir.path())
             .output()?)
     }
@@ -532,37 +534,3 @@ pub fn create_spec(ship_dir: PathBuf, title: &str, body: &str, status: &str) -> 
     Ok(PathBuf::from(entry.path))
 }
 
-pub fn create_issue(
-    ship_dir: PathBuf,
-    title: &str,
-    description: &str,
-    status: &str,
-) -> Result<PathBuf> {
-    let status = status.parse::<ship_module_project::IssueStatus>()?;
-    let entry = ship_module_project::create_issue(
-        &ship_dir,
-        title,
-        description,
-        status,
-        None,
-        None,
-        None,
-        None,
-    )?;
-    Ok(PathBuf::from(entry.path))
-}
-
-pub fn move_issue(
-    ship_dir: PathBuf,
-    path: PathBuf,
-    _from_status: &str,
-    to_status: &str,
-) -> Result<PathBuf> {
-    let new_status = to_status.parse::<ship_module_project::IssueStatus>()?;
-    let reference = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow::anyhow!("invalid issue path: {}", path.display()))?;
-    let entry = ship_module_project::move_issue(&ship_dir, reference, new_status)?;
-    Ok(PathBuf::from(entry.path))
-}

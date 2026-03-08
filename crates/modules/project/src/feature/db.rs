@@ -18,12 +18,13 @@ pub fn upsert_feature_db(ship_dir: &Path, feature: &Feature, status: &FeatureSta
         // Upsert feature
         sqlx::query(
             "INSERT INTO feature
-               (id, title, description, status, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (id, title, description, status, body, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                title       = excluded.title,
                description = excluded.description,
                status      = excluded.status,
+               body        = excluded.body,
                release_id  = excluded.release_id,
                active_target_id = excluded.active_target_id,
                spec_id     = excluded.spec_id,
@@ -36,6 +37,7 @@ pub fn upsert_feature_db(ship_dir: &Path, feature: &Feature, status: &FeatureSta
         .bind(&feature.metadata.title)
         .bind(&feature.metadata.description)
         .bind(status.to_string())
+        .bind(&feature.body)
         .bind(&feature.metadata.release_id)
         .bind(&feature.metadata.active_target_id)
         .bind(&feature.metadata.spec_id)
@@ -95,7 +97,7 @@ pub fn get_feature_db(ship_dir: &Path, id: &str) -> Result<Option<FeatureEntry>>
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let row_opt = sqlx::query(
-            "SELECT id, title, description, status, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at
+            "SELECT id, title, description, status, body, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at
              FROM feature WHERE id = ?",
         )
         .bind(id)
@@ -107,14 +109,15 @@ pub fn get_feature_db(ship_dir: &Path, id: &str) -> Result<Option<FeatureEntry>>
             let title: String = r.get(1);
             let description: Option<String> = r.get(2);
             let status_str: String = r.get(3);
-            let release_id: Option<String> = r.get(4);
-            let active_target_id: Option<String> = r.get(5);
-            let spec_id: Option<String> = r.get(6);
-            let branch: Option<String> = r.get(7);
-            let agent_json: Option<String> = r.get(8);
-            let tags_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let body: String = r.get(4);
+            let release_id: Option<String> = r.get(5);
+            let active_target_id: Option<String> = r.get(6);
+            let spec_id: Option<String> = r.get(7);
+            let branch: Option<String> = r.get(8);
+            let agent_json: Option<String> = r.get(9);
+            let tags_json: String = r.get(10);
+            let created: String = r.get(11);
+            let updated: String = r.get(12);
 
             let status = FeatureStatus::from_str(&status_str).unwrap_or_default();
             let agent = agent_json.and_then(|j| serde_json::from_str(&j).ok());
@@ -175,7 +178,7 @@ pub fn get_feature_db(ship_dir: &Path, id: &str) -> Result<Option<FeatureEntry>>
                         agent,
                         tags,
                     },
-                    body: String::new(), // Body handled by file system or separate field
+                    body,
                     todos,
                     criteria,
                 },
@@ -190,7 +193,7 @@ pub fn list_features_db(ship_dir: &Path) -> Result<Vec<FeatureEntry>> {
     let mut conn = runtime::state_db::open_project_connection(ship_dir)?;
     runtime::state_db::block_on(async {
         let rows = sqlx::query(
-            "SELECT id, title, description, status, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at
+            "SELECT id, title, description, status, body, release_id, active_target_id, spec_id, branch, agent_json, tags_json, created_at, updated_at
              FROM feature ORDER BY updated_at DESC",
         )
         .fetch_all(&mut conn)
@@ -202,14 +205,15 @@ pub fn list_features_db(ship_dir: &Path) -> Result<Vec<FeatureEntry>> {
             let title: String = r.get(1);
             let description: Option<String> = r.get(2);
             let status_str: String = r.get(3);
-            let release_id: Option<String> = r.get(4);
-            let active_target_id: Option<String> = r.get(5);
-            let spec_id: Option<String> = r.get(6);
-            let branch: Option<String> = r.get(7);
-            let agent_json: Option<String> = r.get(8);
-            let tags_json: String = r.get(9);
-            let created: String = r.get(10);
-            let updated: String = r.get(11);
+            let body: String = r.get(4);
+            let release_id: Option<String> = r.get(5);
+            let active_target_id: Option<String> = r.get(6);
+            let spec_id: Option<String> = r.get(7);
+            let branch: Option<String> = r.get(8);
+            let agent_json: Option<String> = r.get(9);
+            let tags_json: String = r.get(10);
+            let created: String = r.get(11);
+            let updated: String = r.get(12);
 
             let status = FeatureStatus::from_str(&status_str).unwrap_or_default();
             let agent = agent_json.and_then(|j| serde_json::from_str(&j).ok());
@@ -235,9 +239,9 @@ pub fn list_features_db(ship_dir: &Path) -> Result<Vec<FeatureEntry>> {
                         agent,
                         tags,
                     },
-                    body: String::new(),
-                    todos: Vec::new(), // Optional: lazy load or join? Joining is better.
-                    criteria: Vec::new(), // For list, maybe we don't need the full checklists.
+                    body,
+                    todos: Vec::new(),
+                    criteria: Vec::new(),
                 },
             });
         }

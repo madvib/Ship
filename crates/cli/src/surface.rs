@@ -20,11 +20,6 @@ pub enum Commands {
         /// Directory to initialize (defaults to current directory)
         path: Option<PathBuf>,
     },
-    /// Manage project issues
-    Issue {
-        #[command(subcommand)]
-        action: IssueCommands,
-    },
     /// Manage architecture decisions
     Adr {
         #[command(subcommand)]
@@ -357,20 +352,6 @@ pub enum TimeCommands {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum IssueCommands {
-    /// Create a new issue
-    Create { title: String, description: String },
-    /// List all issues
-    List,
-    /// Move an issue to a new status
-    Move {
-        file_name: String,
-        from: String,
-        to: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum AdrCommands {
     /// Create a new ADR
     Create { title: String, decision: String },
@@ -502,6 +483,13 @@ pub enum SpecCommands {
     List,
     /// Print a spec document's markdown content
     Get { file_name: String },
+    /// Update a spec's content (reads from stdin if --content omitted)
+    Update {
+        file_name: String,
+        /// New content. If omitted, reads from stdin.
+        #[arg(short, long)]
+        content: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

@@ -777,11 +777,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         "project/features",
         "project/releases",
         "project/notes",
-        "workflow/issues/backlog",
-        "workflow/issues/in-progress",
-        "workflow/issues/review",
-        "workflow/issues/blocked",
-        "workflow/issues/done",
         "workflow/specs",
         "generated",
     ] {
@@ -819,29 +814,12 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         &ship_path.join("workflow/README.md"),
         "# Workflow Namespace\n",
     )?;
-    crate::events::ensure_event_log(&ship_path)?;
-    write_if_missing(
-        &skills_dir(&ship_path).join("task-policy").join("SKILL.md"),
-        r#"---
-name: task-policy
-description: Ship workflow policy and execution guardrails for daily delivery.
-metadata:
-  display_name: Shipwright Workflow Policy
-  source: builtin
----
 
-# Shipwright Workflow Policy
-
-Use Ship as the system of record for workflow state changes.
-
-## Canonical Flow
-
-Vision -> Release -> Feature -> Spec -> Issues -> Close Feature -> Ship Release
-"#,
-    )?;
-
+    // Write ship.toml (with a stable project ID) BEFORE any DB access so that
+    // project_db_key can read the ID and derive a stable state directory path.
     if !ship_path.join(crate::config::PRIMARY_CONFIG_FILE).exists() {
         let mut config = crate::config::ProjectConfig::default();
+        config.id = crate::gen_nanoid();
         config.modes = vec![
             crate::config::ModeConfig {
                 id: "planning".to_string(),
@@ -874,6 +852,27 @@ Vision -> Release -> Feature -> Spec -> Issues -> Close Feature -> Ship Release
         config.active_mode = Some("planning".to_string());
         crate::config::save_config(&config, Some(ship_path.clone()))?;
     }
+
+    crate::events::ensure_event_log(&ship_path)?;
+    write_if_missing(
+        &skills_dir(&ship_path).join("task-policy").join("SKILL.md"),
+        r#"---
+name: task-policy
+description: Ship workflow policy and execution guardrails for daily delivery.
+metadata:
+  display_name: Shipwright Workflow Policy
+  source: builtin
+---
+
+# Shipwright Workflow Policy
+
+Use Ship as the system of record for workflow state changes.
+
+## Canonical Flow
+
+Vision -> Release -> Feature -> Spec -> Issues -> Close Feature -> Ship Release
+"#,
+    )?;
 
     let config = crate::config::get_config(Some(ship_path.clone()))?;
     crate::config::ensure_registered_namespaces(&ship_path, &config.namespaces)?;

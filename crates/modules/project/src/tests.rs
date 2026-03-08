@@ -1,12 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        FeatureStatus, IssueStatus, ReleaseStatus, SpecStatus, create_feature, create_issue,
-        create_release, create_spec, delete_issue, delete_spec, get_feature_by_id, get_issue_by_id,
-        get_release_by_id, get_spec_by_id, import_features_from_files, import_releases_from_files,
-        init_demo_project, init_project, list_adrs, list_features, list_issues, list_releases,
-        list_specs, move_feature, move_issue, move_spec, update_feature, update_feature_content,
-        update_issue, update_release, update_release_content, update_spec,
+        FeatureStatus, ReleaseStatus, SpecStatus, create_feature, create_release, create_spec,
+        delete_spec, get_feature_by_id, get_release_by_id, get_spec_by_id,
+        import_features_from_files, import_releases_from_files, init_demo_project, init_project,
+        list_adrs, list_features, list_releases, list_specs, move_feature, move_spec,
+        update_feature, update_feature_content, update_release, update_release_content, update_spec,
     };
     use std::path::Path;
     use tempfile::tempdir;
@@ -29,7 +28,7 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let entry = create_release(&project_dir, "v0.1.0-alpha", "")?;
         assert_eq!(entry.release.metadata.version, "v0.1.0-alpha");
-        assert_eq!(entry.status, ReleaseStatus::Planned);
+        assert_eq!(entry.status, ReleaseStatus::Upcoming);
 
         let path = std::path::PathBuf::from(&entry.path);
         assert!(path.exists());
@@ -334,28 +333,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_issue_api() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let entry = create_issue(
-            &project_dir,
-            "Fix login bug",
-            "Broken for SSO",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        assert_eq!(entry.issue.metadata.title, "Fix login bug");
-        assert_eq!(entry.status, IssueStatus::Backlog);
-        assert!(!std::path::PathBuf::from(&entry.path).exists());
-        let fetched = get_issue_by_id(&project_dir, &entry.id)?;
-        assert_eq!(fetched.issue.description, "Broken for SSO");
-        Ok(())
-    }
-
-    #[test]
     fn test_create_spec_api() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
@@ -415,121 +392,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_issue_collision_gets_suffix() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let p1 = create_issue(
-            &project_dir,
-            "Fix Bug",
-            "a",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        let p2 = create_issue(
-            &project_dir,
-            "Fix Bug!",
-            "b",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        assert_ne!(p1.path, p2.path);
-        assert!(!std::path::PathBuf::from(&p1.path).exists());
-        assert!(!std::path::PathBuf::from(&p2.path).exists());
-        Ok(())
-    }
-
-    #[test]
-    fn test_list_issues_full() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        create_issue(
-            &project_dir,
-            "Full Issue",
-            "Detailed desc",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        let entries = list_issues(&project_dir)?;
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].issue.metadata.title, "Full Issue");
-        assert_eq!(entries[0].issue.description, "Detailed desc");
-        Ok(())
-    }
-
-    #[test]
-    fn test_get_and_update_issue() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let entry = create_issue(
-            &project_dir,
-            "Update Me",
-            "original",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        let initial = get_issue_by_id(&project_dir, &entry.id)?;
-
-        let mut issue = initial.issue.clone();
-        issue.description = "updated".to_string();
-        let updated = update_issue(&project_dir, &entry.id, issue)?;
-        assert_eq!(updated.issue.description, "updated");
-        assert!(updated.issue.metadata.updated >= initial.issue.metadata.updated);
-        Ok(())
-    }
-
-    #[test]
-    fn test_move_issue_api() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let entry = create_issue(
-            &project_dir,
-            "Test Issue",
-            "Desc",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        let moved = move_issue(&project_dir, &entry.id, IssueStatus::InProgress)?;
-        assert!(moved.path.contains("in-progress"));
-        assert_eq!(moved.status, IssueStatus::InProgress);
-        Ok(())
-    }
-
-    #[test]
-    fn test_delete_issue_api() -> anyhow::Result<()> {
-        let tmp = tempdir()?;
-        let project_dir = init_project(tmp.path().to_path_buf())?;
-        let entry = create_issue(
-            &project_dir,
-            "Delete Me",
-            "bye",
-            IssueStatus::Backlog,
-            None,
-            None,
-            None,
-            None,
-        )?;
-        assert!(!std::path::PathBuf::from(&entry.path).exists());
-        delete_issue(&project_dir, &entry.id)?;
-        assert!(get_issue_by_id(&project_dir, &entry.id).is_err());
-        Ok(())
-    }
-
-    #[test]
     fn test_get_and_update_spec() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
@@ -573,10 +435,6 @@ mod tests {
     fn test_init_demo_project_seeds_correctly() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_demo_project(tmp.path().to_path_buf())?;
-
-        // Verify issues
-        let issues = list_issues(&project_dir)?;
-        assert!(issues.len() >= 6);
 
         // Verify specs
         let specs = list_specs(&project_dir)?;

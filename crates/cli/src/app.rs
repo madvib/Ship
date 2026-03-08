@@ -17,9 +17,6 @@ use ship_module_project::ops::feature::{
     get_feature_by_id, get_feature_documentation, list_features, sync_feature_docs_after_session,
     update_feature, update_feature_documentation,
 };
-use ship_module_project::ops::issue::{
-    create_issue, get_issue_by_id, list_issues, move_issue_with_from,
-};
 use ship_module_project::ops::note::{
     create_note, get_note_by_id, list_notes, update_note_content,
 };
@@ -28,8 +25,8 @@ use ship_module_project::ops::release::{
 };
 use ship_module_project::ops::spec::{create_spec, get_spec_by_id, list_specs, update_spec};
 use ship_module_project::{
-    ADR, AdrStatus, FeatureDocStatus, FeatureStatus, ISSUE_STATUSES, IssueStatus, NoteScope,
-    import_adrs_from_files, import_features_from_files, import_issues_from_files,
+    ADR, AdrStatus, FeatureDocStatus, FeatureStatus, NoteScope,
+    import_adrs_from_files, import_features_from_files,
     import_notes_from_files, import_releases_from_files, import_specs_from_files,
     init_demo_project, init_project, list_registered_projects, register_project, rename_project,
     unregister_project,
@@ -186,44 +183,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
         Some(Commands::Init { .. } | Commands::Doctor | Commands::Version) => anyhow::bail!(
             "core command should be handled by cli-framework before app command dispatch"
         ),
-        Some(Commands::Issue { action }) => {
-            let project_dir = get_project_dir_cli()?;
-            match action {
-                IssueCommands::Create { title, description } => {
-                    let issue = create_issue(
-                        &project_dir,
-                        &title,
-                        &description,
-                        IssueStatus::Backlog,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
-                    println!("Issue created: {} ({})", issue.file_name, issue.id);
-                }
-                IssueCommands::List => {
-                    let issues = list_issues(&project_dir)?;
-                    for issue in issues {
-                        println!("[{}] {}", issue.status, issue.file_name);
-                    }
-                }
-                IssueCommands::Move {
-                    file_name,
-                    from,
-                    to,
-                } => {
-                    let from_status = from
-                        .parse::<IssueStatus>()
-                        .map_err(|_| anyhow::anyhow!("Invalid issue status: {}", from))?;
-                    let to_status = to
-                        .parse::<IssueStatus>()
-                        .map_err(|_| anyhow::anyhow!("Invalid issue status: {}", to))?;
-                    move_issue_with_from(&project_dir, &file_name, from_status, to_status)?;
-                    println!("Moved {} from {} to {}", file_name, from, to);
-                }
-            }
-        }
         Some(Commands::Adr { action }) => {
             let project_dir = get_project_dir_cli()?;
             match action {
@@ -402,6 +361,22 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     let spec = get_spec_by_id(&project_dir, &file_name)?;
                     println!("{}", spec.spec.to_markdown()?);
                 }
+                SpecCommands::Update { file_name, content } => {
+                    let entry = get_spec_by_id(&project_dir, &file_name)?;
+                    let body = match content {
+                        Some(c) => c,
+                        None => {
+                            use std::io::Read;
+                            let mut buf = String::new();
+                            std::io::stdin().read_to_string(&mut buf)?;
+                            buf
+                        }
+                    };
+                    let mut spec = entry.spec.clone();
+                    spec.body = body;
+                    update_spec(&project_dir, &entry.id, spec)?;
+                    println!("Spec updated: {}", file_name);
+                }
             }
         }
         Some(Commands::Release { action }) => {
@@ -505,7 +480,23 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 }
                 FeatureCommands::Get { id } => {
                     let entry = get_feature_by_id(&project_dir, &id)?;
-                    println!("{}", entry.feature.to_markdown()?);
+                    let m = &entry.feature.metadata;
+                    println!("id = \"{}\"", m.id);
+                    println!("title = \"{}\"", m.title);
+                    println!("status = \"{}\"", entry.status);
+                    if let Some(ref branch) = m.branch {
+                        println!("branch = \"{}\"", branch);
+                    }
+                    if let Some(ref release_id) = m.release_id {
+                        println!("release_id = \"{}\"", release_id);
+                    }
+                    if let Some(ref spec_id) = m.spec_id {
+                        println!("spec_id = \"{}\"", spec_id);
+                    }
+                    println!("updated = \"{}\"", m.updated);
+                    if !entry.feature.body.trim().is_empty() {
+                        println!("\n---\n\n{}", entry.feature.body.trim());
+                    }
                 }
                 FeatureCommands::Update { id, content } => {
                     let mut entry = get_feature_by_id(&project_dir, &id)?;
@@ -1056,7 +1047,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             let project_dir = init_demo_project(abs.clone())?;
             println!("Demo project ready at {}", project_dir.display());
             println!(
-                "Point Ship at it with: SHIP_DIR={} ship issue list",
+                "Point Ship at it with: SHIP_DIR={} ship feature list",
                 project_dir.display()
             );
         }
@@ -1179,34 +1170,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     let found = ghost_issues::mark_promoted(&project_dir, &file, line)?;
                     if found {
                         println!("Marked {}:{} as promoted.", file, line);
-                        // Optionally create an issue
-                        if let Ok(Some(scan)) = ghost_issues::load_last_scan(&project_dir) {
-                            if let Some(g) = scan
-                                .issues
-                                .iter()
-                                .find(|g| g.file == file && g.line == line)
-                            {
-                                let title = g.suggested_title();
-                                let desc = format!(
-                                    "Promoted from `{}:{}` ({}).\n\nOriginal comment: {}",
-                                    g.file,
-                                    g.line,
-                                    g.kind.as_str(),
-                                    g.text.trim()
-                                );
-                                let path = create_issue(
-                                    &project_dir,
-                                    &title,
-                                    &desc,
-                                    IssueStatus::Backlog,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                )?;
-                                println!("Created issue: {}", path.file_name);
-                            }
-                        }
                     } else {
                         println!(
                             "Ghost issue not found at {}:{}. Run `ship ghost scan` first.",
@@ -1457,7 +1420,6 @@ fn handle_migrate_command(force: bool) -> Result<()> {
     let global_dir = get_global_dir()?;
     let global = migrate_global_state(&global_dir)?;
     let project = migrate_project_state(&project_dir)?;
-    let issues = import_issues_from_files(&project_dir)?;
     let specs = import_specs_from_files(&project_dir)?;
     let config = migrate_json_config_file(&project_dir)?;
     let cleared_project_markers = runtime::clear_project_migration_meta(&project_dir)?;
@@ -1465,7 +1427,7 @@ fn handle_migrate_command(force: bool) -> Result<()> {
     ensure_user_notes_imported_once(true, true)?;
     ensure_project_imported_once(&project_dir, true, true)?;
     println!(
-        "Migration complete{}:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- startup import markers reset: {} project marker{}, {} global marker{}\n- imported docs: {} issue{}, {} spec{}{}.",
+        "Migration complete{}:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- startup import markers reset: {} project marker{}, {} global marker{}\n- imported docs: {} spec{}{}.",
         if force { " (forced)" } else { "" },
         project.files.copied_files,
         project.files.skipped_identical_files,
@@ -1486,8 +1448,6 @@ fn handle_migrate_command(force: bool) -> Result<()> {
         },
         cleared_global_markers,
         if cleared_global_markers == 1 { "" } else { "s" },
-        issues,
-        if issues == 1 { "" } else { "s" },
         specs,
         if specs == 1 { "" } else { "s" },
         if config {
@@ -2231,33 +2191,8 @@ fn handle_time_command(action: TimeCommands, project_dir: &PathBuf) -> Result<()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or(issue.clone());
 
-            // Try to read the issue title from the file
-            let issue_title = {
-                let path = if issue_path.is_absolute() {
-                    issue_path.clone()
-                } else {
-                    // Search through statuses
-                    let mut found = None;
-                    for status in ISSUE_STATUSES {
-                        let p = runtime::project::issues_dir(project_dir)
-                            .join(status)
-                            .join(&issue_file);
-                        if p.exists() {
-                            found = Some(p);
-                            break;
-                        }
-                    }
-                    found.unwrap_or(issue_path)
-                };
-                if path.exists() {
-                    get_issue_by_id(project_dir, &issue_file)
-                        .ok()
-                        .map(|i| i.issue.metadata.title)
-                        .unwrap_or_else(|| issue_file.clone())
-                } else {
-                    issue_file.clone()
-                }
-            };
+            // Use the file name as the title directly (issue lookup removed)
+            let issue_title = issue_file.clone();
 
             let timer = start_timer(project_dir, &issue_file, &issue_title, note)?;
             println!(

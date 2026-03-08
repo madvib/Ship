@@ -1,10 +1,8 @@
 pub mod adr;
 pub mod demo;
 pub mod feature;
-pub mod issue;
 pub mod note;
 pub mod ops;
-pub mod plugin;
 pub mod project;
 pub mod release;
 pub mod spec;
@@ -22,18 +20,13 @@ pub use feature::{
     record_feature_session_update, update_feature, update_feature_content,
     update_feature_documentation,
 };
-pub use issue::{
-    Issue, IssueEntry, IssueMetadata, IssuePriority, IssueStatus, create_issue, delete_issue,
-    get_issue_by_id, import_issues_from_files, list_issues, move_issue, update_issue,
-};
 pub use note::{
     Note, NoteEntry, NoteScope, create_note, delete_note, get_note_by_id, import_notes_from_files,
     list_notes, update_note, update_note_content,
 };
 pub use ops::{OpsError, OpsResult, ShipModule};
-pub use plugin::{IssuePlugin, IssuePluginRegistry};
 pub use project::{
-    ADR_STATUSES, DEFAULT_STATUSES, FEATURE_STATUSES, ISSUE_STATUSES, ProjectEntry,
+    ADR_STATUSES, DEFAULT_STATUSES, FEATURE_STATUSES, ProjectEntry,
     ProjectRegistry, SPEC_STATUSES, discover_projects, get_project_dir, get_project_name,
     init_project, list_registered_namespaces, list_registered_projects, read_template,
     register_project, register_ship_namespace, rename_project, sanitize_file_name,

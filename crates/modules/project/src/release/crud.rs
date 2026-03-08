@@ -176,7 +176,7 @@ pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<Rele
         metadata: ReleaseMetadata {
             id: id.clone(),
             version: version.to_string(),
-            status: ReleaseStatus::Planned,
+            status: ReleaseStatus::Upcoming,
             created: now.clone(),
             updated: now,
             supported: None,
@@ -189,7 +189,7 @@ pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<Rele
 
     release.extract_breaking_changes();
 
-    upsert_release_db(ship_dir, &release, &ReleaseStatus::Planned)?;
+    upsert_release_db(ship_dir, &release, &ReleaseStatus::Upcoming)?;
     let file_path = write_release_file(ship_dir, &release)?;
 
     runtime::append_event(
@@ -210,7 +210,7 @@ pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<Rele
             .to_string(),
         path: file_path.to_string_lossy().to_string(),
         version: version.to_string(),
-        status: ReleaseStatus::Planned,
+        status: ReleaseStatus::Upcoming,
         release,
     })
 }

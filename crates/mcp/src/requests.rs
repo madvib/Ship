@@ -6,60 +6,6 @@ use serde::Deserialize;
 // ─── Request Types ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateIssueRequest {
-    /// The title of the issue
-    pub title: String,
-    /// The detailed description of the issue
-    pub description: String,
-    /// Initial status: backlog (default), in-progress, blocked, or done
-    pub status: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GetIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Status folder to look in. If omitted, all statuses are searched.
-    pub status: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UpdateIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Current status folder
-    pub status: String,
-    /// New title (optional)
-    pub title: Option<String>,
-    /// New description (optional)
-    pub description: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DeleteIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Status folder the issue is in
-    pub status: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct MoveIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Current status
-    pub from_status: String,
-    /// Target status
-    pub to_status: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SearchIssuesRequest {
-    /// Text to search for in issue titles and descriptions
-    pub query: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct LogDecisionRequest {
     /// Title of the architecture decision
     pub title: String,
@@ -96,27 +42,11 @@ pub struct TimeStopRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GenerateIssueRequest {
-    /// Title or brief description of the issue to generate content for
-    pub title: String,
-    /// Optional extra context (e.g. related issues, tech stack)
-    pub context: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct GenerateAdrRequest {
     /// The problem or decision to address
     pub problem: String,
     /// Optional constraints or options already under consideration
     pub constraints: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct BrainstormRequest {
-    /// Topic or area to brainstorm issues for
-    pub topic: String,
-    /// Number of issue suggestions to generate (default 5)
-    pub count: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -211,14 +141,6 @@ pub struct DeleteSkillRequest {
     pub id: String,
     /// Scope: project (default) or user
     pub scope: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ManageStatusRequest {
-    /// Action: "add" or "remove"
-    pub action: String,
-    /// Status name (e.g. "review", "testing")
-    pub name: String,
 }
 
 #[derive(Deserialize, JsonSchema)]

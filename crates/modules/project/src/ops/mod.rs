@@ -3,7 +3,6 @@ use std::path::Path;
 
 pub mod adr;
 pub mod feature;
-pub mod issue;
 pub mod note;
 pub mod release;
 pub mod spec;
@@ -23,12 +22,6 @@ impl ShipModule for crate::ADR {
 impl ShipModule for crate::Feature {
     fn module_type_id() -> &'static str {
         "feature"
-    }
-}
-
-impl ShipModule for crate::Issue {
-    fn module_type_id() -> &'static str {
-        "issue"
     }
 }
 
