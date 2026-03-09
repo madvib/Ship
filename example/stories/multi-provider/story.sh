@@ -17,7 +17,10 @@ RUN_ID="$(date +%Y%m%d%H%M%S)"
 WORK_DIR="$STORIES_TMP/multi-provider-$RUN_ID"
 HOME_DIR="$WORK_DIR/.home"
 ORIG_HOME="${HOME:-}"
-SHIP_BIN="$ROOT_DIR/target/debug/ship"
+SHIP_BIN="${SHIP_BIN_OVERRIDE:-$ROOT_DIR/target/debug/ship}"
+if ! "$SHIP_BIN" --version &>/dev/null 2>&1; then
+  SHIP_BIN="$(which ship 2>/dev/null || echo ship)"
+fi
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -122,15 +125,15 @@ narrate "and Ship translates that config for whichever provider is running."
 echo ""
 
 narrate "Planning mode: broad thinking, no code execution tools"
-run_ship mode add planning "Planning & Research"
+run_ship mode add roadmap "Planning & Research"
 echo ""
 
 narrate "Implementation mode: full access, optimized for coding"
-run_ship mode add implementation "Implementation"
+run_ship mode add develop "Implementation"
 echo ""
 
 narrate "Review mode: read-only tools, focused on analysis"
-run_ship mode add review "Code Review"
+run_ship mode add analysis "Code Review"
 echo ""
 
 run_ship mode list
@@ -147,13 +150,13 @@ echo ""
 narrate "Planning skill: architecture context and decision history"
 run_ship skill create planning-context \
   "Planning Context" \
-  "You are helping plan software architecture. Focus on: system design, trade-offs, scalability, and alignment with project goals. Reference existing ADRs before suggesting new approaches."
+  --content "You are helping plan software architecture. Focus on: system design, trade-offs, scalability, and alignment with project goals. Reference existing ADRs before suggesting new approaches."
 echo ""
 
 narrate "Review skill: code quality guidelines"
 run_ship skill create review-standards \
   "Review Standards" \
-  "You are performing code review. Enforce: no unused imports, test coverage for new public functions, consistent error handling, and documentation for public APIs. Be direct and constructive."
+  --content "You are performing code review. Enforce: no unused imports, test coverage for new public functions, consistent error handling, and documentation for public APIs. Be direct and constructive."
 echo ""
 
 run_ship skill list
@@ -165,14 +168,14 @@ scene 6 "Planning the release"
 narrate "With providers and modes configured, Jordan plans the work."
 echo ""
 
-run_ship release create "v1.0.0" --status planned
+run_ship release create "v1.0.0"
 echo ""
-RELEASE_FILE="$(find "$WORK_DIR/.ship/project/releases" -maxdepth 2 -name 'v1-0-0*.md' -print | head -n 1)"
+RELEASE_FILE="$(find "$WORK_DIR/.ship/project/releases" -maxdepth 2 -name 'v1.0.0*.md' -print | head -n 1)"
 RELEASE_ID="$(basename "$RELEASE_FILE")"
 
-run_ship feature create "REST API Layer" --release "$RELEASE_ID"
-run_ship feature create "Authentication Service" --release "$RELEASE_ID"
-run_ship feature create "Frontend Dashboard" --release "$RELEASE_ID"
+run_ship feature create "REST API Layer" --release-id "$RELEASE_ID"
+run_ship feature create "Authentication Service" --release-id "$RELEASE_ID"
+run_ship feature create "Frontend Dashboard" --release-id "$RELEASE_ID"
 echo ""
 
 run_ship feature list
@@ -182,7 +185,7 @@ run_ship feature list
 scene 7 "A day in the life: mode switching"
 
 narrate "Morning: Jordan switches to planning mode to design the API layer."
-run_ship mode set planning
+run_ship mode set roadmap
 echo ""
 run_ship mode get
 echo ""
@@ -190,12 +193,12 @@ narrate "  → Jordan opens Claude/Gemini, which now has the planning-context sk
 narrate "  → Discusses API design, documents decisions as ADRs"
 echo ""
 
-run_ship adr create "REST over GraphQL for v1.0" --status accepted
-run_ship adr create "Postgres as primary datastore" --status accepted
+run_ship adr create "REST over GraphQL for v1.0" "REST chosen for simplicity and broader tooling support"
+run_ship adr create "Postgres as primary datastore" "Postgres selected for ACID compliance and rich querying"
 echo ""
 
 narrate "Afternoon: switch to implementation mode, start coding."
-run_ship mode set implementation
+run_ship mode set develop
 echo ""
 run_ship mode get
 echo ""
@@ -208,7 +211,7 @@ run_ship issue create "Add OpenAPI spec generation" "Auto-generate from route ha
 echo ""
 
 narrate "End of day: review mode to check the work."
-run_ship mode set review
+run_ship mode set analysis
 echo ""
 run_ship mode get
 echo ""

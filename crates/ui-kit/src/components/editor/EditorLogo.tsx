@@ -34,8 +34,8 @@ export function editorLogoCandidates(editorId: string, isDarkTheme: boolean): st
             return ['/ide-logos/Google-Antigravity-Icon-Full-Color.png'];
         case 'zed':
             return [
-                byTheme('/ide-logos/zed-light.svg', '/ide-logos/zed-dark.svg'),
-                fallbackTheme('/ide-logos/zed-light.svg', '/ide-logos/zed-dark.svg'),
+                byTheme('/ide-logos/zed-dark.svg', '/ide-logos/zed-light.svg'),
+                fallbackTheme('/ide-logos/zed-dark.svg', '/ide-logos/zed-light.svg'),
             ];
         case 'intellij':
             return ['/ide-logos/IntelliJ_icon.svg'];

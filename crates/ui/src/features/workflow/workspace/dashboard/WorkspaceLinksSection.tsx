@@ -160,8 +160,20 @@ export function WorkspaceLinksSection({
             <SelectTrigger size="sm" className="h-8">
               <SelectValue placeholder="Unlinked">
                 {(value) => {
-                  if (!value || value === noLinkValue) return 'Unlinked';
-                  return featureLabelById.get(String(value)) ?? 'Unlinked';
+                  if (!value || value === noLinkValue) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-muted-foreground/60">
+                        <div className="size-1.5 rounded-full bg-muted-foreground/30" />
+                        <span>Unlinked</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <div className="size-1.5 rounded-full bg-status-green" />
+                      <span className="truncate">{featureLabelById.get(String(value)) ?? 'Unlinked'}</span>
+                    </div>
+                  );
                 }}
               </SelectValue>
             </SelectTrigger>
@@ -201,8 +213,20 @@ export function WorkspaceLinksSection({
             <SelectTrigger size="sm" className="h-8">
               <SelectValue placeholder="Unlinked">
                 {(value) => {
-                  if (!value || value === noLinkValue) return 'Unlinked';
-                  return specLabelById.get(String(value)) ?? 'Unlinked';
+                  if (!value || value === noLinkValue) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-muted-foreground/60">
+                        <div className="size-1.5 rounded-full bg-muted-foreground/30" />
+                        <span>Unlinked</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      <div className="size-1.5 rounded-full bg-status-blue" />
+                      <span className="truncate">{specLabelById.get(String(value)) ?? 'Unlinked'}</span>
+                    </div>
+                  );
                 }}
               </SelectValue>
             </SelectTrigger>

@@ -23,7 +23,10 @@ ALEX_DIR="$STORIES_TMP/handoff-alex-$RUN_ID"
 SAM_HOME="$SAM_DIR/.home"
 ALEX_HOME="$ALEX_DIR/.home"
 ORIG_HOME="${HOME:-}"
-SHIP_BIN="$ROOT_DIR/target/debug/ship"
+SHIP_BIN="${SHIP_BIN_OVERRIDE:-$ROOT_DIR/target/debug/ship}"
+if ! "$SHIP_BIN" --version &>/dev/null 2>&1; then
+  SHIP_BIN="$(which ship 2>/dev/null || echo ship)"
+fi
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BOLD='\033[1m'
@@ -101,23 +104,23 @@ as_sam init .
 echo ""
 
 narrate "Several months of planning artifacts now exist:"
-as_sam release create "v0.1.0" --status shipped
-as_sam release create "v0.2.0" --status shipped
-as_sam release create "v1.0.0" --status planned
+as_sam release create "v0.1.0"
+as_sam release create "v0.2.0"
+as_sam release create "v1.0.0"
 echo ""
 
-RELEASE_V1="$(find "$SAM_DIR/.ship/project/releases" -maxdepth 2 -name 'v1-0-0*.md' -print | head -n 1)"
+RELEASE_V1="$(find "$SAM_DIR/.ship/project/releases" -maxdepth 2 -name 'v1.0.0*.md' -print | head -n 1)"
 RELEASE_V1_ID="$(basename "$RELEASE_V1")"
 
-as_sam feature create "Core API" --release "$RELEASE_V1_ID" --status in_progress
-as_sam feature create "Admin Dashboard" --release "$RELEASE_V1_ID"
-as_sam feature create "Webhook System" --release "$RELEASE_V1_ID"
+as_sam feature create "Core API" --release-id "$RELEASE_V1_ID"
+as_sam feature create "Admin Dashboard" --release-id "$RELEASE_V1_ID"
+as_sam feature create "Webhook System" --release-id "$RELEASE_V1_ID"
 echo ""
 
 narrate "Key architecture decisions are captured:"
-as_sam adr create "Postgres over MongoDB" --status accepted
-as_sam adr create "Event sourcing for audit trail" --status accepted
-as_sam adr create "REST over GraphQL for v1" --status accepted
+as_sam adr create "Postgres over MongoDB" "Postgres selected for ACID compliance and team expertise"
+as_sam adr create "Event sourcing for audit trail" "Immutable event log required for compliance and audit history"
+as_sam adr create "REST over GraphQL for v1" "REST chosen for simplicity and broader tooling support"
 echo ""
 
 as_sam spec create "Webhook Delivery Architecture"
@@ -215,7 +218,7 @@ echo ""
 
 as_sam skill create onboarding-context \
   "Project Onboarding Context" \
-  "$(cat <<'SKILL'
+  --content "$(cat <<'SKILL'
 You are working on a B2B SaaS API platform. Key facts:
 
 **Stack**: Node.js + TypeScript, Postgres, Redis, Kysely ORM, Vitest tests, deployed on Railway.
@@ -235,7 +238,7 @@ echo ""
 
 as_sam skill create api-development \
   "Core API Development" \
-  "You are implementing the Core API feature. Focus areas: REST endpoint design, Kysely query patterns, typed error handling, and test coverage. Reference the existing src/api/ structure and match established patterns. When in doubt, look at a similar existing endpoint before writing new code."
+  --content "You are implementing the Core API feature. Focus areas: REST endpoint design, Kysely query patterns, typed error handling, and test coverage. Reference the existing src/api/ structure and match established patterns. When in doubt, look at a similar existing endpoint before writing new code."
 echo ""
 
 as_sam skill list
@@ -379,6 +382,13 @@ cp -r "$SAM_DIR/.ship" "$ALEX_DIR/.ship"
 narrate "Alex initializes their local Ship state (registers the project):"
 as_alex projects list 2>/dev/null || true
 as_alex init . 2>/dev/null || narrate "  (project already initialized via clone)"
+echo ""
+
+narrate "Workflow modes are team config — Alex registers them from the project README:"
+narrate "  (In practice: run once after cloning. Modes live in local state, not git)"
+as_alex mode add onboarding "Project Onboarding" 2>/dev/null || narrate "  (mode already exists)"
+as_alex mode add api-work "API Development" 2>/dev/null || narrate "  (mode already exists)"
+as_alex mode add review "Code Review" 2>/dev/null || narrate "  (mode already exists)"
 echo ""
 
 narrate "Alex immediately sees the full project context:"

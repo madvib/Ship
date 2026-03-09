@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     getCurrentBranchCmd,
     listWorkspacesCmd,
@@ -197,8 +197,6 @@ export function useWorkspaceState(workspaceUi: any, _ship: any) {
             setWorkspaceGitSummary(gitSummaryRes.status === 'ok' ? gitSummaryRes.data : null);
 
         };
-        void loadContext();
-        return () => { cancelled = true; };
     }, [detail?.branch, detail?.activeMode, detail?.configGeneration, workspaceUi.activeModeId]);
 
     return {

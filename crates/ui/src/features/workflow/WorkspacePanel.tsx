@@ -12,6 +12,7 @@ import {
   endWorkspaceSessionCmd,
   syncWorkspaceCmd,
   activateWorkspaceCmd,
+  transitionWorkspaceCmd,
   type WorkspaceRepairReport,
 } from '@/lib/platform/tauri/commands';
 import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
@@ -48,6 +49,7 @@ export default function WorkspacePanel() {
   const [sessionProvider, setSessionProvider] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
+  const [archivingWorkspace, setArchivingWorkspace] = useState(false);
   const [updatingWorkspaceMode, setUpdatingWorkspaceMode] = useState(false);
   const [restartingSession, setRestartingSession] = useState(false);
   const [archivingWorkspace, setArchivingWorkspace] = useState(false);
@@ -386,6 +388,20 @@ export default function WorkspacePanel() {
     }
   };
 
+  const handleArchiveWorkspace = async (branch: string) => {
+    setArchivingWorkspace(true);
+    try {
+      const result = await transitionWorkspaceCmd(branch, 'archived');
+      if (result.status === 'error') {
+        state.setError(result.error || 'Failed to archive workspace.');
+        return;
+      }
+      await state.load();
+    } finally {
+      setArchivingWorkspace(false);
+    }
+  };
+
   const handleUpdateWorkspaceMode = async (modeId: string | null) => {
     if (!state.detail) return;
     setUpdatingWorkspaceMode(true);
@@ -581,6 +597,7 @@ export default function WorkspacePanel() {
               modeOptions={state.modeOptions}
               creatingWorkspace={creatingWorkspace}
               deletingWorkspace={deletingWorkspace}
+              archivingWorkspace={archivingWorkspace}
               updatingWorkspaceMode={updatingWorkspaceMode}
               environmentOptions={Array.from(
                 new Set(
@@ -603,6 +620,7 @@ export default function WorkspacePanel() {
               }))}
               onCreateWorkspace={handleCreateWorkspace}
               onDeleteWorkspace={handleDeleteWorkspace}
+              onArchiveWorkspace={handleArchiveWorkspace}
               onUpdateWorkspaceMode={handleUpdateWorkspaceMode}
             />
           }
@@ -687,6 +705,7 @@ export default function WorkspacePanel() {
           stoppingTerminal={terminal.stoppingTerminal}
           onStart={handleStartTerminal}
           onStop={terminal.stopWorkspaceTerminal}
+          onRetry={handleStartTerminal}
           onMaximizedChange={setTerminalMaximized}
           maximized={terminalMaximized}
           height={terminalHeight}

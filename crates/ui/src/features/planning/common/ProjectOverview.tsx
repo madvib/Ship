@@ -14,6 +14,8 @@ import {
   Lightbulb,
   Plus,
   History,
+  GitBranch,
+  ArrowRight,
 } from 'lucide-react';
 import { splitFrontmatterDocument } from '@ship/ui';
 import { AdrHeaderMetadata } from '../adrs/AdrHeaderMetadata';
@@ -35,6 +37,7 @@ import {
   PROJECTS_ROUTE,
   RELEASES_ROUTE,
   ACTIVITY_ROUTE,
+  WORKFLOW_WORKSPACE_ROUTE,
 } from '@/lib/constants/routes';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
@@ -294,6 +297,28 @@ export default function ProjectOverview({
                   <Button variant="link" size="xs" onClick={() => onNavigate(NOTES_ROUTE)}>Capture a thought</Button>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          {/* Workspaces */}
+          <Card
+            className="cursor-pointer border-l-4 border-l-blue-500/60 transition-colors hover:bg-muted/20"
+            onClick={() => onNavigate(WORKFLOW_WORKSPACE_ROUTE)}
+          >
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <GitBranch className="size-4 text-blue-500" />
+                  Workspaces
+                </CardTitle>
+                <ArrowRight className="size-4 text-muted-foreground/50" />
+              </div>
+              <CardDescription>AI sessions, active branches, and execution state.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-xs text-muted-foreground">
+                Open the Workspaces panel to start or resume an AI session, manage branches, and track execution context.
+              </p>
             </CardContent>
           </Card>
 

@@ -1,5 +1,5 @@
 import { RefObject } from 'react';
-import { TerminalSquare, RefreshCw, Maximize2, Minimize2, X, Info, Play, Square } from 'lucide-react';
+import { TerminalSquare, RefreshCw, Maximize2, Minimize2, X, Info, Play, Square, RotateCcw } from 'lucide-react';
 import { Badge, Button, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Tooltip, TooltipTrigger, TooltipContent } from '@ship/ui';
 import { cn } from '@/lib/utils';
 import { type RuntimePerfSnapshot, type WorkspaceTerminalSessionInfo } from '@/lib/platform/tauri/commands';
@@ -12,6 +12,7 @@ interface WorkspaceTerminalTrayProps {
     stoppingTerminal: boolean;
     onStart: () => void;
     onStop: () => void;
+    onRetry?: () => void;
     onMaximizedChange: (max: boolean) => void;
     maximized: boolean;
     height: number;
@@ -32,6 +33,7 @@ export function WorkspaceTerminalTray({
     stoppingTerminal,
     onStart,
     onStop,
+    onRetry,
     onMaximizedChange,
     maximized,
     height,
@@ -192,16 +194,29 @@ export function WorkspaceTerminalTray({
             )}
 
             {(activationError || runtimeError) && (
-                <div className="border-b border-border bg-muted/20 px-4 py-2">
-                    {activationError && (
-                        <p className="text-[10px] text-amber-700">
-                            activation warning: {activationError}
-                        </p>
-                    )}
-                    {runtimeError && (
-                        <p className="text-[10px] text-status-red">
-                            provider status: {runtimeError}
-                        </p>
+                <div className="flex items-center justify-between border-b border-border bg-muted/20 px-4 py-2">
+                    <div className="space-y-1">
+                        {activationError && (
+                            <p className="text-[10px] text-amber-700">
+                                activation warning: {activationError}
+                            </p>
+                        )}
+                        {runtimeError && (
+                            <p className="text-[10px] text-status-red">
+                                provider status: {runtimeError}
+                            </p>
+                        )}
+                    </div>
+                    {runtimeError && onRetry && (
+                        <Button
+                            size="xs"
+                            variant="outline"
+                            className="h-7 gap-1 px-2 text-[10px]"
+                            onClick={onRetry}
+                        >
+                            <RotateCcw className="size-3" />
+                            Retry Provider
+                        </Button>
                     )}
                 </div>
             )}

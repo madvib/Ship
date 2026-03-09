@@ -55,6 +55,7 @@ export default function App() {
     return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, parsed));
   });
   const [isResizing, setIsResizing] = useState(false);
+  const isResizingRef = useRef(false);
 
   const navigateTo = useCallback((path: AppRoutePath) => {
     if (path === NOTES_ROUTE) {
@@ -87,7 +88,7 @@ export default function App() {
                 variant="ghost"
                 size="xs"
                 className="h-6 px-1.5 text-xs"
-                onClick={() => navigateTo(WORKFLOW_WORKSPACE_ROUTE)}
+                onClick={() => navigateTo(OVERVIEW_ROUTE)}
               >
                 {workspace.activeProject?.name ?? 'Project'}
               </Button>
@@ -127,7 +128,7 @@ export default function App() {
   const handleSelectProject = async (project: Parameters<typeof workspace.handleSelectProject>[0]) => {
     const selected = await workspace.handleSelectProject(project);
     if (selected) {
-      navigateTo(WORKFLOW_WORKSPACE_ROUTE);
+      navigateTo(OVERVIEW_ROUTE);
     }
   };
 
@@ -178,20 +179,21 @@ export default function App() {
   // Resizing Logic
   const startResizing = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    isResizingRef.current = true;
     setIsResizing(true);
   }, []);
 
   const stopResizing = useCallback(() => {
+    isResizingRef.current = false;
     setIsResizing(false);
   }, []);
 
   const resize = useCallback((e: MouseEvent) => {
-    if (isResizing) {
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX));
-      setSidebarWidth(newWidth);
-      localStorage.setItem('sidebar-width', newWidth.toString());
-    }
-  }, [isResizing]);
+    if (!isResizingRef.current) return;
+    const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX));
+    setSidebarWidth(newWidth);
+    localStorage.setItem('sidebar-width', newWidth.toString());
+  }, []);
 
   useEffect(() => {
     window.addEventListener('mousemove', resize);
@@ -355,7 +357,7 @@ export default function App() {
               value={activeChrome}
               onUpdate={handleUpdateChrome}
             >
-              <div key={location.pathname} className="route-enter h-full min-h-0">
+              <div className="h-full min-h-0">
                 <Outlet />
               </div>
             </PageChromeProvider>

@@ -5,6 +5,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@ship/ui';
+import { cn } from '@/lib/utils';
 import {
   Archive,
   GitBranch,
@@ -119,7 +120,7 @@ export function WorkspaceStatusCard({
         </p>
       )}
 
-      <div className="mb-3 flex gap-2 border-t pt-3">
+      <div className="mb-2 flex gap-2 border-t pt-3">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -143,7 +144,10 @@ export function WorkspaceStatusCard({
           <TooltipTrigger asChild>
             <Button
               size="sm"
-              className="h-8 flex-1 gap-1.5 text-xs font-semibold"
+              className={cn(
+                "h-8 flex-1 gap-1.5 text-xs font-semibold",
+                lastRepairReport?.needs_recompile && "ring-2 ring-primary ring-offset-2 ring-offset-background"
+              )}
               onClick={onActivate}
               disabled={activating}
             >
@@ -195,6 +199,12 @@ export function WorkspaceStatusCard({
           </TooltipTrigger>
           <TooltipContent>Run workspace consistency checks and recompile missing/invalid provider config as needed.</TooltipContent>
         </Tooltip>
+      </div>
+
+      <div className="mb-3 grid grid-cols-3 gap-2 px-1 text-[9px] text-muted-foreground uppercase tracking-widest font-bold">
+        <div className="text-center">Refresh</div>
+        <div className="text-center text-foreground/70">Deploy</div>
+        <div className="text-center">Fix</div>
       </div>
 
       <p className="text-[10px] text-muted-foreground">

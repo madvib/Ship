@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState } from "react";
 import {
   Button,
   Dialog,
@@ -16,15 +16,15 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from '@ship/ui';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { ModeConfig } from '@/bindings';
-import { WorkspaceRow } from './types';
+} from "@ship/ui";
+import { Plus, RefreshCw, Trash2, Archive } from "lucide-react";
+import { ModeConfig } from "@/bindings";
+import { WorkspaceRow } from "./types";
 
-const WORKSPACE_MODE_DEFAULT = '__workspace_default__';
-const CREATE_MODE_DEFAULT = '__mode_default__';
+const WORKSPACE_MODE_DEFAULT = "__workspace_default__";
+const CREATE_MODE_DEFAULT = "__mode_default__";
 
-type WorkspaceTypeOption = 'feature' | 'patch' | 'service';
+type WorkspaceTypeOption = "feature" | "patch" | "service";
 
 interface CreateWorkspaceInput {
   branch: string;
@@ -46,6 +46,7 @@ interface WorkspaceHeaderActionsProps {
   modeOptions: ModeConfig[];
   creatingWorkspace: boolean;
   deletingWorkspace: boolean;
+  archivingWorkspace: boolean;
   updatingWorkspaceMode: boolean;
   environmentOptions: WorkspaceLinkOption[];
   featureOptions: WorkspaceLinkOption[];
@@ -53,6 +54,7 @@ interface WorkspaceHeaderActionsProps {
   releaseOptions: WorkspaceLinkOption[];
   onCreateWorkspace: (input: CreateWorkspaceInput) => Promise<void>;
   onDeleteWorkspace: (branch: string) => Promise<void>;
+  onArchiveWorkspace: (branch: string) => Promise<void>;
   onUpdateWorkspaceMode: (modeId: string | null) => Promise<void>;
 }
 
@@ -61,6 +63,7 @@ export function WorkspaceHeaderActions({
   modeOptions,
   creatingWorkspace,
   deletingWorkspace,
+  archivingWorkspace,
   updatingWorkspaceMode,
   environmentOptions,
   featureOptions,
@@ -68,23 +71,24 @@ export function WorkspaceHeaderActions({
   releaseOptions,
   onCreateWorkspace,
   onDeleteWorkspace,
+  onArchiveWorkspace,
   onUpdateWorkspaceMode,
 }: WorkspaceHeaderActionsProps) {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [createBranch, setCreateBranch] = useState('');
-  const [createType, setCreateType] = useState<WorkspaceTypeOption>('feature');
+  const [createBranch, setCreateBranch] = useState("");
+  const [createType, setCreateType] = useState<WorkspaceTypeOption>("feature");
   const [createModeId, setCreateModeId] = useState<string>(CREATE_MODE_DEFAULT);
-  const [createEnvironmentId, setCreateEnvironmentId] = useState<string>('');
-  const [createFeatureId, setCreateFeatureId] = useState<string>('');
-  const [createSpecId, setCreateSpecId] = useState<string>('');
-  const [createReleaseId, setCreateReleaseId] = useState<string>('');
+  const [createEnvironmentId, setCreateEnvironmentId] = useState<string>("");
+  const [createFeatureId, setCreateFeatureId] = useState<string>("");
+  const [createSpecId, setCreateSpecId] = useState<string>("");
+  const [createReleaseId, setCreateReleaseId] = useState<string>("");
 
   const modeLabelById = useMemo(
     () =>
       new Map(
-        modeOptions.map((mode) => [mode.id, mode.name ?? mode.id] as const)
+        modeOptions.map((mode) => [mode.id, mode.name ?? mode.id] as const),
       ),
-    [modeOptions]
+    [modeOptions],
   );
 
   const modeSelectValue = useMemo(() => {
@@ -101,22 +105,31 @@ export function WorkspaceHeaderActions({
 
   const resetCreateWorkspaceDraft = () => {
     setCreateDialogOpen(false);
-    setCreateBranch('');
-    setCreateType('feature');
+    setCreateBranch("");
+    setCreateType("feature");
     setCreateModeId(CREATE_MODE_DEFAULT);
-    setCreateEnvironmentId('');
-    setCreateFeatureId('');
-    setCreateSpecId('');
-    setCreateReleaseId('');
+    setCreateEnvironmentId("");
+    setCreateFeatureId("");
+    setCreateSpecId("");
+    setCreateReleaseId("");
   };
 
   const handleDelete = async () => {
     if (!detail) return;
     const confirmed = window.confirm(
-      `Delete workspace '${detail.branch}'? This removes runtime workspace/session state for this branch.`
+      `Delete workspace '${detail.branch}'? This removes ALL runtime state and history for this branch.`,
     );
     if (!confirmed) return;
     await onDeleteWorkspace(detail.branch);
+  };
+
+  const handleArchive = async () => {
+    if (!detail) return;
+    const confirmed = window.confirm(
+      `Archive workspace '${detail.branch}'? This marks the workspace as archived and moves it out of the active roster.`,
+    );
+    if (!confirmed) return;
+    await onArchiveWorkspace(detail.branch);
   };
 
   const handleCreate = async () => {
@@ -144,7 +157,7 @@ export function WorkspaceHeaderActions({
                 value={modeSelectValue}
                 onValueChange={(next) =>
                   void onUpdateWorkspaceMode(
-                    next === WORKSPACE_MODE_DEFAULT ? null : next
+                    next === WORKSPACE_MODE_DEFAULT ? null : next,
                   )
                 }
                 disabled={updatingWorkspaceMode}
@@ -153,10 +166,10 @@ export function WorkspaceHeaderActions({
                   <SelectValue placeholder="Mode: Default">
                     {(value) => {
                       if (!value || value === WORKSPACE_MODE_DEFAULT) {
-                        return 'Mode: Default';
+                        return "Mode: Default";
                       }
                       const asString = String(value);
-                      return `Mode: ${modeLabelById.get(asString) ?? 'Default'}`;
+                      return `Mode: ${modeLabelById.get(asString) ?? "Default"}`;
                     }}
                   </SelectValue>
                 </SelectTrigger>
@@ -173,7 +186,9 @@ export function WorkspaceHeaderActions({
               </Select>
             </div>
           </TooltipTrigger>
-          <TooltipContent>Workspace mode override. Applies to this branch only.</TooltipContent>
+          <TooltipContent>
+            Workspace mode override. Applies to this branch only.
+          </TooltipContent>
         </Tooltip>
       )}
 
@@ -200,8 +215,9 @@ export function WorkspaceHeaderActions({
           <DialogHeader>
             <DialogTitle>Create Workspace</DialogTitle>
             <DialogDescription>
-              Create a feature/patch/service workspace and activate it.
-              Optional environment profile seeds initial settings; each workspace keeps its own configuration.
+              Create a feature/patch/service workspace and activate it. Optional
+              environment profile seeds initial settings; each workspace keeps
+              its own configuration.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -235,10 +251,12 @@ export function WorkspaceHeaderActions({
                 <SelectValue placeholder="Service Default Mode">
                   {(value) => {
                     if (!value || value === CREATE_MODE_DEFAULT) {
-                      return 'Service Default Mode';
+                      return "Service Default Mode";
                     }
                     const asString = String(value);
-                    return modeLabelById.get(asString) ?? 'Service Default Mode';
+                    return (
+                      modeLabelById.get(asString) ?? "Service Default Mode"
+                    );
                   }}
                 </SelectValue>
               </SelectTrigger>
@@ -329,20 +347,51 @@ export function WorkspaceHeaderActions({
         </DialogContent>
       </Dialog>
 
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 gap-1.5 text-status-red"
-        onClick={() => void handleDelete()}
-        disabled={!detail || deletingWorkspace}
-      >
-        {deletingWorkspace ? (
-          <RefreshCw className="size-3.5 animate-spin" />
-        ) : (
-          <Trash2 className="size-3.5" />
-        )}
-        Delete
-      </Button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5"
+            onClick={() => void handleArchive()}
+            disabled={
+              !detail || archivingWorkspace || detail.status === "archived"
+            }
+          >
+            {archivingWorkspace ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : (
+              <Archive className="size-3.5" />
+            )}
+            Archive
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          Mark workspace as archived. Moves it out of active view.
+        </TooltipContent>
+      </Tooltip>
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-status-red"
+            onClick={() => void handleDelete()}
+            disabled={!detail || deletingWorkspace}
+          >
+            {deletingWorkspace ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="size-3.5" />
+            )}
+            Delete
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          Permanently delete workspace and its runtime state.
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 }

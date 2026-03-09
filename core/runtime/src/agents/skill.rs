@@ -140,7 +140,7 @@ fn parse_skill_spec(dir: &Path) -> Result<Skill> {
         return Err(anyhow!("Missing SKILL.md in {}", dir.display()));
     }
 
-    let raw = fs::read_to_string(&path)?;
+    let raw = fs::read_to_string(&path)?.replace("\r\n", "\n");
     if !raw.starts_with("---\n") {
         return Err(anyhow!(
             "Invalid SKILL.md frontmatter in {}",
