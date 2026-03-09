@@ -32,6 +32,7 @@ interface SpecDetailProps {
   onSelectFeature: (feature: FeatureInfo) => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
   onDelete: (fileName: string) => Promise<void> | void;
+  onMove: (fileName: string, status: string) => Promise<void> | void;
 }
 
 export default function SpecDetail({
@@ -43,10 +44,12 @@ export default function SpecDetail({
   onSelectFeature,
   onSave,
   onDelete,
+  onMove,
 }: SpecDetailProps) {
   const [content, setContent] = useState(spec.spec.body);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [movingStatus, setMovingStatus] = useState(false);
 
   useEffect(() => {
     setContent(spec.spec.body);
@@ -86,6 +89,16 @@ export default function SpecDetail({
       setSaving(false);
     }
   }, [content, dirty, onSave, saving, spec.file_name]);
+
+  const moveSpecStatus = useCallback(async (status: string) => {
+    if (!status || status === String(spec.status)) return;
+    setMovingStatus(true);
+    try {
+      await onMove(spec.file_name, status);
+    } finally {
+      setMovingStatus(false);
+    }
+  }, [onMove, spec.file_name, spec.status]);
 
   useKeyboardShortcuts({
     onEscape: onClose,
@@ -136,6 +149,9 @@ export default function SpecDetail({
       meta={
         <SpecHeaderMetadata
           fileName={spec.file_name}
+          status={String(spec.status)}
+          onMoveStatus={moveSpecStatus}
+          movingStatus={movingStatus}
           tags={tags}
           isEditing={true}
           onUpdate={handleMetadataUpdate}

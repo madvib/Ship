@@ -24,12 +24,21 @@ import { WorkspaceRow } from './types';
 const WORKSPACE_MODE_DEFAULT = '__workspace_default__';
 const CREATE_MODE_DEFAULT = '__mode_default__';
 
-type WorkspaceTypeOption = 'feature' | 'refactor' | 'experiment' | 'hotfix';
+type WorkspaceTypeOption = 'feature' | 'patch' | 'service';
 
 interface CreateWorkspaceInput {
   branch: string;
   workspaceType: WorkspaceTypeOption;
+  environmentId: string | null;
   modeId: string | null;
+  featureId: string | null;
+  specId: string | null;
+  releaseId: string | null;
+}
+
+interface WorkspaceLinkOption {
+  id: string;
+  label: string;
 }
 
 interface WorkspaceHeaderActionsProps {
@@ -38,6 +47,10 @@ interface WorkspaceHeaderActionsProps {
   creatingWorkspace: boolean;
   deletingWorkspace: boolean;
   updatingWorkspaceMode: boolean;
+  environmentOptions: WorkspaceLinkOption[];
+  featureOptions: WorkspaceLinkOption[];
+  specOptions: WorkspaceLinkOption[];
+  releaseOptions: WorkspaceLinkOption[];
   onCreateWorkspace: (input: CreateWorkspaceInput) => Promise<void>;
   onDeleteWorkspace: (branch: string) => Promise<void>;
   onUpdateWorkspaceMode: (modeId: string | null) => Promise<void>;
@@ -49,6 +62,10 @@ export function WorkspaceHeaderActions({
   creatingWorkspace,
   deletingWorkspace,
   updatingWorkspaceMode,
+  environmentOptions,
+  featureOptions,
+  specOptions,
+  releaseOptions,
   onCreateWorkspace,
   onDeleteWorkspace,
   onUpdateWorkspaceMode,
@@ -57,6 +74,10 @@ export function WorkspaceHeaderActions({
   const [createBranch, setCreateBranch] = useState('');
   const [createType, setCreateType] = useState<WorkspaceTypeOption>('feature');
   const [createModeId, setCreateModeId] = useState<string>(CREATE_MODE_DEFAULT);
+  const [createEnvironmentId, setCreateEnvironmentId] = useState<string>('');
+  const [createFeatureId, setCreateFeatureId] = useState<string>('');
+  const [createSpecId, setCreateSpecId] = useState<string>('');
+  const [createReleaseId, setCreateReleaseId] = useState<string>('');
 
   const modeLabelById = useMemo(
     () =>
@@ -78,6 +99,17 @@ export function WorkspaceHeaderActions({
     return modeLabelById.has(createModeId) ? createModeId : CREATE_MODE_DEFAULT;
   }, [createModeId, modeLabelById]);
 
+  const resetCreateWorkspaceDraft = () => {
+    setCreateDialogOpen(false);
+    setCreateBranch('');
+    setCreateType('feature');
+    setCreateModeId(CREATE_MODE_DEFAULT);
+    setCreateEnvironmentId('');
+    setCreateFeatureId('');
+    setCreateSpecId('');
+    setCreateReleaseId('');
+  };
+
   const handleDelete = async () => {
     if (!detail) return;
     const confirmed = window.confirm(
@@ -93,12 +125,13 @@ export function WorkspaceHeaderActions({
     await onCreateWorkspace({
       branch,
       workspaceType: createType,
+      environmentId: createEnvironmentId.trim() || null,
       modeId: createModeId === CREATE_MODE_DEFAULT ? null : createModeId,
+      featureId: createFeatureId.trim() || null,
+      specId: createSpecId.trim() || null,
+      releaseId: createReleaseId.trim() || null,
     });
-    setCreateDialogOpen(false);
-    setCreateBranch('');
-    setCreateType('feature');
-    setCreateModeId(CREATE_MODE_DEFAULT);
+    resetCreateWorkspaceDraft();
   };
 
   return (
@@ -129,7 +162,7 @@ export function WorkspaceHeaderActions({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={WORKSPACE_MODE_DEFAULT}>
-                    Default (project)
+                    Default (service)
                   </SelectItem>
                   {modeOptions.map((mode) => (
                     <SelectItem key={mode.id} value={mode.id}>
@@ -144,7 +177,16 @@ export function WorkspaceHeaderActions({
         </Tooltip>
       )}
 
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+      <Dialog
+        open={createDialogOpen}
+        onOpenChange={(open) => {
+          if (open) {
+            setCreateDialogOpen(true);
+            return;
+          }
+          resetCreateWorkspaceDraft();
+        }}
+      >
         <Button
           size="sm"
           variant="outline"
@@ -158,8 +200,8 @@ export function WorkspaceHeaderActions({
           <DialogHeader>
             <DialogTitle>Create Workspace</DialogTitle>
             <DialogDescription>
-              Create a feature/refactor/experiment/hotfix workspace and
-              activate it.
+              Create a feature/patch/service workspace and activate it.
+              Optional environment profile seeds initial settings; each workspace keeps its own configuration.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -179,9 +221,8 @@ export function WorkspaceHeaderActions({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="feature">feature</SelectItem>
-                <SelectItem value="refactor">refactor</SelectItem>
-                <SelectItem value="experiment">experiment</SelectItem>
-                <SelectItem value="hotfix">hotfix</SelectItem>
+                <SelectItem value="patch">patch</SelectItem>
+                <SelectItem value="service">service</SelectItem>
               </SelectContent>
             </Select>
             <Select
@@ -191,19 +232,19 @@ export function WorkspaceHeaderActions({
               }
             >
               <SelectTrigger>
-                <SelectValue placeholder="Project Default Mode">
+                <SelectValue placeholder="Service Default Mode">
                   {(value) => {
                     if (!value || value === CREATE_MODE_DEFAULT) {
-                      return 'Project Default Mode';
+                      return 'Service Default Mode';
                     }
                     const asString = String(value);
-                    return modeLabelById.get(asString) ?? 'Project Default Mode';
+                    return modeLabelById.get(asString) ?? 'Service Default Mode';
                   }}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={CREATE_MODE_DEFAULT}>
-                  Project Default Mode
+                  Service Default Mode
                 </SelectItem>
                 {modeOptions.map((mode) => (
                   <SelectItem key={mode.id} value={mode.id}>
@@ -212,11 +253,63 @@ export function WorkspaceHeaderActions({
                 ))}
               </SelectContent>
             </Select>
+            <Input
+              list="create-workspace-environment-options"
+              value={createEnvironmentId}
+              onChange={(event) => setCreateEnvironmentId(event.target.value)}
+              placeholder="Environment profile id (optional)"
+            />
+            <datalist id="create-workspace-environment-options">
+              {environmentOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+            <Input
+              list="create-workspace-feature-options"
+              value={createFeatureId}
+              onChange={(event) => setCreateFeatureId(event.target.value)}
+              placeholder="Link feature id (optional)"
+            />
+            <datalist id="create-workspace-feature-options">
+              {featureOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+            <Input
+              list="create-workspace-spec-options"
+              value={createSpecId}
+              onChange={(event) => setCreateSpecId(event.target.value)}
+              placeholder="Link spec id (optional)"
+            />
+            <datalist id="create-workspace-spec-options">
+              {specOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
+            <Input
+              list="create-workspace-release-options"
+              value={createReleaseId}
+              onChange={(event) => setCreateReleaseId(event.target.value)}
+              placeholder="Link release id (optional)"
+            />
+            <datalist id="create-workspace-release-options">
+              {releaseOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </datalist>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setCreateDialogOpen(false)}
+              onClick={resetCreateWorkspaceDraft}
               disabled={creatingWorkspace}
             >
               Cancel

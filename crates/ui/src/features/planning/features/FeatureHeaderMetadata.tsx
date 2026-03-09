@@ -3,7 +3,6 @@ import {
     Shapes,
     Tag,
     CheckCircle2,
-    Circle,
     Clock,
     AlertTriangle,
     Package,
@@ -27,11 +26,11 @@ interface FeatureHeaderMetadataProps {
     tags?: string[];
     isEditing: boolean;
     onUpdate: (updates: {
-        status?: string;
         release_id?: string;
         spec_id?: string;
         tags?: string[];
     }) => void;
+    onStatusTransition?: (status: string) => Promise<void> | void;
     releaseSuggestions?: string[];
     specSuggestions?: string[];
     tagSuggestions?: string[];
@@ -39,11 +38,10 @@ interface FeatureHeaderMetadataProps {
 }
 
 const STATUS_OPTIONS = [
-    { value: 'backlog', label: 'Backlog', icon: FolderKanban },
-    { value: 'todo', label: 'Todo', icon: Circle },
+    { value: 'planned', label: 'Planned', icon: FolderKanban },
     { value: 'in-progress', label: 'In Progress', icon: Clock },
-    { value: 'done', label: 'Done', icon: CheckCircle2 },
-    { value: 'blocked', label: 'Blocked', icon: AlertTriangle },
+    { value: 'implemented', label: 'Implemented', icon: CheckCircle2 },
+    { value: 'deprecated', label: 'Deprecated', icon: AlertTriangle },
 ];
 
 export function FeatureHeaderMetadata({
@@ -53,6 +51,7 @@ export function FeatureHeaderMetadata({
     tags = [],
     isEditing,
     onUpdate,
+    onStatusTransition,
     releaseSuggestions = [],
     specSuggestions = [],
     tagSuggestions = [],
@@ -64,6 +63,28 @@ export function FeatureHeaderMetadata({
     const [releaseInput, setReleaseInput] = useState(releaseId || '');
     const [specInput, setSpecInput] = useState(specId || '');
 
+    const canTransition = (nextStatus: string) => {
+        if (nextStatus === status) {
+            return false;
+        }
+        if (status === 'planned') {
+            return nextStatus === 'in-progress';
+        }
+        if (status === 'in-progress') {
+            return nextStatus === 'implemented';
+        }
+        return false;
+    };
+
+    const handleStatusClick = (nextStatus: string) => {
+        if (!canTransition(nextStatus) || !onStatusTransition) {
+            return;
+        }
+        void Promise.resolve(onStatusTransition(nextStatus)).catch(() => {
+            // Errors are surfaced by shared workspace error state in action hooks.
+        });
+    };
+
     return (
         <BaseMetadataHeader>
             {/* Status Popover */}
@@ -73,9 +94,9 @@ export function FeatureHeaderMetadata({
                 title="Change Status"
                 triggerClassName={cn(
                     status === 'in-progress' && "[&_svg]:text-blue-500",
-                    status === 'done' && "[&_svg]:text-emerald-500",
-                    status === 'blocked' && "[&_svg]:text-destructive",
-                    status === 'todo' && "[&_svg]:text-amber-500"
+                    status === 'implemented' && "[&_svg]:text-emerald-500",
+                    status === 'deprecated' && "[&_svg]:text-destructive",
+                    status === 'planned' && "[&_svg]:text-amber-500"
                 )}
                 contentClassName="w-48 p-2"
             >
@@ -89,8 +110,8 @@ export function FeatureHeaderMetadata({
                                 "w-full justify-start gap-2 h-8 font-normal",
                                 status === opt.value && "bg-accent text-accent-foreground"
                             )}
-                            onClick={() => isEditing && onUpdate({ status: opt.value })}
-                            disabled={!isEditing}
+                            onClick={() => handleStatusClick(opt.value)}
+                            disabled={!canTransition(opt.value)}
                         >
                             <opt.icon className="size-3.5" />
                             {opt.label}

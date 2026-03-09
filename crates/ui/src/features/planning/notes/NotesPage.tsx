@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-// useNavigate removed – no longer needed after SPECS_ROUTE removal
 import { Plus, StickyNote, Trash2 } from 'lucide-react';
 import { Button } from '@ship/ui';
 import { Input } from '@ship/ui';
@@ -18,7 +17,6 @@ import {
     composeFrontmatterDocument,
     setFrontmatterStringListField,
 } from '@ship/ui';
-// Specs are no longer a top-level route
 
 type EditableNote = {
     title: string;

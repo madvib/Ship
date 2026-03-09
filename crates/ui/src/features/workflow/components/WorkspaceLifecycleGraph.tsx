@@ -10,11 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 
 export type WorkspaceGraphStatus =
-  | 'planned'
   | 'active'
-  | 'idle'
-  | 'review'
-  | 'merged'
   | 'archived';
 
 export type WorkspaceGroupBy = 'status' | 'type' | 'release';
@@ -22,7 +18,7 @@ export type WorkspaceGroupBy = 'status' | 'type' | 'release';
 export interface WorkspaceGraphRow {
   branch: string;
   status: WorkspaceGraphStatus;
-  workspaceType: 'feature' | 'refactor' | 'experiment' | 'hotfix';
+  workspaceType: 'feature' | 'patch' | 'service';
   specId: string | null;
   featureId: string | null;
   releaseId: string | null;
@@ -33,19 +29,14 @@ export interface WorkspaceGraphRow {
 }
 
 const STATUS_ORDER: WorkspaceGraphStatus[] = [
-  'planned',
   'active',
-  'idle',
-  'review',
-  'merged',
   'archived',
 ];
 
 const TYPE_ORDER: WorkspaceGraphRow['workspaceType'][] = [
   'feature',
-  'refactor',
-  'experiment',
-  'hotfix',
+  'patch',
+  'service',
 ];
 
 const UNASSIGNED_RELEASE_KEY = '__unassigned_release__';
@@ -54,30 +45,10 @@ const STATUS_META: Record<
   WorkspaceGraphStatus,
   { label: string; tone: string; rail: string }
 > = {
-  planned: {
-    label: 'Planned',
-    tone: 'border-sky-300 bg-sky-50 text-sky-900 dark:border-sky-500/35 dark:bg-sky-500/12 dark:text-sky-200',
-    rail: 'bg-sky-600 dark:bg-sky-500/80',
-  },
   active: {
     label: 'Active',
     tone: 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-200',
     rail: 'bg-emerald-600 dark:bg-emerald-500/80',
-  },
-  idle: {
-    label: 'Idle',
-    tone: 'border-zinc-300 bg-zinc-50 text-zinc-900 dark:border-zinc-500/35 dark:bg-zinc-500/12 dark:text-zinc-200',
-    rail: 'bg-zinc-500 dark:bg-zinc-400/75',
-  },
-  review: {
-    label: 'Review',
-    tone: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/35 dark:bg-amber-500/12 dark:text-amber-200',
-    rail: 'bg-amber-600 dark:bg-amber-400/85',
-  },
-  merged: {
-    label: 'Merged',
-    tone: 'border-violet-300 bg-violet-50 text-violet-900 dark:border-violet-500/35 dark:bg-violet-500/12 dark:text-violet-200',
-    rail: 'bg-violet-600 dark:bg-violet-400/85',
   },
   archived: {
     label: 'Archived',
@@ -95,20 +66,15 @@ const TYPE_META: Record<
     tone: 'border-cyan-300 bg-cyan-50 text-cyan-900 dark:border-cyan-500/35 dark:bg-cyan-500/12 dark:text-cyan-200',
     rail: 'bg-cyan-600 dark:bg-cyan-500/80',
   },
-  refactor: {
-    label: 'Refactor',
+  patch: {
+    label: 'Patch',
     tone: 'border-indigo-300 bg-indigo-50 text-indigo-900 dark:border-indigo-500/35 dark:bg-indigo-500/12 dark:text-indigo-200',
     rail: 'bg-indigo-600 dark:bg-indigo-500/80',
   },
-  experiment: {
-    label: 'Experiment',
+  service: {
+    label: 'Service',
     tone: 'border-fuchsia-300 bg-fuchsia-50 text-fuchsia-900 dark:border-fuchsia-500/35 dark:bg-fuchsia-500/12 dark:text-fuchsia-200',
     rail: 'bg-fuchsia-600 dark:bg-fuchsia-500/85',
-  },
-  hotfix: {
-    label: 'Hotfix',
-    tone: 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-500/35 dark:bg-rose-500/12 dark:text-rose-200',
-    rail: 'bg-rose-600 dark:bg-rose-500/85',
   },
 };
 
@@ -167,11 +133,7 @@ export function WorkspaceLifecycleGraph({
 }: WorkspaceLifecycleGraphProps) {
   const groupedByStatus = useMemo(() => {
     const grouped: Record<WorkspaceGraphStatus, WorkspaceGraphRow[]> = {
-      planned: [],
       active: [],
-      idle: [],
-      review: [],
-      merged: [],
       archived: [],
     };
     for (const row of rows) grouped[row.status].push(row);
@@ -181,9 +143,8 @@ export function WorkspaceLifecycleGraph({
   const groupedByType = useMemo(() => {
     const grouped: Record<WorkspaceGraphRow['workspaceType'], WorkspaceGraphRow[]> = {
       feature: [],
-      refactor: [],
-      experiment: [],
-      hotfix: [],
+      patch: [],
+      service: [],
     };
     for (const row of rows) grouped[row.workspaceType].push(row);
     return grouped;

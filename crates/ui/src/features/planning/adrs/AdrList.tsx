@@ -1,5 +1,4 @@
 import { ComponentType, useCallback, useContext, useEffect, useMemo, useState, ChangeEvent, MouseEvent } from 'react';
-// useNavigate removed – no longer needed after SPECS_ROUTE removal
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {

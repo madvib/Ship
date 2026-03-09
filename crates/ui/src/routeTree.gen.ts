@@ -25,6 +25,7 @@ import { Route as ProjectAgentsSkillsRouteImport } from './routes/project/agents
 import { Route as ProjectAgentsRulesRouteImport } from './routes/project/agents.rules'
 import { Route as ProjectAgentsProvidersRouteImport } from './routes/project/agents.providers'
 import { Route as ProjectAgentsPermissionsRouteImport } from './routes/project/agents.permissions'
+import { Route as ProjectAgentsHooksRouteImport } from './routes/project/agents.hooks'
 import { Route as ProjectAgentsMcpRouteImport } from './routes/project/agents.mcp'
 
 const ProjectsRoute = ProjectsRouteImport.update({
@@ -114,6 +115,11 @@ const ProjectAgentsMcpRoute = ProjectAgentsMcpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => ProjectAgentsRoute,
 } as any)
+const ProjectAgentsHooksRoute = ProjectAgentsHooksRouteImport.update({
+  id: '/hooks',
+  path: '/hooks',
+  getParentRoute: () => ProjectAgentsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/project/releases': typeof ProjectReleasesRoute
   '/project/settings': typeof ProjectSettingsRoute
   '/project/agents/mcp': typeof ProjectAgentsMcpRoute
+  '/project/agents/hooks': typeof ProjectAgentsHooksRoute
   '/project/agents/permissions': typeof ProjectAgentsPermissionsRoute
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/project/releases': typeof ProjectReleasesRoute
   '/project/settings': typeof ProjectSettingsRoute
   '/project/agents/mcp': typeof ProjectAgentsMcpRoute
+  '/project/agents/hooks': typeof ProjectAgentsHooksRoute
   '/project/agents/permissions': typeof ProjectAgentsPermissionsRoute
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
@@ -166,6 +174,7 @@ export interface FileRoutesById {
   '/project/releases': typeof ProjectReleasesRoute
   '/project/settings': typeof ProjectSettingsRoute
   '/project/agents/mcp': typeof ProjectAgentsMcpRoute
+  '/project/agents/hooks': typeof ProjectAgentsHooksRoute
   '/project/agents/permissions': typeof ProjectAgentsPermissionsRoute
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
@@ -187,6 +196,7 @@ export interface FileRouteTypes {
     | '/project/releases'
     | '/project/settings'
     | '/project/agents/mcp'
+    | '/project/agents/hooks'
     | '/project/agents/permissions'
     | '/project/agents/providers'
     | '/project/agents/rules'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/project/releases'
     | '/project/settings'
     | '/project/agents/mcp'
+    | '/project/agents/hooks'
     | '/project/agents/permissions'
     | '/project/agents/providers'
     | '/project/agents/rules'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/project/releases'
     | '/project/settings'
     | '/project/agents/mcp'
+    | '/project/agents/hooks'
     | '/project/agents/permissions'
     | '/project/agents/providers'
     | '/project/agents/rules'
@@ -368,11 +380,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectAgentsMcpRouteImport
       parentRoute: typeof ProjectAgentsRoute
     }
+    '/project/agents/hooks': {
+      id: '/project/agents/hooks'
+      path: '/hooks'
+      fullPath: '/project/agents/hooks'
+      preLoaderRoute: typeof ProjectAgentsHooksRouteImport
+      parentRoute: typeof ProjectAgentsRoute
+    }
   }
 }
 
 interface ProjectAgentsRouteChildren {
   ProjectAgentsMcpRoute: typeof ProjectAgentsMcpRoute
+  ProjectAgentsHooksRoute: typeof ProjectAgentsHooksRoute
   ProjectAgentsPermissionsRoute: typeof ProjectAgentsPermissionsRoute
   ProjectAgentsProvidersRoute: typeof ProjectAgentsProvidersRoute
   ProjectAgentsRulesRoute: typeof ProjectAgentsRulesRoute
@@ -382,6 +402,7 @@ interface ProjectAgentsRouteChildren {
 
 const ProjectAgentsRouteChildren: ProjectAgentsRouteChildren = {
   ProjectAgentsMcpRoute: ProjectAgentsMcpRoute,
+  ProjectAgentsHooksRoute: ProjectAgentsHooksRoute,
   ProjectAgentsPermissionsRoute: ProjectAgentsPermissionsRoute,
   ProjectAgentsProvidersRoute: ProjectAgentsProvidersRoute,
   ProjectAgentsRulesRoute: ProjectAgentsRulesRoute,

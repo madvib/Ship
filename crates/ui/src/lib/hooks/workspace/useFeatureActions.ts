@@ -3,6 +3,9 @@ import { FeatureInfo, FeatureDocument } from '@/bindings';
 import {
   createFeatureCmd,
   getFeatureCmd,
+  featureDoneCmd,
+  featureStartCmd,
+  updateFeatureDocumentationCmd,
   updateFeatureCmd,
 } from '../../platform/tauri/commands';
 import { isTauriRuntime } from '../../platform/tauri/runtime';
@@ -44,7 +47,8 @@ export function useFeatureActions({
     title: string,
     content: string,
     release?: string | null,
-    spec?: string | null
+    spec?: string | null,
+    branch?: string | null,
   ) => {
     if (!isTauriRuntime()) {
       setError('Feature creation is only available in Tauri runtime.');
@@ -52,7 +56,7 @@ export function useFeatureActions({
     }
 
     try {
-      const result = await createFeatureCmd(title, content, release, spec);
+      const result = await createFeatureCmd(title, content, release, spec, branch);
       if (result.status === 'ok') {
         const created = result.data;
         setFeatures((prev) => [...prev, created]);
@@ -91,9 +95,99 @@ export function useFeatureActions({
     }
   }, [setFeatures, setSelectedFeature, setError, refreshActivity]);
 
+  const handleStartFeature = useCallback(async (fileName: string) => {
+    if (!isTauriRuntime()) {
+      setError('Feature transition controls are only available in Tauri runtime.');
+      return;
+    }
+
+    try {
+      const result = await featureStartCmd(fileName);
+      if (result.status === 'ok') {
+        const updated = result.data;
+        setFeatures((prev) =>
+          prev.map((entry: FeatureInfo) => (entry.file_name === updated.file_name ? updated : entry))
+        );
+        setSelectedFeature(updated);
+        await refreshActivity();
+      } else {
+        setError(String(result.error));
+        throw new Error(String(result.error));
+      }
+    } catch (error) {
+      setError(String(error));
+      throw error;
+    }
+  }, [setFeatures, setSelectedFeature, setError, refreshActivity]);
+
+  const handleDoneFeature = useCallback(async (fileName: string) => {
+    if (!isTauriRuntime()) {
+      setError('Feature transition controls are only available in Tauri runtime.');
+      return;
+    }
+
+    try {
+      const result = await featureDoneCmd(fileName);
+      if (result.status === 'ok') {
+        const updated = result.data;
+        setFeatures((prev) =>
+          prev.map((entry: FeatureInfo) => (entry.file_name === updated.file_name ? updated : entry))
+        );
+        setSelectedFeature(updated);
+        await refreshActivity();
+      } else {
+        setError(String(result.error));
+        throw new Error(String(result.error));
+      }
+    } catch (error) {
+      setError(String(error));
+      throw error;
+    }
+  }, [setFeatures, setSelectedFeature, setError, refreshActivity]);
+
+  const handleSaveFeatureDocumentation = useCallback(async (
+    fileName: string,
+    content: string,
+    status?: string | null,
+    verifyNow?: boolean,
+  ) => {
+    if (!isTauriRuntime()) {
+      setError('Feature documentation updates are only available in Tauri runtime.');
+      return;
+    }
+
+    try {
+      const result = await updateFeatureDocumentationCmd(fileName, content, status ?? null, verifyNow);
+      if (result.status === 'ok') {
+        const updated = result.data;
+        setFeatures((prev) =>
+          prev.map((entry: FeatureInfo) => (entry.file_name === updated.file_name ? updated : entry))
+        );
+        setSelectedFeature(updated);
+        await refreshActivity();
+      } else {
+        setError(String(result.error));
+        throw new Error(String(result.error));
+      }
+    } catch (error) {
+      setError(String(error));
+      throw error;
+    }
+  }, [setFeatures, setSelectedFeature, setError, refreshActivity]);
+
   return useMemo(() => ({
     handleSelectFeature,
     handleCreateFeature,
     handleSaveFeature,
-  }), [handleSelectFeature, handleCreateFeature, handleSaveFeature]);
+    handleStartFeature,
+    handleDoneFeature,
+    handleSaveFeatureDocumentation,
+  }), [
+    handleSelectFeature,
+    handleCreateFeature,
+    handleSaveFeature,
+    handleStartFeature,
+    handleDoneFeature,
+    handleSaveFeatureDocumentation,
+  ]);
 }

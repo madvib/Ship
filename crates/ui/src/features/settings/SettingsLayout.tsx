@@ -8,6 +8,7 @@ import {
   Globe2,
   Package,
   Settings,
+  Terminal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@ship/ui';
@@ -24,6 +25,7 @@ export type SettingsSection =
   | 'mcp'
   | 'skills'
   | 'rules'
+  | 'hooks'
   | 'permissions';
 
 interface SettingsSidebarItem {
@@ -40,10 +42,11 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
   { id: 'mcp', label: 'MCP Servers', icon: Package, group: 'agents' },
   { id: 'skills', label: 'Skills', icon: FileStack, group: 'agents' },
   { id: 'rules', label: 'Rules', icon: FileCode2, group: 'agents' },
+  { id: 'hooks', label: 'Hooks', icon: Terminal, group: 'agents' },
   { id: 'permissions', label: 'Permissions', icon: FileCog, group: 'agents' },
 ];
 
-const AGENT_SECTIONS: SettingsSection[] = ['providers', 'mcp', 'skills', 'rules', 'permissions'];
+const AGENT_SECTIONS: SettingsSection[] = ['providers', 'mcp', 'skills', 'rules', 'hooks', 'permissions'];
 
 interface SettingsLayoutProps {
   config: Config;

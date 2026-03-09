@@ -10,6 +10,7 @@ import {
   Alert,
   AlertDescription,
   Button,
+  Input,
   EmptyState,
   PageFrame,
   PageHeader,
@@ -40,7 +41,21 @@ interface FeaturesPageProps {
   onCloseFeatureDetail: () => void;
   onSelectFeature: (entry: FeatureEntry) => void;
   onSaveFeature: (fileName: string, content: string) => Promise<void> | void;
-  onCreateFeature: (title: string, content: string) => Promise<void>;
+  onStartFeature: (fileName: string) => Promise<void> | void;
+  onDoneFeature: (fileName: string) => Promise<void> | void;
+  onSaveFeatureDocumentation: (
+    fileName: string,
+    content: string,
+    status?: string | null,
+    verifyNow?: boolean
+  ) => Promise<void> | void;
+  onCreateFeature: (
+    title: string,
+    content: string,
+    releaseId?: string | null,
+    specId?: string | null,
+    branch?: string | null,
+  ) => Promise<void>;
   onSelectReleaseFromFeature?: (name: string) => void;
   onSelectSpecFromFeature?: (name: string) => void;
   tagSuggestions?: string[];
@@ -63,6 +78,9 @@ export default function FeaturesPage({
   onCloseFeatureDetail,
   onSelectFeature,
   onSaveFeature,
+  onStartFeature,
+  onDoneFeature,
+  onSaveFeatureDocumentation,
   onCreateFeature,
   onSelectReleaseFromFeature,
   onSelectSpecFromFeature,
@@ -71,6 +89,9 @@ export default function FeaturesPage({
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [createReleaseId, setCreateReleaseId] = useState<string>('');
+  const [createSpecId, setCreateSpecId] = useState<string>('');
+  const [createBranch, setCreateBranch] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +100,16 @@ export default function FeaturesPage({
   const [sortBy, setSortBy] = useState<FeatureSort>('newest');
   const [viewFilter, setViewFilter] = useState<'all' | 'blocking' | 'ready'>('all');
   const { metricsByFile: featureMetricsByFile } = useFeatureChecklistMetrics(features);
+
+  const resetCreateFeatureDraft = () => {
+    setCreateOpen(false);
+    setTitle('');
+    setContent('');
+    setCreateReleaseId('');
+    setCreateSpecId('');
+    setCreateBranch('');
+    setError(null);
+  };
 
   const stats = useMemo(() => featureHubStats(features), [features]);
 
@@ -147,10 +178,14 @@ export default function FeaturesPage({
     try {
       setCreating(true);
       setError(null);
-      await onCreateFeature(title, content);
-      setCreateOpen(false);
-      setTitle('');
-      setContent('');
+      await onCreateFeature(
+        title,
+        content,
+        createReleaseId.trim() || null,
+        createSpecId.trim() || null,
+        createBranch.trim() || null,
+      );
+      resetCreateFeatureDraft();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -247,6 +282,9 @@ export default function FeaturesPage({
           feature={selectedFeature}
           onClose={onCloseFeatureDetail}
           onSave={onSaveFeature}
+          onStart={onStartFeature}
+          onDone={onDoneFeature}
+          onSaveDocumentation={onSaveFeatureDocumentation}
           onSelectRelease={(name) => {
             if (onSelectReleaseFromFeature) {
               onSelectReleaseFromFeature(name);
@@ -266,10 +304,10 @@ export default function FeaturesPage({
       {createOpen && (
         <DetailSheet
           title="New Feature"
-          onClose={() => setCreateOpen(false)}
+          onClose={resetCreateFeatureDraft}
           footer={
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              <Button variant="ghost" onClick={resetCreateFeatureDraft}>
                 Cancel
               </Button>
               <Button
@@ -307,6 +345,51 @@ export default function FeaturesPage({
                   fillHeight
                 />
               </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Release Link (Optional)</label>
+                <Input
+                  list="feature-create-releases"
+                  value={createReleaseId}
+                  placeholder="release id (ex: rel_123...)"
+                  onChange={(event) => setCreateReleaseId(event.target.value)}
+                />
+                <datalist id="feature-create-releases">
+                  {releases.map((release) => (
+                    <option key={release.id} value={release.id}>
+                      {release.version}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Spec Link (Optional)</label>
+                <Input
+                  list="feature-create-specs"
+                  value={createSpecId}
+                  placeholder="spec id (ex: spec_123...)"
+                  onChange={(event) => setCreateSpecId(event.target.value)}
+                />
+                <datalist id="feature-create-specs">
+                  {specs.map((spec) => (
+                    <option key={spec.id} value={spec.id}>
+                      {spec.spec.metadata.title}
+                    </option>
+                  ))}
+                </datalist>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Branch (Optional)</label>
+              <Input
+                value={createBranch}
+                placeholder="feature/your-scope"
+                onChange={(event) => setCreateBranch(event.target.value)}
+              />
+              <p className="text-muted-foreground text-xs">
+                Initialize the feature with a branch link so lifecycle checks and workspace handoff are ready.
+              </p>
             </div>
           </form>
         </DetailSheet>

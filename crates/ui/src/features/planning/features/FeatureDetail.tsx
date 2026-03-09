@@ -29,6 +29,8 @@ import {
 } from '@ship/ui';
 import { cn } from '@/lib/utils';
 
+const DOC_STATUS_OPTIONS = ['not-started', 'draft', 'reviewed', 'published'];
+
 interface FeatureDetailProps {
   feature: FeatureEntry;
   releaseSuggestions?: string[];
@@ -39,6 +41,14 @@ interface FeatureDetailProps {
   onSelectRelease: (fileName: string) => void;
   onSelectSpec: (fileName: string) => void;
   onSave: (fileName: string, content: string) => Promise<void> | void;
+  onStart: (fileName: string) => Promise<void> | void;
+  onDone: (fileName: string) => Promise<void> | void;
+  onSaveDocumentation: (
+    fileName: string,
+    content: string,
+    status?: string | null,
+    verifyNow?: boolean
+  ) => Promise<void> | void;
 }
 
 export default function FeatureDetail({
@@ -51,11 +61,21 @@ export default function FeatureDetail({
   onSelectRelease,
   onSelectSpec,
   onSave,
+  onStart,
+  onDone,
+  onSaveDocumentation,
 }: FeatureDetailProps) {
   const [content, setContent] = useState(feature.content ?? '');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+
+  const [docsContent, setDocsContent] = useState(feature.docs_content ?? '');
+  const [docsStatus, setDocsStatus] = useState(feature.docs_status ?? 'not-started');
+  const [docsDirty, setDocsDirty] = useState(false);
+  const [docsSaving, setDocsSaving] = useState(false);
+  const [editingDocs, setEditingDocs] = useState(false);
+
   const [activeTab, setActiveTab] = useState<'feature' | 'docs'>('feature');
 
   useEffect(() => {
@@ -63,6 +83,13 @@ export default function FeatureDetail({
     setDirty(false);
     setSaving(false);
     setEditing(false);
+
+    setDocsContent(feature.docs_content ?? '');
+    setDocsStatus(feature.docs_status ?? 'not-started');
+    setDocsDirty(false);
+    setDocsSaving(false);
+    setEditingDocs(false);
+
     setActiveTab('feature');
   }, [feature]);
 
@@ -83,6 +110,36 @@ export default function FeatureDetail({
     setDirty(false);
     setEditing(false);
   }, [feature.content]);
+
+  const handleStatusTransition = useCallback(async (nextStatus: string) => {
+    if (nextStatus === feature.status) return;
+    if (nextStatus === 'in-progress') {
+      await onStart(feature.file_name);
+    } else if (nextStatus === 'implemented') {
+      await onDone(feature.file_name);
+    }
+  }, [feature.file_name, feature.status, onStart, onDone]);
+
+  const saveDocs = useCallback(async () => {
+    if (!docsDirty || docsSaving) return;
+    setDocsSaving(true);
+    try {
+      await onSaveDocumentation(feature.file_name, docsContent, docsStatus);
+      setDocsDirty(false);
+      setEditingDocs(false);
+    } catch {
+      // Error state is set by useFeatureActions; keep editor open for correction.
+    } finally {
+      setDocsSaving(false);
+    }
+  }, [docsContent, docsDirty, docsSaving, feature.file_name, onSaveDocumentation, docsStatus]);
+
+  const cancelDocsEditing = useCallback(() => {
+    setDocsContent(feature.docs_content ?? '');
+    setDocsStatus(feature.docs_status ?? 'not-started');
+    setDocsDirty(false);
+    setEditingDocs(false);
+  }, [feature.docs_content, feature.docs_status]);
 
   const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
   const todoItems = useMemo(
@@ -129,10 +186,9 @@ export default function FeatureDetail({
     () => readFrontmatterStringListField(documentModel.frontmatter, 'tags'),
     [documentModel.frontmatter]
   );
-  const docsContent = useMemo(() => feature.docs_content?.trim() ?? '', [feature.docs_content]);
+  const docsPreview = useMemo(() => docsContent.trim(), [docsContent]);
 
   const handleMetadataUpdate = useCallback((updates: {
-    status?: string;
     release_id?: string;
     spec_id?: string;
     tags?: string[];
@@ -140,9 +196,6 @@ export default function FeatureDetail({
     let nextContent = content;
     const delimiter = documentModel.delimiter || '---';
 
-    if (updates.status) {
-      nextContent = setFrontmatterStringField(nextContent, 'status', updates.status, delimiter) || nextContent;
-    }
     if (updates.release_id !== undefined) {
       nextContent = setFrontmatterStringField(nextContent, 'release_id', updates.release_id, delimiter) || nextContent;
     }
@@ -161,19 +214,28 @@ export default function FeatureDetail({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && editing) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && (editing || editingDocs)) {
         event.preventDefault();
-        cancelEditing();
+        if (editing) void saveFeature();
+        if (editingDocs) void saveDocs();
         return;
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && editing) {
-        event.preventDefault();
-        void saveFeature();
+      if (event.key === 'Escape') {
+        if (editing) {
+          event.preventDefault();
+          cancelEditing();
+          return;
+        }
+        if (editingDocs) {
+          event.preventDefault();
+          cancelDocsEditing();
+          return;
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [cancelEditing, editing, saveFeature]);
+  }, [cancelDocsEditing, cancelEditing, editing, editingDocs, saveDocs, saveFeature]);
 
   return (
     <div className="space-y-3">
@@ -215,6 +277,7 @@ export default function FeatureDetail({
               tags={tags}
               isEditing={editing}
               onUpdate={handleMetadataUpdate}
+              onStatusTransition={handleStatusTransition}
               releaseSuggestions={releaseSuggestions}
               specSuggestions={specSuggestions}
               tagSuggestions={tagSuggestions}
@@ -258,61 +321,61 @@ export default function FeatureDetail({
         <div className="space-y-3">
           <div className="grid gap-2 md:grid-cols-3">
             <div className="space-y-1.5 rounded-md border bg-card px-2.5 py-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">Readiness</span>
-                  <span className="font-semibold">{readiness.readinessPercent}%</span>
-                </div>
-                <Progress
-                  value={readiness.readinessPercent}
-                  indicatorClassName={cn(
-                    !hasChecklistCoverage
-                      ? 'bg-muted-foreground/40'
-                      : readiness.blocking
-                        ? 'bg-amber-500'
-                        : 'bg-emerald-500'
-                  )}
-                />
-                <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
-                  <span>Todos {readiness.todos.done}/{readiness.todos.total}</span>
-                  <span>Acceptance {readiness.acceptance.done}/{readiness.acceptance.total}</span>
-                </div>
-                {!hasChecklistCoverage && (
-                  <p className="text-muted-foreground text-xs italic">
-                    No checklist coverage yet.
-                  </p>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Readiness</span>
+                <span className="font-semibold">{readiness.readinessPercent}%</span>
+              </div>
+              <Progress
+                value={readiness.readinessPercent}
+                indicatorClassName={cn(
+                  !hasChecklistCoverage
+                    ? 'bg-muted-foreground/40'
+                    : readiness.blocking
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
                 )}
+              />
+              <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
+                <span>Todos {readiness.todos.done}/{readiness.todos.total}</span>
+                <span>Acceptance {readiness.acceptance.done}/{readiness.acceptance.total}</span>
+              </div>
+              {!hasChecklistCoverage && (
+                <p className="text-muted-foreground text-xs italic">
+                  No checklist coverage yet.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5 rounded-md border bg-card px-2.5 py-2">
-                <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
-                  <FileText className="size-3.5" />
-                  Docs: <span className="font-medium text-foreground">{feature.docs_status ?? 'not-started'}</span>
-                </p>
+              <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                <FileText className="size-3.5" />
+                Docs: <span className="font-medium text-foreground">{feature.docs_status ?? 'not-started'}</span>
+              </p>
+              <p className="text-muted-foreground text-xs">
+                Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span>
+              </p>
+              {feature.docs_updated_at && (
                 <p className="text-muted-foreground text-xs">
-                  Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span>
+                  Updated: <span className="font-medium text-foreground">{new Date(feature.docs_updated_at).toLocaleString()}</span>
                 </p>
-                {feature.docs_updated_at && (
-                  <p className="text-muted-foreground text-xs">
-                    Updated: <span className="font-medium text-foreground">{new Date(feature.docs_updated_at).toLocaleString()}</span>
-                  </p>
-                )}
-                {!docsContent && (
-                  <p className="text-muted-foreground text-xs italic">
-                    No docs content yet.
-                  </p>
-                )}
+              )}
+              {!docsPreview && (
+                <p className="text-muted-foreground text-xs italic">
+                  No docs content yet.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5 rounded-md border bg-card px-2.5 py-2">
-                <p className="text-muted-foreground text-xs">Execution Context</p>
-                {feature.branch ? (
-                  <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
-                    <GitBranch className="size-3.5" />
-                    {feature.branch}
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground text-xs italic">No branch linked yet.</p>
-                )}
+              <p className="text-muted-foreground text-xs">Execution Context</p>
+              {feature.branch ? (
+                <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+                  <GitBranch className="size-3.5" />
+                  {feature.branch}
+                </p>
+              ) : (
+                <p className="text-muted-foreground text-xs italic">No branch linked yet.</p>
+              )}
             </div>
           </div>
 
@@ -407,25 +470,75 @@ export default function FeatureDetail({
                         <CheckCircle2 className="size-3.5" />
                         Acceptance criteria currently satisfy readiness checks.
                       </p>
-                    )}
+                      )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="docs" className="mt-0 h-full overflow-auto">
                   <div className="space-y-3">
-                    <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
-                      <span>Status: <span className="font-medium text-foreground">{feature.docs_status ?? 'not-started'}</span></span>
+                    <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-xs">
+                      <label className="flex items-center gap-1.5">
+                        Status:
+                        <select
+                          className="bg-card border-muted-foreground/30 rounded border px-2 py-1 text-xs"
+                          value={docsStatus}
+                          onChange={(event) => {
+                            setDocsStatus(event.target.value);
+                            setDocsDirty(true);
+                          }}
+                          disabled={!editingDocs || docsSaving}
+                        >
+                          {DOC_STATUS_OPTIONS.map((nextStatus) => (
+                            <option key={nextStatus} value={nextStatus}>
+                              {nextStatus}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                       <span>Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span></span>
                     </div>
-                    <article className="ship-markdown-preview rounded-md bg-background px-4 py-3">
-                      {docsContent ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{docsContent}</ReactMarkdown>
+                    <div className="ml-auto inline-flex items-center justify-end gap-2">
+                      {editingDocs ? (
+                        <>
+                          <Button variant="outline" size="sm" onClick={cancelDocsEditing} disabled={docsSaving}>
+                            <X className="size-4" />
+                            Cancel
+                          </Button>
+                          <Button size="sm" onClick={() => void saveDocs()} disabled={!docsDirty || docsSaving}>
+                            <Save className="size-4" />
+                            {docsSaving ? 'Saving…' : 'Save'}
+                          </Button>
+                        </>
                       ) : (
-                        <p className="text-muted-foreground text-sm italic">
-                          No feature documentation content yet.
-                        </p>
+                        <Button size="sm" onClick={() => setEditingDocs(true)}>
+                          <Edit3 className="size-4" />
+                          Edit
+                        </Button>
                       )}
-                    </article>
+                    </div>
+                    {editingDocs ? (
+                      <MarkdownEditor
+                        value={docsContent}
+                        onChange={(next) => {
+                          setDocsContent(next);
+                          setDocsDirty(true);
+                        }}
+                        mcpEnabled={mcpEnabled}
+                        fillHeight
+                        rows={24}
+                        defaultMode="edit"
+                      />
+                    ) : (
+                      <article className="ship-markdown-preview rounded-md bg-background px-4 py-3">
+                        {docsPreview ? (
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{docsPreview}</ReactMarkdown>
+                        ) : (
+                          <p className="text-muted-foreground text-sm italic">
+                            No feature documentation content yet.
+                          </p>
+                        )}
+                      </article>
+                    )}
                   </div>
                 </TabsContent>
               </div>

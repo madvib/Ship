@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, FileCode2, Plus } from 'lucide-react';
 import { SpecInfo as SpecEntry } from '@/lib/types/spec';
+import { FeatureInfo as FeatureEntry } from '@/bindings';
 import {
   Alert,
   AlertDescription,
@@ -30,11 +31,20 @@ import {
   setFrontmatterStringListField,
 } from '@ship/ui';
 import { SpecHeaderMetadata } from './SpecHeaderMetadata';
+import SpecDetail from './SpecDetail';
 import TemplateEditorButton from '../common/TemplateEditorButton';
 
 interface SpecsPageProps {
   specs: SpecEntry[];
+  features: FeatureEntry[];
+  selectedSpec: SpecEntry | null;
+  onCloseSpecDetail: () => void;
+  onSaveSpec: (fileName: string, content: string) => Promise<void> | void;
+  onDeleteSpec: (fileName: string) => Promise<void> | void;
+  onMoveSpec: (fileName: string, status: string) => Promise<void> | void;
+  onSelectFeatureFromSpec?: (feature: FeatureEntry) => void;
   tagSuggestions?: string[];
+  mcpEnabled?: boolean;
   onSelectSpec: (entry: SpecEntry) => void;
   onCreateSpec: (title: string, content: string) => Promise<void>;
 }
@@ -47,7 +57,15 @@ const SPEC_SORT_OPTIONS: Array<{ value: SpecSort; label: string }> = [
 
 export default function SpecsPage({
   specs,
+  features,
+  selectedSpec,
+  onCloseSpecDetail,
+  onSaveSpec,
+  onDeleteSpec,
+  onMoveSpec,
+  onSelectFeatureFromSpec,
   tagSuggestions = [],
+  mcpEnabled = false,
   onSelectSpec,
   onCreateSpec,
 }: SpecsPageProps) {
@@ -170,6 +188,24 @@ tags = []
     setContent(createInitialSpecDocument());
   }, [createOpen]);
 
+  if (selectedSpec) {
+    return (
+      <PageFrame width="wide">
+        <SpecDetail
+          spec={selectedSpec}
+          features={features}
+          tagSuggestions={tagSuggestions}
+          onClose={onCloseSpecDetail}
+          onSelectFeature={(feature) => onSelectFeatureFromSpec?.(feature)}
+          onSave={onSaveSpec}
+          onDelete={onDeleteSpec}
+          onMove={onMoveSpec}
+          mcpEnabled={mcpEnabled}
+        />
+      </PageFrame>
+    );
+  }
+
   return (
     <PageFrame>
       <PageHeader
@@ -286,6 +322,7 @@ tags = []
           meta={
             <SpecHeaderMetadata
               fileName="new-spec.md"
+              status={readFrontmatterStringField(documentModel.frontmatter, 'status') || 'draft'}
               tags={currentTags}
               isEditing={true}
               onUpdate={handleMetadataUpdate}
@@ -329,6 +366,7 @@ tags = []
               placeholder="# Alpha Spec"
               rows={22}
               defaultMode="doc"
+              mcpEnabled={mcpEnabled}
             />
           </form>
         </DetailSheet>

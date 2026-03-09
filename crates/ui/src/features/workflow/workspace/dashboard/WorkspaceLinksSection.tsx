@@ -15,32 +15,42 @@ import { ExternalLink, Info, RefreshCw } from 'lucide-react';
 interface WorkspaceLinksSectionProps {
   linkedFeature: any;
   linkedSpec: any;
+  linkedRelease: any;
   linkFeatureId: string;
   setLinkFeatureId: (id: string) => void;
   linkSpecId: string;
   setLinkSpecId: (id: string) => void;
+  linkReleaseId: string;
+  setLinkReleaseId: (id: string) => void;
   featureLinkOptions: any[];
   specLinkOptions: any[];
+  releaseLinkOptions: any[];
   updatingLinks: boolean;
   onApplyLinks: () => void;
   onOpenFeature: () => void;
   onOpenSpec: () => void;
+  onOpenRelease: () => void;
   noLinkValue: string;
 }
 
 export function WorkspaceLinksSection({
   linkedFeature,
   linkedSpec,
+  linkedRelease,
   linkFeatureId,
   setLinkFeatureId,
   linkSpecId,
   setLinkSpecId,
+  linkReleaseId,
+  setLinkReleaseId,
   featureLinkOptions,
   specLinkOptions,
+  releaseLinkOptions,
   updatingLinks,
   onApplyLinks,
   onOpenFeature,
   onOpenSpec,
+  onOpenRelease,
   noLinkValue,
 }: WorkspaceLinksSectionProps) {
   const featureLabelById = useMemo(
@@ -69,6 +79,30 @@ export function WorkspaceLinksSection({
   const safeSpecValue =
     linkSpecId === noLinkValue || specLabelById.has(linkSpecId)
       ? linkSpecId
+      : noLinkValue;
+  const releaseLabelById = useMemo(
+    () =>
+      new Map(
+        releaseLinkOptions.map((entry) => [
+          entry.id,
+          entry.version || entry.file_name || entry.id,
+        ])
+    ),
+    [releaseLinkOptions]
+  );
+  const resolvedReleaseOptionId = useMemo(() => {
+    if (linkReleaseId === noLinkValue) return noLinkValue;
+    const matched = releaseLinkOptions.find(
+      (entry) =>
+        entry.id === linkReleaseId ||
+        entry.version === linkReleaseId ||
+        entry.file_name === linkReleaseId
+    );
+    return matched?.id ?? noLinkValue;
+  }, [linkReleaseId, noLinkValue, releaseLinkOptions]);
+  const safeReleaseValue =
+    resolvedReleaseOptionId === noLinkValue || releaseLabelById.has(resolvedReleaseOptionId)
+      ? resolvedReleaseOptionId
       : noLinkValue;
 
   return (
@@ -102,7 +136,7 @@ export function WorkspaceLinksSection({
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
@@ -181,6 +215,50 @@ export function WorkspaceLinksSection({
                     title={entry.spec?.metadata?.title || entry.id}
                   >
                     {entry.spec?.metadata?.title || entry.id}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Release
+            </span>
+            {linkedRelease ? (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="size-5 text-muted-foreground"
+                onClick={onOpenRelease}
+              >
+                <ExternalLink className="size-3" />
+              </Button>
+            ) : null}
+          </div>
+          <Select
+            value={safeReleaseValue}
+            onValueChange={(val) => setLinkReleaseId(val ?? noLinkValue)}
+          >
+            <SelectTrigger size="sm" className="h-8">
+              <SelectValue placeholder="Unlinked">
+                {(value) => {
+                  if (!value || value === noLinkValue) return 'Unlinked';
+                  return releaseLabelById.get(String(value)) ?? 'Unlinked';
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={noLinkValue}>Unlinked</SelectItem>
+              {releaseLinkOptions.map((entry) => (
+                <SelectItem key={entry.id} value={entry.id}>
+                  <span
+                    className="block max-w-[24rem] truncate"
+                    title={entry.version || entry.file_name || entry.id}
+                  >
+                    {entry.version || entry.file_name || entry.id}
                   </span>
                 </SelectItem>
               ))}

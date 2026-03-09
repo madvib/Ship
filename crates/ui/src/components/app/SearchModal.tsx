@@ -29,6 +29,7 @@ import {
 } from '@ship/ui';
 import {
     ADRS_ROUTE,
+    AGENTS_HOOKS_ROUTE,
     AGENTS_MCP_ROUTE,
     AGENTS_PERMISSIONS_ROUTE,
     AGENTS_PROVIDERS_ROUTE,
@@ -38,6 +39,7 @@ import {
     NOTES_ROUTE,
     OVERVIEW_ROUTE,
     RELEASES_ROUTE,
+    SPECS_ROUTE,
     WORKFLOW_WORKSPACE_ROUTE,
 } from '@/lib/constants/routes';
 import {
@@ -61,7 +63,6 @@ export function SearchModal() {
 
     const {
         setNotesScope,
-        setError: setWorkspaceError,
     } = workspace;
 
     const {
@@ -156,28 +157,17 @@ export function SearchModal() {
     }, [knownWorkspaceBranches, runWorkspaceMutation, runtimeBranch]);
 
     const openSpecContext = React.useCallback(async (spec: typeof specs[number]) => {
-        const relatedFeature = features.find(
-            (feature) => feature.spec_id === spec.id || feature.spec_id === spec.file_name
-        );
-        if (relatedFeature) {
-            await navigate({ to: FEATURES_ROUTE });
-            await handleSelectFeature(relatedFeature);
-            return;
-        }
-
-        await navigate({ to: FEATURES_ROUTE });
+        await navigate({ to: SPECS_ROUTE });
         await ship.handleSelectSpec(spec);
-        const message = `Spec "${spec.spec.metadata.title || spec.id}" is not linked to a feature yet.`;
-        setWorkspaceError(message);
-        throw new Error(message);
-    }, [features, handleSelectFeature, navigate, setWorkspaceError, ship]);
+    }, [navigate, ship]);
 
-    const openSettingsSection = React.useCallback((section: 'providers' | 'mcp' | 'skills' | 'rules' | 'permissions') => {
+    const openSettingsSection = React.useCallback((section: 'providers' | 'mcp' | 'skills' | 'rules' | 'hooks' | 'permissions') => {
         const routeBySection = {
             providers: AGENTS_PROVIDERS_ROUTE,
             mcp: AGENTS_MCP_ROUTE,
             skills: AGENTS_SKILLS_ROUTE,
             rules: AGENTS_RULES_ROUTE,
+            hooks: AGENTS_HOOKS_ROUTE,
             permissions: AGENTS_PERMISSIONS_ROUTE,
         } as const;
         void navigate({ to: routeBySection[section] });
@@ -201,6 +191,10 @@ export function SearchModal() {
                     <CommandItem onSelect={() => runCommand(() => void navigate({ to: FEATURES_ROUTE }))}>
                         <Target className="mr-2 h-4 w-4" />
                         <span>Features</span>
+                    </CommandItem>
+                    <CommandItem onSelect={() => runCommand(() => void navigate({ to: SPECS_ROUTE }))}>
+                        <FileText className="mr-2 h-4 w-4" />
+                        <span>Specs</span>
                     </CommandItem>
                     <CommandItem onSelect={() => runCommand(() => void navigate({ to: RELEASES_ROUTE }))}>
                         <Package className="mr-2 h-4 w-4" />

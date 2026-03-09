@@ -6,6 +6,7 @@ import {
   TooltipTrigger,
 } from '@ship/ui';
 import {
+  Archive,
   GitBranch,
   Info,
   RefreshCw,
@@ -23,6 +24,8 @@ interface WorkspaceStatusCardProps {
   syncing: boolean;
   onActivate: () => void;
   activating: boolean;
+  onArchive: () => void;
+  archiving: boolean;
   onRepair: () => void;
   repairing: boolean;
   lastRepairReport: WorkspaceRepairReport | null;
@@ -35,6 +38,8 @@ export function WorkspaceStatusCard({
   syncing,
   onActivate,
   activating,
+  onArchive,
+  archiving,
   onRepair,
   repairing,
   lastRepairReport,
@@ -151,6 +156,25 @@ export function WorkspaceStatusCard({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Compile and apply this workspace context as the active branch environment.</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 flex-1 gap-1.5 text-xs font-medium"
+              onClick={onArchive}
+              disabled={archiving}
+            >
+              {archiving ? (
+                <RefreshCw className="size-3 animate-spin" />
+              ) : (
+                <Archive className="size-3" />
+              )}
+              Archive
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Archive this workspace while preserving its links and session history.</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>

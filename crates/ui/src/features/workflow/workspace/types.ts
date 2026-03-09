@@ -3,6 +3,7 @@ import { WorkspaceGraphRow, WorkspaceGraphStatus } from '../components/Workspace
 export interface WorkspaceRow extends WorkspaceGraphRow {
     id: string;
     branch: string;
+    environmentId: string | null;
     resolvedAt: string;
     worktreePath: string | null;
     lastActivatedAt: string | null;

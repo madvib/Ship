@@ -7,6 +7,7 @@ import { Workspace, WorkspaceType } from '@/bindings';
  */
 export interface RuntimeWorkspace extends Workspace {
     workspace_type?: WorkspaceType;
+    environment_id?: string | null;
     release_id?: string | null;
     last_activated_at?: string | null;
     context_hash?: string | null;

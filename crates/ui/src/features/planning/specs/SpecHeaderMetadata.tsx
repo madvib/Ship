@@ -1,9 +1,13 @@
 import {
     Tag,
-    FileText
+    FileText,
+    Circle,
+    PlayCircle,
+    Archive
 } from 'lucide-react';
 import {
     Badge,
+    Button,
     FacetedFilter,
     Tooltip,
     TooltipTrigger,
@@ -14,6 +18,9 @@ import { MetadataPopover } from '../common/MetadataPopover';
 
 interface SpecHeaderMetadataProps {
     fileName: string;
+    status: string;
+    onMoveStatus?: (status: string) => Promise<void> | void;
+    movingStatus?: boolean;
     tags?: string[];
     isEditing: boolean;
     onUpdate: (updates: {
@@ -22,15 +29,55 @@ interface SpecHeaderMetadataProps {
     tagSuggestions?: string[];
 }
 
+const STATUS_OPTIONS = [
+    { value: 'draft', label: 'Draft', icon: Circle },
+    { value: 'active', label: 'Active', icon: PlayCircle },
+    { value: 'archived', label: 'Archived', icon: Archive },
+];
+
 export function SpecHeaderMetadata({
     fileName,
+    status,
+    onMoveStatus,
+    movingStatus = false,
     tags = [],
     isEditing,
     onUpdate,
     tagSuggestions = [],
 }: SpecHeaderMetadataProps) {
+    const statusOption = STATUS_OPTIONS.find((option) => option.value === status) ?? STATUS_OPTIONS[0];
+
     return (
         <BaseMetadataHeader>
+            {/* Status Popover */}
+            <MetadataPopover
+                icon={statusOption.icon}
+                label={statusOption.label}
+                title="Move Spec"
+                contentClassName="w-44 p-2"
+            >
+                <div className="space-y-1">
+                    {STATUS_OPTIONS.map((option) => (
+                        <Button
+                            key={option.value}
+                            variant="ghost"
+                            size="xs"
+                            className="h-8 w-full justify-start gap-2"
+                            onClick={() => {
+                                if (!onMoveStatus || option.value === status || movingStatus) return;
+                                void Promise.resolve(onMoveStatus(option.value)).catch(() => {
+                                    // Shared workspace error state captures move failures.
+                                });
+                            }}
+                            disabled={!onMoveStatus || movingStatus || option.value === status}
+                        >
+                            <option.icon className="size-3.5" />
+                            {option.label}
+                        </Button>
+                    ))}
+                </div>
+            </MetadataPopover>
+
             {/* File Name Info */}
             <div className="flex items-center gap-1.5 shrink-0">
                 <FileText className="size-3.5" />

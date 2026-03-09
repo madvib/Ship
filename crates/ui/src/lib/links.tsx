@@ -2,6 +2,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useShip } from './hooks/workspace/WorkspaceContext';
 import { Badge, Button } from '@ship/ui';
 import { ExternalLink } from 'lucide-react';
+import { SPECS_ROUTE } from './constants/routes';
 
 export type EntityType = 'spec' | 'feature' | 'release' | 'adr' | 'note';
 
@@ -20,7 +21,8 @@ export function useEntityLink() {
 
         if (lowerType === 'spec') {
             const entry = ship.specs.find(s => s.file_name === target || s.id === target);
-            if (entry) ship.setSelectedSpec(entry);
+            if (entry) void ship.handleSelectSpec(entry);
+            navigate({ to: SPECS_ROUTE });
         } else if (lowerType === 'feature') {
             const entry = ship.features.find(f => f.file_name === target || f.id === target);
             if (entry) void ship.handleSelectFeature(entry);

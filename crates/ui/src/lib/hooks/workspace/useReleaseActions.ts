@@ -3,6 +3,7 @@ import { ReleaseInfo, ReleaseDocument } from '@/bindings';
 import {
   createReleaseCmd,
   getReleaseCmd,
+  ReleaseMetadataUpdate,
   updateReleaseCmd,
 } from '../../platform/tauri/commands';
 import { isTauriRuntime } from '../../platform/tauri/runtime';
@@ -38,14 +39,18 @@ export function useReleaseActions({
     }
   }, [setSelectedRelease, setError]);
 
-  const handleCreateRelease = useCallback(async (version: string, content: string) => {
+  const handleCreateRelease = useCallback(async (
+    version: string,
+    content: string,
+    metadata?: ReleaseMetadataUpdate,
+  ) => {
     if (!isTauriRuntime()) {
       setError('Release creation is only available in Tauri runtime.');
       return;
     }
 
     try {
-      const result = await createReleaseCmd(version, content);
+      const result = await createReleaseCmd(version, content, metadata);
       if (result.status === 'ok') {
         const created = result.data;
         setReleases((prev) => [...prev, created]);
@@ -61,18 +66,22 @@ export function useReleaseActions({
     }
   }, [setReleases, setSelectedRelease, setError, refreshActivity]);
 
-  const handleSaveRelease = useCallback(async (fileName: string, content: string) => {
+  const handleSaveRelease = useCallback(async (
+    fileName: string,
+    content: string,
+    metadata?: ReleaseMetadataUpdate,
+  ) => {
     if (!isTauriRuntime()) {
       setError('Saving releases is only available in Tauri runtime.');
       return;
     }
 
     try {
-      const result = await updateReleaseCmd(fileName, content);
+      const result = await updateReleaseCmd(fileName, content, metadata);
       if (result.status === 'ok') {
         const updated = result.data;
         setReleases((prev) =>
-          prev.map((entry) => (entry.file_name === updated.file_name ? updated : entry))
+          prev.map((entry) => (entry.id === updated.id ? updated : entry))
         );
         setSelectedRelease(updated);
         await refreshActivity();

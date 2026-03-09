@@ -6,6 +6,7 @@ import {
   createSpecCmd,
   deleteSpecCmd,
   getSpecCmd,
+  moveSpecCmd,
   updateSpecCmd,
 } from '../../platform/tauri/commands';
 import { isTauriRuntime } from '../../platform/tauri/runtime';
@@ -109,10 +110,36 @@ export function useSpecActions({
     }
   }, [setSpecs, setSelectedSpec, setError, refreshActivity]);
 
+  const handleMoveSpec = useCallback(async (fileName: string, status: string) => {
+    if (!isTauriRuntime()) {
+      setError('Spec status transitions are only available in Tauri runtime.');
+      return;
+    }
+
+    try {
+      const result = await moveSpecCmd(fileName, status);
+      if (result.status === 'ok') {
+        const updated = result.data;
+        setSpecs((prev) =>
+          prev.map((entry) => (entry.file_name === updated.file_name ? updated : entry))
+        );
+        setSelectedSpec(updated);
+        await refreshActivity();
+      } else {
+        setError(String(result.error));
+        throw new Error(String(result.error));
+      }
+    } catch (error) {
+      setError(String(error));
+      throw error;
+    }
+  }, [setSpecs, setSelectedSpec, setError, refreshActivity]);
+
   return useMemo(() => ({
     handleSelectSpec,
     handleCreateSpec,
     handleSaveSpec,
     handleDeleteSpec,
-  }), [handleSelectSpec, handleCreateSpec, handleSaveSpec, handleDeleteSpec]);
+    handleMoveSpec,
+  }), [handleSelectSpec, handleCreateSpec, handleSaveSpec, handleDeleteSpec, handleMoveSpec]);
 }
