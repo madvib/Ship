@@ -581,7 +581,7 @@ fn write_directory_readmes(ship_path: &Path) -> Result<()> {
         ),
         (
             agents_ns(ship_path),
-            "# agents/\n\nAgent runtime config and policy.\n- `mcp.toml`: Model Context Protocol server configuration.\n- `permissions.toml`: Agent capability and access controls.\n- `rules/`: Development and project principles.\n- Skills are stored outside repo state (`~/.ship/skills` and `~/.ship/projects/<project>/skills`).\n- Modes: persisted in SQLite runtime state.\n".to_string(),
+            "# agents/\n\nAgent runtime config and policy.\n- `mcp.toml`: Model Context Protocol server configuration.\n- `permissions.toml`: Agent capability and access controls.\n- `rules/`: Development and project principles.\n- Skills: project scope in `.ship/skills/`, user scope in `~/.ship/skills/`.\n- Modes: persisted in SQLite runtime state.\n".to_string(),
         ),
         (
             rules_dir(ship_path),

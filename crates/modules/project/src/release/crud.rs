@@ -166,22 +166,48 @@ fn remove_release_files(ship_dir: &Path, version: &str) {
 // ── Public CRUD ──────────────────────────────────────────────────────────────
 
 pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<ReleaseEntry> {
+    create_release_with_metadata(ship_dir, version, body, None, None, None, Vec::new())
+}
+
+pub fn create_release_with_metadata(
+    ship_dir: &Path,
+    version: &str,
+    body: &str,
+    status: Option<ReleaseStatus>,
+    target_date: Option<String>,
+    supported: Option<bool>,
+    tags: Vec<String>,
+) -> Result<ReleaseEntry> {
     if version.trim().is_empty() {
         return Err(anyhow!("Release version cannot be empty"));
     }
     let id = version.to_string(); // version is the ID for releases
     let now = Utc::now().to_rfc3339();
+    let status = status.unwrap_or(ReleaseStatus::Upcoming);
+    let target_date = target_date.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let tags = tags
+        .into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .collect::<Vec<_>>();
 
     let mut release = Release {
         metadata: ReleaseMetadata {
             id: id.clone(),
             version: version.to_string(),
-            status: ReleaseStatus::Upcoming,
+            status: status.clone(),
             created: now.clone(),
             updated: now,
-            supported: None,
-            target_date: None,
-            tags: vec![],
+            supported,
+            target_date,
+            tags,
         },
         body: body.to_string(),
         breaking_changes: vec![],
@@ -189,7 +215,7 @@ pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<Rele
 
     release.extract_breaking_changes();
 
-    upsert_release_db(ship_dir, &release, &ReleaseStatus::Upcoming)?;
+    upsert_release_db(ship_dir, &release, &status)?;
     let file_path = write_release_file(ship_dir, &release)?;
 
     runtime::append_event(
@@ -210,15 +236,15 @@ pub fn create_release(ship_dir: &Path, version: &str, body: &str) -> Result<Rele
             .to_string(),
         path: file_path.to_string_lossy().to_string(),
         version: version.to_string(),
-        status: ReleaseStatus::Upcoming,
+        status,
         release,
     })
 }
 
 pub fn get_release_by_id(ship_dir: &Path, id: &str) -> Result<ReleaseEntry> {
     let resolved_id = require_release_id(ship_dir, id)?;
-    let mut entry =
-        get_release_db(ship_dir, &resolved_id)?.ok_or_else(|| anyhow!("Release not found: {}", id))?;
+    let mut entry = get_release_db(ship_dir, &resolved_id)?
+        .ok_or_else(|| anyhow!("Release not found: {}", id))?;
     if entry.release.body.trim().is_empty()
         && let Some(body) = load_release_body_from_file(ship_dir, &resolved_id, &entry.version)
     {
@@ -229,7 +255,7 @@ pub fn get_release_by_id(ship_dir: &Path, id: &str) -> Result<ReleaseEntry> {
 
 pub fn update_release(ship_dir: &Path, id: &str, mut release: Release) -> Result<ReleaseEntry> {
     let resolved_id = require_release_id(ship_dir, id)?;
-    let existing = get_release_db(ship_dir, &resolved_id)?
+    let _existing = get_release_db(ship_dir, &resolved_id)?
         .ok_or_else(|| anyhow!("Release not found: {}", id))?;
     release.metadata.updated = Utc::now().to_rfc3339();
     if release.body.trim().is_empty()
@@ -239,7 +265,8 @@ pub fn update_release(ship_dir: &Path, id: &str, mut release: Release) -> Result
         release.body = body;
     }
 
-    upsert_release_db(ship_dir, &release, &existing.status)?;
+    let persisted_status = release.metadata.status;
+    upsert_release_db(ship_dir, &release, &persisted_status)?;
     let path = release_update_path(ship_dir, &release.metadata.version);
     let content = release.to_markdown()?;
     runtime::fs_util::write_atomic(&path, content)?;
@@ -256,6 +283,8 @@ pub fn update_release(ship_dir: &Path, id: &str, mut release: Release) -> Result
     let mut entry = get_release_db(ship_dir, &resolved_id)?
         .ok_or_else(|| anyhow!("Release not found after update"))?;
     entry.release.body = release.body;
+    entry.status = persisted_status;
+    entry.release.metadata.status = persisted_status;
     Ok(entry)
 }
 

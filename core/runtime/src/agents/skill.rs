@@ -24,7 +24,7 @@ pub enum SkillSource {
 /// They can be invoked explicitly by the user with `/skill-name [args]`
 /// and can use `$ARGUMENTS`.
 /// Stored as:
-/// - project scope: `~/.ship/projects/<project-slug>/skills/<id>/SKILL.md`
+/// - project scope: `.ship/skills/<id>/SKILL.md`
 /// - user scope: `~/.ship/skills/<id>/SKILL.md`
 /// using Agent Skills spec format.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -113,71 +113,15 @@ fn user_skills_dir() -> PathBuf {
     crate::project::user_skills_dir()
 }
 
-fn legacy_project_skills_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join("agents").join("skills")
-}
-
-fn legacy_user_skills_dir() -> Result<PathBuf> {
-    Ok(crate::project::get_global_dir()?
-        .join("agents")
-        .join("skills"))
-}
-
-fn migrate_legacy_skill_dirs(legacy_dir: &Path, target_dir: &Path) -> Result<()> {
-    if !legacy_dir.exists() || !legacy_dir.is_dir() {
-        return Ok(());
-    }
-
-    fs::create_dir_all(target_dir)?;
-
-    for entry in fs::read_dir(legacy_dir)? {
-        let entry = entry?;
-        let source = entry.path();
-        if !source.is_dir() {
-            continue;
-        }
-        let Some(name) = source.file_name() else {
-            continue;
-        };
-        let target = target_dir.join(name);
-        if target.exists() {
-            continue;
-        }
-        if fs::rename(&source, &target).is_err() {
-            fs::create_dir_all(&target)?;
-            for child in fs::read_dir(&source)? {
-                let child = child?;
-                let child_source = child.path();
-                let child_target = target.join(child.file_name());
-                if child_source.is_dir() {
-                    fs::create_dir_all(&child_target)?;
-                } else {
-                    fs::copy(&child_source, &child_target)?;
-                }
-            }
-            let _ = fs::remove_dir_all(&source);
-        }
-    }
-
-    if fs::read_dir(legacy_dir)?.next().is_none() {
-        let _ = fs::remove_dir_all(legacy_dir);
-    }
-
-    Ok(())
-}
-
 fn ensure_project_skills_storage(project_dir: &Path) -> Result<PathBuf> {
     let target = skills_dir(project_dir);
-    migrate_legacy_skill_dirs(&legacy_project_skills_dir(project_dir), &target)?;
     fs::create_dir_all(&target)?;
+    migrate_legacy_project_skills(project_dir, &target)?;
     Ok(target)
 }
 
 fn ensure_user_skills_storage() -> Result<PathBuf> {
     let target = user_skills_dir();
-    if let Ok(legacy) = legacy_user_skills_dir() {
-        migrate_legacy_skill_dirs(&legacy, &target)?;
-    }
     fs::create_dir_all(&target)?;
     Ok(target)
 }
@@ -350,6 +294,39 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
             fs::copy(&source_path, &target_path)?;
         }
     }
+    Ok(())
+}
+
+fn migrate_legacy_project_skills(project_dir: &Path, target_root: &Path) -> Result<()> {
+    let legacy_root = crate::project::legacy_project_skills_dir(project_dir);
+    if legacy_root == target_root || !legacy_root.exists() || !legacy_root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(&legacy_root)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        if !source_path.is_dir() {
+            continue;
+        }
+        if !source_path.join("SKILL.md").is_file() {
+            continue;
+        }
+
+        let destination_path = target_root.join(entry.file_name());
+        if destination_path.exists() {
+            continue;
+        }
+
+        match fs::rename(&source_path, &destination_path) {
+            Ok(_) => {}
+            Err(_) => {
+                copy_dir_recursive(&source_path, &destination_path)?;
+                fs::remove_dir_all(&source_path)?;
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -752,8 +729,7 @@ mod tests {
     #[test]
     fn create_and_get_round_trip() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         let s = create_skill(
             &project_dir,
             "review",
@@ -775,51 +751,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_legacy_skill_format_without_skill_md() -> Result<()> {
+    fn rejects_invalid_skill_dir_without_skill_md() -> Result<()> {
         let tmp = tempdir()?;
-        let legacy_dir = skill_dir(tmp.path(), "legacy-skill");
-        fs::create_dir_all(&legacy_dir)?;
+        let invalid_dir = skill_dir(tmp.path(), "broken-skill");
+        fs::create_dir_all(&invalid_dir)?;
         write_atomic(
-            &legacy_dir.join("skill.toml"),
-            "id = \"legacy-skill\"\nname = \"Legacy Skill\"\n".to_string(),
+            &invalid_dir.join("skill.toml"),
+            "id = \"broken-skill\"\nname = \"Broken Skill\"\n".to_string(),
         )?;
-        write_atomic(&legacy_dir.join("index.md"), "legacy body".to_string())?;
-        let err = get_skill(tmp.path(), "legacy-skill").expect_err("expected parse failure");
+        write_atomic(&invalid_dir.join("index.md"), "broken body".to_string())?;
+        let err = get_skill(tmp.path(), "broken-skill").expect_err("expected parse failure");
         assert!(err.to_string().contains("Missing SKILL.md"));
-        Ok(())
-    }
-
-    #[test]
-    fn migrates_legacy_repo_local_skill_storage_to_global_project_storage() -> Result<()> {
-        let tmp = tempdir()?;
-        let legacy_skill_dir = tmp
-            .path()
-            .join("agents")
-            .join("skills")
-            .join("legacy-migrated");
-        fs::create_dir_all(&legacy_skill_dir)?;
-        write_atomic(
-            &legacy_skill_dir.join("SKILL.md"),
-            r#"---
-name: legacy-migrated
-description: Legacy repo-local skill that should be migrated.
-metadata:
-  display_name: Legacy Migrated
----
-
-Legacy body.
-"#,
-        )?;
-
-        let skills = list_skills(tmp.path())?;
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].id, "legacy-migrated");
-        assert_eq!(skills[0].name, "Legacy Migrated");
-        assert!(
-            !legacy_skill_dir.exists(),
-            "legacy skill dir should be moved"
-        );
-        assert!(skill_dir(tmp.path(), "legacy-migrated").exists());
         Ok(())
     }
 
@@ -925,11 +867,12 @@ Body.
     #[test]
     fn list_returns_all_skills() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "a", "A", "content a")?;
         create_skill(&project_dir, "b", "B", "content b")?;
-        assert_eq!(list_skills(&project_dir)?.len(), 2);
+        let skills = list_skills(&project_dir)?;
+        assert!(skills.iter().any(|s| s.id == "a"));
+        assert!(skills.iter().any(|s| s.id == "b"));
         Ok(())
     }
 
@@ -943,8 +886,7 @@ Body.
     #[test]
     fn update_skill_persists() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "s", "Old", "old")?;
         update_skill(&project_dir, "s", Some("New"), Some("new $ARGUMENTS"))?;
         let reloaded = get_skill(&project_dir, "s")?;
@@ -956,8 +898,7 @@ Body.
     #[test]
     fn delete_removes_skill() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "gone", "Gone", "x")?;
         delete_skill(&project_dir, "gone")?;
         assert!(get_skill(&project_dir, "gone").is_err());
@@ -967,10 +908,47 @@ Body.
     #[test]
     fn duplicate_rejected() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "dup", "Dup", "x")?;
         assert!(create_skill(&project_dir, "dup", "Dup2", "y").is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn migrates_legacy_global_project_skills_into_repo_local_storage() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        let legacy_skill_dir = crate::project::legacy_project_skills_dir(&project_dir)
+            .join("legacy-skill");
+        fs::create_dir_all(&legacy_skill_dir)?;
+        write_atomic(
+            &legacy_skill_dir.join("SKILL.md"),
+            r#"---
+name: legacy-skill
+description: Legacy skill migrated into repo-local project storage.
+metadata:
+  display_name: Legacy Skill
+  source: imported
+---
+
+Legacy body.
+"#,
+        )?;
+
+        let skills = list_skills(&project_dir)?;
+        assert!(skills.iter().any(|skill| skill.id == "legacy-skill"));
+        assert!(
+            crate::project::skills_dir(&project_dir)
+                .join("legacy-skill")
+                .join("SKILL.md")
+                .is_file()
+        );
+        assert!(
+            !crate::project::legacy_project_skills_dir(&project_dir)
+                .join("legacy-skill")
+                .exists()
+        );
         Ok(())
     }
 

@@ -519,10 +519,15 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
             println!("{:<30} {:<14} {}", "MODEL", "CONTEXT", "");
             println!("{}", "-".repeat(60));
             for model in models {
+                let context = if model.context_window == 0 {
+                    "-".to_string()
+                } else {
+                    format!("{}k", model.context_window / 1000)
+                };
                 println!(
                     "{:<30} {:<14} {}",
                     model.id,
-                    format!("{}k", model.context_window / 1000),
+                    context,
                     if model.recommended {
                         "(recommended)"
                     } else {

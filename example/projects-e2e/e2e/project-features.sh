@@ -69,9 +69,9 @@ assert_path_exists "$WORK_DIR/.ship/project/notes"
 assert_path_exists "$WORK_DIR/.ship/project/vision.md"
 assert_path_exists "$WORK_DIR/.ship/project/TEMPLATE.md"
 assert_path_exists "$WORK_DIR/.ship/project/releases/TEMPLATE.md"
-# Skills are stored outside repo-local .ship to avoid git noise.
-if [[ -z "$(find "$HOME_DIR/.ship/projects" -type f -path '*/skills/task-policy/SKILL.md' -print -quit 2>/dev/null)" ]]; then
-  echo "ASSERTION FAILED: expected seeded task-policy skill under \$HOME/.ship/projects/*/skills" >&2
+# Project skills are stored in repo-local .ship/skills.
+if [[ ! -f "$WORK_DIR/.ship/skills/task-policy/SKILL.md" ]]; then
+  echo "ASSERTION FAILED: expected seeded task-policy skill under .ship/skills" >&2
   exit 1
 fi
 assert_path_exists "$WORK_DIR/.ship/generated"

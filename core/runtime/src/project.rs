@@ -92,7 +92,7 @@ pub fn permissions_config_path(ship_dir: &Path) -> PathBuf {
 }
 
 /// Derive a stable, filesystem-safe project slug from a `.ship` path.
-/// This is shared across runtime storage surfaces under `~/.ship`.
+/// Used for legacy migration paths and global indexing.
 pub fn project_slug_from_ship_dir(ship_dir: &Path) -> String {
     let project_root = if ship_dir
         .file_name()
@@ -136,8 +136,14 @@ pub fn user_skills_dir() -> PathBuf {
         .join("skills")
 }
 
-/// Project-scoped skills store: `~/.ship/projects/<project-slug>/skills/`
+/// Project-scoped skills store: `.ship/skills/`
 pub fn project_skills_dir(ship_dir: &Path) -> PathBuf {
+    ship_dir.join("skills")
+}
+
+/// Legacy project-scoped skills store used by pre-release builds:
+/// `~/.ship/projects/<project-slug>/skills/`
+pub fn legacy_project_skills_dir(ship_dir: &Path) -> PathBuf {
     let slug = project_slug_from_ship_dir(ship_dir);
     get_global_dir()
         .unwrap_or_else(|_| PathBuf::from(".ship"))
@@ -440,14 +446,27 @@ fn auto_test_global_dir() -> Option<PathBuf> {
         return None;
     }
 
-    static TEST_GLOBAL_DIR: OnceLock<PathBuf> = OnceLock::new();
-    let dir = TEST_GLOBAL_DIR
-        .get_or_init(|| {
+    thread_local! {
+        static TEST_GLOBAL_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    }
+    let dir = TEST_GLOBAL_DIR.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        slot.get_or_insert_with(|| {
+            let thread_suffix = format!("{:?}", std::thread::current().id())
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect::<String>();
             std::env::temp_dir()
-                .join(format!("{}{}", TEST_GLOBAL_DIR_PREFIX, std::process::id()))
+                .join(format!(
+                    "{}{}-{}",
+                    TEST_GLOBAL_DIR_PREFIX,
+                    std::process::id(),
+                    thread_suffix
+                ))
                 .join(SHIP_DIR_NAME)
         })
-        .clone();
+        .clone()
+    });
     register_test_global_cleanup(&dir);
     cleanup_stale_test_global_dirs();
     Some(dir)
@@ -512,7 +531,11 @@ fn cleanup_stale_test_global_dirs() {
 }
 
 fn parse_test_global_dir_pid(name: &str) -> Option<u32> {
-    name.strip_prefix(TEST_GLOBAL_DIR_PREFIX)?.parse().ok()
+    name.strip_prefix(TEST_GLOBAL_DIR_PREFIX)?
+        .split('-')
+        .next()?
+        .parse()
+        .ok()
 }
 
 #[cfg(unix)]
@@ -731,6 +754,7 @@ mod tests {
     #[test]
     fn parses_test_global_dir_pid() -> Result<()> {
         assert_eq!(parse_test_global_dir_pid("ship-test-global-123"), Some(123));
+        assert_eq!(parse_test_global_dir_pid("ship-test-global-123-ThreadId9"), Some(123));
         assert_eq!(parse_test_global_dir_pid("ship-test-global-abc"), None);
         assert_eq!(parse_test_global_dir_pid("other-prefix-123"), None);
         Ok(())
@@ -782,8 +806,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     ] {
         fs::create_dir_all(ship_path.join(rel))?;
     }
-
-    fs::create_dir_all(skills_dir(&ship_path).join("task-policy"))?;
 
     write_if_missing(
         &ship_path.join("project/features/TEMPLATE.md"),

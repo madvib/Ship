@@ -67,19 +67,26 @@ fn export_claude_settings(hooks: &[HookConfig], permissions: &Permissions) -> Re
             .ok_or_else(|| anyhow!("hooks not an object"))?;
         let mut by_trigger: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
         for hook in hooks {
-            let key = match hook.trigger {
-                HookTrigger::PreToolUse => "PreToolUse",
-                HookTrigger::PostToolUse => "PostToolUse",
-                HookTrigger::Notification => "Notification",
-                HookTrigger::Stop => "Stop",
-                HookTrigger::SubagentStop => "SubagentStop",
-                HookTrigger::PreCompact => "PreCompact",
+            let Some(key) = claude_trigger_name(&hook.trigger) else {
+                continue;
             };
-            let mut entry = serde_json::json!({ "type": "command", "command": hook.command });
-            if let Some(m) = &hook.matcher {
-                entry["matcher"] = serde_json::json!(m);
+            let mut command_hook = serde_json::json!({
+                "type": "command",
+                "command": hook.command,
+            });
+            if let Some(timeout) = hook.timeout_ms {
+                command_hook["timeout"] = serde_json::json!(timeout);
             }
-            by_trigger.entry(key).or_default().push(entry);
+            if let Some(description) = &hook.description {
+                command_hook["description"] = serde_json::json!(description);
+            }
+            let mut group = serde_json::json!({
+                "hooks": [command_hook]
+            });
+            if let Some(m) = &hook.matcher {
+                group["matcher"] = serde_json::json!(m);
+            }
+            by_trigger.entry(key).or_default().push(group);
         }
         for (trigger, entries) in by_trigger {
             hooks_map.insert(trigger.to_string(), serde_json::json!(entries));
@@ -87,6 +94,101 @@ fn export_claude_settings(hooks: &[HookConfig], permissions: &Permissions) -> Re
     }
 
     crate::fs_util::write_atomic(&path, serde_json::to_string_pretty(&root)?)
+}
+
+fn export_gemini_settings(project_root: &Path, hooks: &[HookConfig]) -> Result<()> {
+    if hooks.is_empty() {
+        return Ok(());
+    }
+
+    let path = project_root.join(".gemini").join("settings.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut root: serde_json::Value = if path.exists() {
+        serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow!(".gemini/settings.json is not an object"))?;
+    let hooks_val = obj.entry("hooks").or_insert(serde_json::json!({}));
+    let hooks_map = hooks_val
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("hooks not an object"))?;
+
+    let mut by_trigger: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    for hook in hooks {
+        let Some(key) = gemini_trigger_name(&hook.trigger) else {
+            continue;
+        };
+        let mut command_hook = serde_json::json!({
+            "name": hook.id,
+            "type": "command",
+            "command": hook.command,
+        });
+        if let Some(timeout) = hook.timeout_ms {
+            command_hook["timeout"] = serde_json::json!(timeout);
+        }
+        if let Some(description) = &hook.description {
+            command_hook["description"] = serde_json::json!(description);
+        }
+        let mut group = serde_json::json!({
+            "hooks": [command_hook]
+        });
+        if let Some(matcher) = &hook.matcher {
+            group["matcher"] = serde_json::json!(matcher);
+        }
+        by_trigger.entry(key).or_default().push(group);
+    }
+
+    for (trigger, entries) in by_trigger {
+        hooks_map.insert(trigger.to_string(), serde_json::json!(entries));
+    }
+    crate::fs_util::write_atomic(&path, serde_json::to_string_pretty(&root)?)
+}
+
+fn claude_trigger_name(trigger: &HookTrigger) -> Option<&'static str> {
+    match trigger {
+        HookTrigger::SessionStart => Some("SessionStart"),
+        HookTrigger::UserPromptSubmit => Some("UserPromptSubmit"),
+        HookTrigger::PreToolUse | HookTrigger::BeforeTool => Some("PreToolUse"),
+        HookTrigger::PermissionRequest => Some("PermissionRequest"),
+        HookTrigger::PostToolUse | HookTrigger::AfterTool => Some("PostToolUse"),
+        HookTrigger::PostToolUseFailure => Some("PostToolUseFailure"),
+        HookTrigger::Notification => Some("Notification"),
+        HookTrigger::SubagentStart => Some("SubagentStart"),
+        HookTrigger::SubagentStop => Some("SubagentStop"),
+        HookTrigger::Stop | HookTrigger::SessionEnd => Some("Stop"),
+        HookTrigger::PreCompact => Some("PreCompact"),
+        HookTrigger::BeforeAgent
+        | HookTrigger::AfterAgent
+        | HookTrigger::BeforeModel
+        | HookTrigger::AfterModel
+        | HookTrigger::BeforeToolSelection => None,
+    }
+}
+
+fn gemini_trigger_name(trigger: &HookTrigger) -> Option<&'static str> {
+    match trigger {
+        HookTrigger::BeforeTool | HookTrigger::PreToolUse => Some("BeforeTool"),
+        HookTrigger::AfterTool | HookTrigger::PostToolUse => Some("AfterTool"),
+        HookTrigger::BeforeAgent => Some("BeforeAgent"),
+        HookTrigger::AfterAgent => Some("AfterAgent"),
+        HookTrigger::Notification => Some("Notification"),
+        HookTrigger::SessionStart => Some("SessionStart"),
+        HookTrigger::SessionEnd | HookTrigger::Stop => Some("SessionEnd"),
+        HookTrigger::PreCompact => Some("PreCompress"),
+        HookTrigger::BeforeModel => Some("BeforeModel"),
+        HookTrigger::AfterModel => Some("AfterModel"),
+        HookTrigger::BeforeToolSelection => Some("BeforeToolSelection"),
+        HookTrigger::UserPromptSubmit
+        | HookTrigger::PermissionRequest
+        | HookTrigger::PostToolUseFailure
+        | HookTrigger::SubagentStart
+        | HookTrigger::SubagentStop => None,
+    }
 }
 
 fn export_gemini_workspace_policy(project_root: &Path, permissions: &Permissions) -> Result<()> {

@@ -27,7 +27,7 @@ intent, not executing code.
 
 ### Starting a planning session
 
-1. Call `get_project_info` first. Always. It gives you active workspaces, recent features,
+1. Read `ship://project_info` first. Always. It gives you active workspaces, recent features,
    open decisions, and log entries. Don't assume you know the state — read it.
 2. Orient the user: summarize what's in flight and ask what they want to focus on.
 
@@ -48,13 +48,13 @@ This section starts empty and fills in during and after the session.
 
 - Use `create_feature` to capture a new feature idea. Don't wait until it's fully defined.
 - Use `update_feature` to refine — iterating on intent is expected and encouraged.
-- Use `get_feature` to read a feature before updating it so you don't overwrite sections.
+- Read `ship://features/{id}` before updating a feature so you don't overwrite sections.
 
 ### Decisions — log them while they're fresh
 
 When you commit to a technical approach, trade-off, or design choice:
 
-- Use `log_decision` with a clear title and the reasoning. Future contributors (including you)
+- Use `create_adr` with a clear title and the reasoning. Future contributors (including you)
   will need to understand *why*, not just *what*.
 - Don't log every micro-decision — only ones that would surprise someone reading the code later.
 
@@ -67,12 +67,12 @@ observations, questions, things to revisit. Notes are cheap — capture first, r
 
 ## Stage 2 — Workspace Activation
 
-A workspace is the execution context for a feature, refactor, or experiment. Activating
+A workspace is the execution context for a feature or patch. Activating
 one compiles the right CLAUDE.md and .mcp.json for your AI provider.
 
 ### Activating a workspace
 
-1. Call `list_workspaces` to see what's available.
+1. Read `ship://workspaces` to see what's available.
 2. Call `activate_workspace` with the branch name. This recompiles provider context — the
    agent immediately has the right tools and instructions for that workspace's mode and scope.
 3. Optionally call `set_mode` if you want to shift the tool surface (e.g., enable extended
@@ -80,15 +80,13 @@ one compiles the right CLAUDE.md and .mcp.json for your AI provider.
 
 ### Workspace types
 
-- **project**: the project-manager workspace (`ship` branch). Always present. Activating it
+- **service**: the project-management workspace (`ship` branch). Always present. Activating it
   unlocks the full PM surface — issues, specs, releases, sessions history — without needing a
   mode. Use this for planning, triage, release prep, and cross-workspace coordination.
 - **feature**: tied to a feature document, inherits feature's mode/provider config
-- **refactor**: code-only, no feature link required
-- **experiment**: exploratory, no delivery expectation
-- **hotfix**: urgent, minimal scope
+- **patch**: urgent, minimal scope
 
-**The project workspace is the home base.** If the user wants to triage issues, prep a release,
+**The service workspace is the home base.** If the user wants to triage issues, prep a release,
 or work across multiple features, activate it first:
 
 ```
@@ -100,10 +98,10 @@ and expands the available tools to the full PM surface automatically.
 
 ### Modes shape the tool surface
 
-By default (non-project workspace, no mode), only core workflow tools are visible. Two ways
+By default (non-service workspace, no mode), only core workflow tools are visible. Two ways
 to expand the surface:
 
-1. **Activate the project workspace** (`ship`) — auto-unlocks PM tools (issues, specs, releases)
+1. **Activate the service workspace** (`ship`) — auto-unlocks PM tools (issues, specs, releases)
 2. **Set a mode** with `active_tools` configured — fine-grained control for any workspace type
 
 ```
@@ -111,8 +109,8 @@ active_tools: []          # unlocks everything
 active_tools: ["create_issue", "move_issue", "search_issues"]   # just issue tools
 ```
 
-If the user wants to work on issues, specs, or releases from a feature workspace, check
-`list_modes` and activate an appropriate mode, or suggest switching to the project workspace.
+If the user wants to work on specs or releases from a feature workspace, read
+`ship://modes` and activate an appropriate mode, or suggest switching to the service workspace.
 
 ---
 
@@ -140,7 +138,7 @@ happens:
 - A significant piece of work completed
 - The approach changed from the original goal
 
-Progress notes appear in the project log and surface in `get_project_info`. They're the
+Progress notes appear in the project log and surface in `ship://project_info`. They're the
 breadcrumbs that make session summaries meaningful.
 
 ### Ending a session — the feedback loop
@@ -153,14 +151,14 @@ This is the most important part. When calling `end_session`:
 2. **List updated_feature_ids**: every feature that was touched — even if just the intent
    was clarified. Ship will bump their timestamps so they surface as recently active.
 
-3. **Review docs before closing**: call `get_feature` for each updated feature and check
+3. **Review docs before closing**: read `ship://features/{id}` for each updated feature and check
    the `## Documentation` section. If it's empty or stale compared to what was built this
    session, update it with `update_feature`. Do this before calling end_session so the
    feature record is accurate.
    - Propose the documentation update to the user before writing.
    - Keep it factual: what the code does, not what you intended.
 
-4. **For non-feature workspaces** (refactor, hotfix, experiment): just provide a summary.
+4. **For non-feature workspaces** (patch): just provide a summary.
    No feature doc update required, but a progress note before ending is still useful.
 
 ### End-session checklist

@@ -46,7 +46,10 @@ fn find_feature_file_by_id(ship_dir: &Path, id: &str) -> Option<PathBuf> {
             if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            let file_name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            let file_name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
             if file_name == "README.md" || file_name == "TEMPLATE.md" {
                 continue;
             }
@@ -319,8 +322,8 @@ pub fn create_feature(
 
 pub fn get_feature_by_id(ship_dir: &Path, id: &str) -> Result<FeatureEntry> {
     let resolved_id = require_feature_id(ship_dir, id)?;
-    let mut entry =
-        get_feature_db(ship_dir, &resolved_id)?.ok_or_else(|| anyhow!("Feature not found: {}", id))?;
+    let mut entry = get_feature_db(ship_dir, &resolved_id)?
+        .ok_or_else(|| anyhow!("Feature not found: {}", id))?;
     // Fallback: if SQLite body is empty, try loading from legacy markdown file (migration on read)
     if entry.feature.body.trim().is_empty() {
         if let Some(body) = load_feature_body_from_file(ship_dir, &resolved_id) {

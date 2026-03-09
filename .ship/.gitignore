@@ -8,4 +8,4 @@ project/**
 generated/
 .tmp-global/
 
-.tmp-global/
+events.ndjson

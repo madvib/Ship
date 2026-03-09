@@ -3,23 +3,13 @@ use crate::config::{
     get_config, get_effective_config,
 };
 use crate::permissions::{Permissions, get_permissions};
+use crate::project::{SHIP_DIR_NAME, ship_dir_from_path};
 use crate::skill::{get_effective_skill, list_effective_skills};
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-// ─── Model registry ───────────────────────────────────────────────────────────
-
-/// Static model entry — all `&'static str` so it can live in a `const` array.
-#[derive(Debug, Clone, Copy)]
-pub struct StaticModelInfo {
-    pub id: &'static str,
-    pub name: &'static str,
-    pub context_window: u32,
-    pub recommended: bool,
-}
 
 /// Serializable model info for Tauri/MCP.
 #[derive(Serialize, Deserialize, Debug, Clone, specta::Type)]
@@ -29,18 +19,6 @@ pub struct ModelInfo {
     pub provider_id: String,
     pub context_window: u32,
     pub recommended: bool,
-}
-
-impl ModelInfo {
-    fn from_static(m: &StaticModelInfo, provider_id: &str) -> Self {
-        ModelInfo {
-            id: m.id.to_string(),
-            name: m.name.to_string(),
-            provider_id: provider_id.to_string(),
-            context_window: m.context_window,
-            recommended: m.recommended,
-        }
-    }
 }
 
 // ─── Provider registry ────────────────────────────────────────────────────────
@@ -104,72 +82,7 @@ pub struct ProviderDescriptor {
     pub managed_marker: ManagedMarker,
     pub prompt_output: PromptOutput,
     pub skills_output: SkillsOutput,
-    /// Known models for this provider (static list; first `recommended` is the default).
-    pub models: &'static [StaticModelInfo],
 }
-
-const CLAUDE_MODELS: &[StaticModelInfo] = &[
-    StaticModelInfo {
-        id: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        context_window: 200_000,
-        recommended: true,
-    },
-    StaticModelInfo {
-        id: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        context_window: 200_000,
-        recommended: false,
-    },
-    StaticModelInfo {
-        id: "claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
-        context_window: 200_000,
-        recommended: false,
-    },
-];
-
-const GEMINI_MODELS: &[StaticModelInfo] = &[
-    StaticModelInfo {
-        id: "gemini-2.5-pro",
-        name: "Gemini 2.5 Pro",
-        context_window: 1_000_000,
-        recommended: true,
-    },
-    StaticModelInfo {
-        id: "gemini-2.0-flash",
-        name: "Gemini 2.0 Flash",
-        context_window: 1_000_000,
-        recommended: false,
-    },
-    StaticModelInfo {
-        id: "gemini-2.0-flash-lite",
-        name: "Gemini 2.0 Flash Lite",
-        context_window: 1_000_000,
-        recommended: false,
-    },
-];
-
-const CODEX_MODELS: &[StaticModelInfo] = &[
-    StaticModelInfo {
-        id: "gpt-4o",
-        name: "GPT-4o",
-        context_window: 128_000,
-        recommended: true,
-    },
-    StaticModelInfo {
-        id: "gpt-4o-mini",
-        name: "GPT-4o Mini",
-        context_window: 128_000,
-        recommended: false,
-    },
-    StaticModelInfo {
-        id: "o1",
-        name: "o1",
-        context_window: 200_000,
-        recommended: false,
-    },
-];
 
 pub const PROVIDERS: &[ProviderDescriptor] = &[
     ProviderDescriptor {
@@ -185,7 +98,6 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         managed_marker: ManagedMarker::Inline,
         prompt_output: PromptOutput::ClaudeMd,
         skills_output: SkillsOutput::ClaudeSkills,
-        models: CLAUDE_MODELS,
     },
     ProviderDescriptor {
         id: "gemini",
@@ -196,11 +108,10 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         config_format: ConfigFormat::Json,
         mcp_key: "mcpServers",
         http_url_field: "httpUrl",
-        emit_type_field: false,
+        emit_type_field: true,
         managed_marker: ManagedMarker::Inline,
         prompt_output: PromptOutput::GeminiMd,
         skills_output: SkillsOutput::AgentSkills,
-        models: GEMINI_MODELS,
     },
     ProviderDescriptor {
         id: "codex",
@@ -215,7 +126,6 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
         managed_marker: ManagedMarker::StateFileOnly,
         prompt_output: PromptOutput::AgentsMd,
         skills_output: SkillsOutput::CodexSkills,
-        models: CODEX_MODELS,
     },
 ];
 
@@ -280,7 +190,7 @@ pub fn detect_version(binary: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn provider_info(d: &ProviderDescriptor, enabled: bool) -> ProviderInfo {
+fn provider_info(d: &ProviderDescriptor, enabled: bool, project_dir: Option<&Path>) -> ProviderInfo {
     let installed = detect_binary(d.binary);
     let version = if installed {
         detect_version(d.binary)
@@ -311,11 +221,7 @@ fn provider_info(d: &ProviderDescriptor, enabled: bool) -> ProviderInfo {
         enabled,
         installed,
         version,
-        models: d
-            .models
-            .iter()
-            .map(|m| ModelInfo::from_static(m, d.id))
-            .collect(),
+        models: discover_models(d, project_dir),
     }
 }
 
@@ -326,7 +232,7 @@ pub fn list_providers(project_dir: &std::path::Path) -> anyhow::Result<Vec<Provi
         config.providers.iter().map(|s| s.as_str()).collect();
     Ok(PROVIDERS
         .iter()
-        .map(|d| provider_info(d, enabled.contains(d.id)))
+        .map(|d| provider_info(d, enabled.contains(d.id), Some(project_dir)))
         .collect())
 }
 
@@ -373,10 +279,7 @@ pub fn autodetect_providers(project_dir: &std::path::Path) -> Result<Vec<String>
 /// Return models for a specific provider by ID.
 pub fn list_models(provider_id: &str) -> Result<Vec<ModelInfo>> {
     let d = require_provider(provider_id)?;
-    Ok(d.models
-        .iter()
-        .map(|m| ModelInfo::from_static(m, d.id))
-        .collect())
+    Ok(discover_models(d, resolve_project_dir_for_models().as_deref()))
 }
 
 fn require_provider(id: &str) -> Result<&'static ProviderDescriptor> {
@@ -384,4 +287,190 @@ fn require_provider(id: &str) -> Result<&'static ProviderDescriptor> {
         let known: Vec<&str> = PROVIDERS.iter().map(|p| p.id).collect();
         anyhow!("Unknown provider '{}'. Known: {}", id, known.join(", "))
     })
+}
+
+fn resolve_project_dir_for_models() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    if cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == SHIP_DIR_NAME)
+    {
+        return Some(cwd);
+    }
+    let direct = cwd.join(SHIP_DIR_NAME);
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    ship_dir_from_path(&cwd)
+}
+
+fn discover_models(desc: &ProviderDescriptor, project_dir: Option<&Path>) -> Vec<ModelInfo> {
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+
+    // Provider env hints (explicitly set by users in shell/startup).
+    for env_key in provider_model_env_keys(desc.id) {
+        if let Ok(value) = std::env::var(env_key) {
+            push_model(&mut models, &mut seen, desc.id, value.trim(), true);
+        }
+    }
+
+    // Model IDs from provider-native config files.
+    for path in provider_model_config_paths(desc, project_dir) {
+        match desc.config_format {
+            ConfigFormat::Json => {
+                if let Ok(raw) = fs::read_to_string(&path)
+                    && let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw)
+                {
+                    collect_json_models(desc.id, &json, &mut models, &mut seen);
+                }
+            }
+            ConfigFormat::Toml => {
+                if let Ok(raw) = fs::read_to_string(&path)
+                    && let Ok(toml) = toml::from_str::<toml::Value>(&raw)
+                {
+                    collect_toml_models(desc.id, &toml, &mut models, &mut seen);
+                }
+            }
+        }
+    }
+
+    // Ship-side preference for generation model.
+    if let Some(project_dir) = project_dir
+        && let Ok(config) = get_config(Some(project_dir.to_path_buf()))
+        && let Some(ai) = config.ai.as_ref()
+        && ai.effective_provider() == desc.id
+        && let Some(model) = ai.model.as_deref()
+    {
+        push_model(&mut models, &mut seen, desc.id, model.trim(), false);
+    }
+
+    models
+}
+
+fn provider_model_env_keys(provider_id: &str) -> &'static [&'static str] {
+    match provider_id {
+        "claude" => &["ANTHROPIC_MODEL", "CLAUDE_CODE_MODEL"],
+        "gemini" => &["GEMINI_MODEL"],
+        "codex" => &["OPENAI_MODEL", "CODEX_MODEL"],
+        _ => &[],
+    }
+}
+
+fn provider_model_config_paths(desc: &ProviderDescriptor, project_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(project_dir) = project_dir
+        && let Some(project_root) = project_dir.parent()
+    {
+        paths.push(project_root.join(desc.project_config));
+    }
+    // Fallback to HOME for providers whose global config is not under ~/.ship.
+    if let Some(home) = std::env::var_os("HOME") {
+        paths.push(PathBuf::from(home).join(desc.global_config));
+    }
+    let mut deduped = Vec::new();
+    let mut seen = HashSet::new();
+    for path in paths {
+        if seen.insert(path.clone()) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
+fn push_model(
+    models: &mut Vec<ModelInfo>,
+    seen: &mut HashSet<String>,
+    provider_id: &str,
+    raw_id: &str,
+    recommended: bool,
+) {
+    let id = raw_id.trim();
+    if id.is_empty() {
+        return;
+    }
+    if !seen.insert(id.to_string()) {
+        // Promote to recommended if any source marks it as default.
+        if recommended
+            && let Some(existing) = models.iter_mut().find(|entry| entry.id == id)
+        {
+            existing.recommended = true;
+        }
+        return;
+    }
+    models.push(ModelInfo {
+        id: id.to_string(),
+        name: id.to_string(),
+        provider_id: provider_id.to_string(),
+        context_window: 0,
+        recommended,
+    });
+}
+
+fn collect_json_models(
+    provider_id: &str,
+    root: &serde_json::Value,
+    models: &mut Vec<ModelInfo>,
+    seen: &mut HashSet<String>,
+) {
+    if let Some(model) = root.get("model").and_then(|v| v.as_str()) {
+        push_model(models, seen, provider_id, model, true);
+    }
+    if let Some(model) = root
+        .get("model")
+        .and_then(|v| v.get("name"))
+        .and_then(|v| v.as_str())
+    {
+        push_model(models, seen, provider_id, model, true);
+    }
+
+    // Claude model aliases.
+    if let Some(aliases) = root.get("modelAliases").and_then(|v| v.as_object()) {
+        for (alias, value) in aliases {
+            push_model(models, seen, provider_id, alias, false);
+            if let Some(target) = value.as_str() {
+                push_model(models, seen, provider_id, target, false);
+            }
+        }
+    }
+
+    // Gemini model configs.
+    if let Some(model_configs) = root.get("modelConfigs").and_then(|v| v.as_object()) {
+        for (name, entry) in model_configs {
+            push_model(models, seen, provider_id, name, false);
+            if let Some(model_name) = entry.get("name").and_then(|v| v.as_str()) {
+                push_model(models, seen, provider_id, model_name, false);
+            }
+            if let Some(model_name) = entry.get("model").and_then(|v| v.as_str()) {
+                push_model(models, seen, provider_id, model_name, false);
+            }
+        }
+    }
+}
+
+fn collect_toml_models(
+    provider_id: &str,
+    root: &toml::Value,
+    models: &mut Vec<ModelInfo>,
+    seen: &mut HashSet<String>,
+) {
+    if let Some(model) = root.get("model").and_then(|v| v.as_str()) {
+        push_model(models, seen, provider_id, model, true);
+    }
+    if let Some(model) = root.get("model_name").and_then(|v| v.as_str()) {
+        push_model(models, seen, provider_id, model, false);
+    }
+    if let Some(table) = root.get("model_providers").and_then(|v| v.as_table()) {
+        for (_, provider_entry) in table {
+            if let Some(model) = provider_entry.get("model").and_then(|v| v.as_str()) {
+                push_model(models, seen, provider_id, model, false);
+            }
+            if let Some(array) = provider_entry.get("models").and_then(|v| v.as_array()) {
+                for model in array.iter().filter_map(|item| item.as_str()) {
+                    push_model(models, seen, provider_id, model, false);
+                }
+            }
+        }
+    }
 }

@@ -76,9 +76,7 @@ fn parse_generated_feature_header(content: &str) -> (Option<String>, String) {
     let mut lines = content.lines();
     if let Some(first) = lines.next() {
         let trimmed = first.trim();
-        if trimmed.starts_with("<!-- ship:feature ")
-            && trimmed.ends_with("-->")
-        {
+        if trimmed.starts_with("<!-- ship:feature ") && trimmed.ends_with("-->") {
             let id = trimmed
                 .split_whitespace()
                 .find_map(|part| part.strip_prefix("id="))

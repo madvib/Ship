@@ -65,7 +65,6 @@ fn core_loop_paths_resolve_correctly() {
     assert!(spec.starts_with(specs_dir(&p.ship_dir)));
 }
 
-
 /// ADRs land in project/adrs/.
 #[test]
 fn adrs_land_in_project_namespace() {

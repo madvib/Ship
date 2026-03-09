@@ -86,12 +86,25 @@ impl AiConfig {
 #[derive(Serialize, Deserialize, Debug, Clone, Type, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum HookTrigger {
+    SessionStart,
+    UserPromptSubmit,
     PreToolUse,
+    PermissionRequest,
     PostToolUse,
+    PostToolUseFailure,
     Notification,
+    SubagentStart,
     Stop,
     SubagentStop,
     PreCompact,
+    BeforeTool,
+    AfterTool,
+    BeforeAgent,
+    AfterAgent,
+    SessionEnd,
+    BeforeModel,
+    AfterModel,
+    BeforeToolSelection,
 }
 
 /// A shell command executed on a lifecycle event.
@@ -102,6 +115,12 @@ pub struct HookConfig {
     /// Glob/regex pattern to match tool name (e.g. "Bash", "mcp__*"). Empty = all tools.
     #[serde(default)]
     pub matcher: Option<String>,
+    /// Optional timeout for the hook command in milliseconds.
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    /// Human-readable intent for editor UX and exported provider config.
+    #[serde(default)]
+    pub description: Option<String>,
     /// The shell command to run
     pub command: String,
 }
@@ -832,14 +851,46 @@ pub fn save_config(config: &ProjectConfig, project_dir: Option<PathBuf>) -> Resu
         return Ok(());
     }
 
+    let mut effective = config.clone();
+    if effective.id.trim().is_empty() {
+        #[derive(serde::Deserialize, Default)]
+        struct MinConfig {
+            #[serde(default)]
+            id: String,
+        }
+        if let Ok(content) = fs::read_to_string(&path) {
+            let parsed: MinConfig = toml::from_str(&content).unwrap_or_default();
+            if !parsed.id.trim().is_empty() {
+                effective.id = parsed.id;
+            }
+        }
+    }
+    if effective.id.trim().is_empty() {
+        effective.id = crate::gen_nanoid();
+    }
+
+    // Bootstrap ship.toml with project identity before any SQLite-backed writes.
+    // save_runtime_settings/open_project_db resolve the DB key from ship.toml:id.
+    if !path.exists() {
+        let mut bootstrap = effective.clone();
+        bootstrap.modes.clear();
+        bootstrap.mcp_servers.clear();
+        bootstrap.active_mode = None;
+        bootstrap.hooks.clear();
+        bootstrap.agent = AgentLayerConfig::default();
+        bootstrap.providers.clear();
+        let toml_str = toml::to_string_pretty(&bootstrap)?;
+        write_atomic(&path, toml_str)?;
+    }
+
     // Project runtime settings + mode bindings live in SQLite.
-    save_runtime_settings(&config_dir, config)?;
+    save_runtime_settings(&config_dir, &effective)?;
     // File-backed catalog state (mcp/skills/rules) is indexed into SQLite for mode refs.
-    save_mcp_config(&config_dir, &config.mcp_servers)?;
-    save_modes_config(&config_dir, &config.modes)?;
+    save_mcp_config(&config_dir, &effective.mcp_servers)?;
+    save_modes_config(&config_dir, &effective.modes)?;
 
     // Keep ship.toml focused on core project/workflow config.
-    let mut core = config.clone();
+    let mut core = effective;
     core.modes.clear();
     core.mcp_servers.clear();
     core.active_mode = None;
@@ -1408,6 +1459,8 @@ mod tests {
             id: "log-tools".to_string(),
             trigger: HookTrigger::PostToolUse,
             matcher: Some("Bash".to_string()),
+            timeout_ms: None,
+            description: None,
             command: "echo 'tool used'".to_string(),
         };
         add_hook(Some(dir.clone()), hook)?;
@@ -1426,6 +1479,8 @@ mod tests {
             id: "bye".to_string(),
             trigger: HookTrigger::Stop,
             matcher: None,
+            timeout_ms: None,
+            description: None,
             command: "echo bye".to_string(),
         };
         add_hook(Some(dir.clone()), hook)?;
@@ -1442,6 +1497,8 @@ mod tests {
             id: "dup".to_string(),
             trigger: HookTrigger::PreToolUse,
             matcher: None,
+            timeout_ms: None,
+            description: None,
             command: "x".to_string(),
         };
         add_hook(Some(dir.clone()), hook.clone())?;
@@ -1558,6 +1615,8 @@ mod tests {
             id: "audit".to_string(),
             trigger: HookTrigger::PostToolUse,
             matcher: Some("Bash".to_string()),
+            timeout_ms: None,
+            description: None,
             command: "echo audit".to_string(),
         }];
         config.agent = AgentLayerConfig {

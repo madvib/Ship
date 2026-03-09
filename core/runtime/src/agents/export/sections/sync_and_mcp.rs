@@ -114,7 +114,10 @@ fn export_to_inner(
                 export_claude_settings(&payload.hooks, &payload.permissions)?;
             }
         }
-        "gemini" => export_gemini_workspace_policy(project_root, &payload.permissions)?,
+        "gemini" => {
+            export_gemini_settings(project_root, &payload.hooks)?;
+            export_gemini_workspace_policy(project_root, &payload.permissions)?;
+        }
         _ => {}
     }
 

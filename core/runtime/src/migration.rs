@@ -476,6 +476,10 @@ mod tests {
         fs::create_dir_all(ship.join("workflow/releases"))?;
         fs::create_dir_all(ship.join("adrs"))?;
         fs::create_dir_all(ship.join("project/releases"))?;
+        fs::write(
+            ship.join(crate::config::PRIMARY_CONFIG_FILE),
+            format!("version = \"1\"\nid = \"{}\"\n", crate::gen_nanoid()),
+        )?;
 
         fs::write(
             ship.join("issues/backlog/legacy.md"),

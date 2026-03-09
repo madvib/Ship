@@ -533,4 +533,3 @@ pub fn create_spec(ship_dir: PathBuf, title: &str, body: &str, status: &str) -> 
     }
     Ok(PathBuf::from(entry.path))
 }
-

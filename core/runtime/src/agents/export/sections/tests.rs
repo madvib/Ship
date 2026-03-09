@@ -109,6 +109,8 @@ mod tests {
             id: "project-global-hook".to_string(),
             trigger: HookTrigger::PreToolUse,
             matcher: Some("Bash".to_string()),
+            timeout_ms: None,
+            description: None,
             command: "echo global".to_string(),
         }];
         config.modes = vec![ModeConfig {
@@ -124,6 +126,8 @@ mod tests {
                 id: "mode-hook".to_string(),
                 trigger: HookTrigger::PostToolUse,
                 matcher: Some("Bash".to_string()),
+                timeout_ms: None,
+                description: None,
                 command: "echo mode".to_string(),
             }],
             permissions: PermissionConfig {
@@ -179,6 +183,8 @@ mod tests {
             id: "project-global-hook-only".to_string(),
             trigger: HookTrigger::Notification,
             matcher: None,
+            timeout_ms: None,
+            description: None,
             command: "echo global".to_string(),
         }];
         config.modes = vec![ModeConfig {
@@ -194,6 +200,8 @@ mod tests {
                 id: "unused-mode-hook".to_string(),
                 trigger: HookTrigger::Stop,
                 matcher: None,
+                timeout_ms: None,
+                description: None,
                 command: "echo unused".to_string(),
             }],
             permissions: PermissionConfig {
@@ -433,6 +441,32 @@ mod tests {
         assert!(err.to_string().contains("claude"));
     }
 
+    #[test]
+    fn list_providers_discovers_models_from_provider_config() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        let gemini_dir = tmp.path().join(".gemini");
+        std::fs::create_dir_all(&gemini_dir).unwrap();
+        std::fs::write(
+            gemini_dir.join("settings.json"),
+            r#"{
+  "model": "gemini-2.5-pro",
+  "modelConfigs": {
+    "fast": { "name": "gemini-2.0-flash" }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let providers = list_providers(&project_dir).unwrap();
+        let gemini = providers
+            .iter()
+            .find(|provider| provider.id == "gemini")
+            .expect("gemini provider should exist");
+        let ids: Vec<&str> = gemini.models.iter().map(|model| model.id.as_str()).collect();
+        assert!(ids.contains(&"gemini-2.5-pro"));
+        assert!(ids.contains(&"gemini-2.0-flash"));
+    }
+
     // ── Claude ─────────────────────────────────────────────────────────────────
 
     #[test]
@@ -568,6 +602,55 @@ mod tests {
         assert_eq!(restored.tools.deny, vec!["WebFetch(*)".to_string()]);
     }
 
+    #[test]
+    fn claude_exports_grouped_hook_schema_with_metadata() {
+        let (_tmp, project_dir) = project_with_servers(vec![]);
+        let home = tempdir().unwrap();
+        let _home_guard = lock_home_for_test(home.path());
+
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.hooks = vec![
+            HookConfig {
+                id: "session-context".to_string(),
+                trigger: HookTrigger::SessionStart,
+                matcher: None,
+                timeout_ms: Some(2000),
+                description: Some("Inject workspace context".to_string()),
+                command: "$SHIP_HOOKS_BIN".to_string(),
+            },
+            HookConfig {
+                id: "tool-guard".to_string(),
+                trigger: HookTrigger::PreToolUse,
+                matcher: Some("Bash".to_string()),
+                timeout_ms: Some(1500),
+                description: Some("Validate command scope".to_string()),
+                command: "$SHIP_HOOKS_BIN".to_string(),
+            },
+        ];
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        export_to(project_dir, "claude").unwrap();
+        let settings_path = home.path().join(".claude").join("settings.json");
+        let val: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(settings_path).unwrap()).unwrap();
+
+        let session_hook = &val["hooks"]["SessionStart"][0]["hooks"][0];
+        assert_eq!(session_hook["type"].as_str(), Some("command"));
+        assert_eq!(session_hook["command"].as_str(), Some("$SHIP_HOOKS_BIN"));
+        assert_eq!(session_hook["timeout"].as_u64(), Some(2000));
+        assert_eq!(
+            session_hook["description"].as_str(),
+            Some("Inject workspace context")
+        );
+
+        let pre_tool_group = &val["hooks"]["PreToolUse"][0];
+        assert_eq!(pre_tool_group["matcher"].as_str(), Some("Bash"));
+        assert_eq!(
+            pre_tool_group["hooks"][0]["description"].as_str(),
+            Some("Validate command scope")
+        );
+    }
+
     // ── Gemini ─────────────────────────────────────────────────────────────────
 
     #[test]
@@ -660,6 +743,39 @@ mod tests {
         assert!(content.contains("toolName = \"run_shell_command\""));
         assert!(content.contains("commandPrefix = \"git status\""));
         assert!(content.contains("decision = \"ask_user\""));
+    }
+
+    #[test]
+    fn gemini_exports_hooks_to_settings_json() {
+        let (tmp, project_dir) = project_with_servers(vec![]);
+        let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
+        config.hooks = vec![HookConfig {
+            id: "before-tool-guard".to_string(),
+            trigger: HookTrigger::PreToolUse,
+            matcher: Some("run_shell_command".to_string()),
+            timeout_ms: Some(1200),
+            description: Some("Decompose chained shell command".to_string()),
+            command: "$SHIP_HOOKS_BIN".to_string(),
+        }];
+        save_config(&config, Some(project_dir.clone())).unwrap();
+
+        export_to(project_dir, "gemini").unwrap();
+        let val: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(tmp.path().join(".gemini/settings.json")).unwrap(),
+        )
+        .unwrap();
+
+        let group = &val["hooks"]["BeforeTool"][0];
+        assert_eq!(group["matcher"].as_str(), Some("run_shell_command"));
+        let hook = &group["hooks"][0];
+        assert_eq!(hook["name"].as_str(), Some("before-tool-guard"));
+        assert_eq!(hook["type"].as_str(), Some("command"));
+        assert_eq!(hook["command"].as_str(), Some("$SHIP_HOOKS_BIN"));
+        assert_eq!(hook["timeout"].as_u64(), Some(1200));
+        assert_eq!(
+            hook["description"].as_str(),
+            Some("Decompose chained shell command")
+        );
     }
 
     #[test]
@@ -935,46 +1051,6 @@ prefix_rules = [
         assert!(unmanaged_dir.exists());
         let content = std::fs::read_to_string(&unmanaged_file).unwrap();
         assert_eq!(content, "manual skill content");
-    }
-
-    #[test]
-    fn codex_export_migrates_and_exports_legacy_repo_local_skills() {
-        let (tmp, project_dir) = project_with_servers(vec![]);
-        let legacy_skill_dir = project_dir
-            .join("agents")
-            .join("skills")
-            .join("legacy-export");
-        std::fs::create_dir_all(&legacy_skill_dir).unwrap();
-        std::fs::write(
-            legacy_skill_dir.join("SKILL.md"),
-            r#"---
-name: legacy-export
-description: Legacy repo-local skill that should be migrated and exported.
----
-
-Legacy export skill body.
-"#,
-        )
-        .unwrap();
-
-        export_to(project_dir, "codex").unwrap();
-
-        let exported = tmp
-            .path()
-            .join(".agents")
-            .join("skills")
-            .join("legacy-export")
-            .join("SKILL.md");
-        assert!(
-            exported.exists(),
-            "legacy skill should be exported after migration"
-        );
-        let exported_body = std::fs::read_to_string(exported).unwrap();
-        assert!(exported_body.contains("Legacy export skill body."));
-        assert!(
-            !legacy_skill_dir.exists(),
-            "legacy repo-local skill should be migrated out of .ship"
-        );
     }
 
     // ── Import ─────────────────────────────────────────────────────────────────
