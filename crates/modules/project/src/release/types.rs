@@ -5,8 +5,10 @@ use specta::Type;
 #[serde(rename_all = "kebab-case")]
 pub enum ReleaseStatus {
     #[default]
+    #[serde(alias = "planned")]
     Upcoming,
     Active,
+    #[serde(alias = "shipped", alias = "archived")]
     Deprecated,
 }
 
@@ -27,6 +29,10 @@ impl std::str::FromStr for ReleaseStatus {
             "upcoming" => Ok(ReleaseStatus::Upcoming),
             "active" => Ok(ReleaseStatus::Active),
             "deprecated" => Ok(ReleaseStatus::Deprecated),
+            // Legacy aliases from older release status model.
+            "planned" => Ok(ReleaseStatus::Upcoming),
+            "shipped" => Ok(ReleaseStatus::Deprecated),
+            "archived" => Ok(ReleaseStatus::Deprecated),
             _ => Err(anyhow::anyhow!("Invalid release status: {}", s)),
         }
     }

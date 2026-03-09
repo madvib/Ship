@@ -10,10 +10,9 @@ use runtime::project::{
     SHIP_DIR_NAME, adrs_dir as runtime_adrs_dir, agents_ns as runtime_agents_ns,
     features_dir as runtime_features_dir, generated_ns as runtime_generated_ns, get_global_dir,
     get_project_dir as runtime_get_project_dir, get_project_name as runtime_get_project_name,
-    mcp_config_path as runtime_mcp_config_path,
-    modes_dir as runtime_modes_dir, notes_dir as runtime_notes_dir,
-    permissions_config_path as runtime_permissions_config_path, project_ns as runtime_project_ns,
-    register_ship_namespace as runtime_register_ship_namespace,
+    mcp_config_path as runtime_mcp_config_path, modes_dir as runtime_modes_dir,
+    notes_dir as runtime_notes_dir, permissions_config_path as runtime_permissions_config_path,
+    project_ns as runtime_project_ns, register_ship_namespace as runtime_register_ship_namespace,
     releases_dir as runtime_releases_dir,
     resolve_project_ship_dir as runtime_resolve_project_ship_dir, rules_dir as runtime_rules_dir,
     sanitize_file_name as runtime_sanitize_file_name,
@@ -430,6 +429,9 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     } else {
         ProjectConfig::default()
     };
+    if config.id.trim().is_empty() {
+        config.id = runtime::gen_nanoid();
+    }
     ensure_first_party_namespaces(&mut config.namespaces);
     if config_exists {
         save_config(&config, Some(ship_path.clone()))?;
@@ -489,7 +491,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     }
 
     // Seed the project-manager workspace ("ship") so it's ready on first use.
-    if let Err(e) = runtime::workspace::seed_project_workspace(&ship_path) {
+    if let Err(e) = runtime::workspace::seed_service_workspace(&ship_path) {
         eprintln!("[ship] warning: could not seed project workspace: {}", e);
     }
 
@@ -673,7 +675,6 @@ fn default_agent_modes() -> Vec<ModeConfig> {
                 "ship_update_spec".to_string(),
                 "ship_list_notes".to_string(),
                 "ship_create_note".to_string(),
-                "ship_git_feature_sync".to_string(),
             ],
             ..Default::default()
         },
@@ -748,12 +749,43 @@ fn seed_builtin_user_skills(user_skills_root: &Path) -> Result<()> {
     fs::create_dir_all(user_skills_root)?;
 
     // Builtins always overwrite — they're owned by Ship and update with each release.
-    let ship_workflow_dir = user_skills_root.join("ship-workflow");
-    fs::create_dir_all(&ship_workflow_dir)?;
-    fs::write(
-        ship_workflow_dir.join("SKILL.md"),
-        include_str!("../../../../core/runtime/src/templates/skills/ship-workflow.SKILL.md"),
-    )?;
+    const SINGLE_FILE_BUILTINS: &[(&str, &str)] = &[
+        (
+            "ship-workflow",
+            include_str!("../../../../core/runtime/src/templates/skills/ship-workflow.SKILL.md"),
+        ),
+        (
+            "create-document",
+            include_str!("../../../../core/runtime/src/templates/skills/create-document/SKILL.md"),
+        ),
+        (
+            "workspace-session-lifecycle",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/workspace-session-lifecycle/SKILL.md"
+            ),
+        ),
+        (
+            "release-orchestration",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/release-orchestration/SKILL.md"
+            ),
+        ),
+        (
+            "workspace-profile-onboarding",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/workspace-profile-onboarding/SKILL.md"
+            ),
+        ),
+        (
+            "start-session",
+            include_str!("../../../../core/runtime/src/templates/skills/start-session/SKILL.md"),
+        ),
+    ];
+    for (id, content) in SINGLE_FILE_BUILTINS {
+        let skill_dir = user_skills_root.join(id);
+        fs::create_dir_all(&skill_dir)?;
+        fs::write(skill_dir.join("SKILL.md"), content)?;
+    }
 
     // skill-creator is a multi-file skill; only seed if missing.
     let skill_creator_root = user_skills_root.join("skill-creator");
@@ -1231,24 +1263,38 @@ mod tests {
     }
 
     #[test]
-    fn seed_builtin_user_skills_writes_ship_workflow_and_skill_creator() -> Result<()> {
+    fn seed_builtin_user_skills_writes_workflow_library_and_skill_creator() -> Result<()> {
         let tmp = tempdir()?;
         let user_skills = tmp.path().join("skills");
         seed_builtin_user_skills(&user_skills)?;
 
         let ship_workflow = user_skills.join("ship-workflow").join("SKILL.md");
+        let create_document = user_skills.join("create-document").join("SKILL.md");
+        let start_session = user_skills.join("start-session").join("SKILL.md");
         let skill_creator = user_skills.join("skill-creator").join("SKILL.md");
         assert!(ship_workflow.is_file());
+        assert!(create_document.is_file());
+        assert!(start_session.is_file());
         assert!(skill_creator.is_file());
         let ship_workflow_content = fs::read_to_string(&ship_workflow)?;
+        let create_document_content = fs::read_to_string(&create_document)?;
+        let start_session_content = fs::read_to_string(&start_session)?;
         let skill_creator_content = fs::read_to_string(&skill_creator)?;
         assert!(
             ship_workflow_content.contains("name: ship-workflow"),
             "ship-workflow template should be seeded"
         );
         assert!(
-            ship_workflow_content.contains("## System Of Record Contract"),
+            ship_workflow_content.contains("## System of Record"),
             "ship-workflow template should include execution contract guidance"
+        );
+        assert!(
+            create_document_content.contains("name: create-document"),
+            "create-document template should be seeded"
+        );
+        assert!(
+            start_session_content.contains("name: start-session"),
+            "start-session template should be seeded"
         );
         assert!(
             skill_creator_content.contains("name: skill-creator"),

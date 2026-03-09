@@ -5,7 +5,8 @@ mod tests {
         delete_spec, get_feature_by_id, get_release_by_id, get_spec_by_id,
         import_features_from_files, import_releases_from_files, init_demo_project, init_project,
         list_adrs, list_features, list_releases, list_specs, move_feature, move_spec,
-        update_feature, update_feature_content, update_release, update_release_content, update_spec,
+        update_feature, update_feature_content, update_release, update_release_content,
+        update_spec,
     };
     use std::path::Path;
     use tempfile::tempdir;
@@ -164,7 +165,14 @@ mod tests {
     fn test_update_feature_metadata_preserves_body() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        let created = create_feature(&project_dir, "Feature Body Preserve", "feature-body", None, None, None)?;
+        let created = create_feature(
+            &project_dir,
+            "Feature Body Preserve",
+            "feature-body",
+            None,
+            None,
+            None,
+        )?;
 
         let mut feature = get_feature_by_id(&project_dir, &created.id)?.feature;
         feature.metadata.description = Some("updated description".to_string());
@@ -348,17 +356,14 @@ mod tests {
     }
 
     #[test]
-    fn test_create_spec_requires_active_workspace() -> anyhow::Result<()> {
+    fn test_create_spec_defaults_to_service_workspace_when_only_active_workspace() -> anyhow::Result<()>
+    {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
 
-        let err = create_spec(&project_dir, "No Workspace Spec", "body", None)
-            .expect_err("expected workspace requirement");
-        assert!(
-            err.to_string().contains("No active workspace found"),
-            "unexpected error: {}",
-            err
-        );
+        let entry = create_spec(&project_dir, "No Workspace Spec", "body", None)?;
+        assert_eq!(entry.spec.metadata.branch.as_deref(), Some("ship"));
+        assert_eq!(entry.spec.metadata.workspace_id.as_deref(), Some("ship"));
         Ok(())
     }
 
