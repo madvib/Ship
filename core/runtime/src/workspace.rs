@@ -1,5 +1,5 @@
-use crate::project::{get_global_dir, project_slug_from_ship_dir, sanitize_file_name};
 use crate::events::{EventAction, EventEntity, append_event};
+use crate::project::{get_global_dir, project_slug_from_ship_dir, sanitize_file_name};
 use crate::state_db::{
     WorkspaceSessionDb, WorkspaceUpsert, clear_branch_link, delete_workspace_db,
     get_active_workspace_session_db, get_workspace_db,
@@ -1313,10 +1313,16 @@ pub fn end_workspace_session(
         details.push(format!("summary={summary}"));
     }
     if !ended.updated_feature_ids.is_empty() {
-        details.push(format!("updated_features={}", ended.updated_feature_ids.join(",")));
+        details.push(format!(
+            "updated_features={}",
+            ended.updated_feature_ids.join(",")
+        ));
     }
     if !ended.updated_spec_ids.is_empty() {
-        details.push(format!("updated_specs={}", ended.updated_spec_ids.join(",")));
+        details.push(format!(
+            "updated_specs={}",
+            ended.updated_spec_ids.join(",")
+        ));
     }
     append_event(
         ship_dir,
@@ -1470,7 +1476,8 @@ pub fn activate_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
         workspace.status,
         WorkspaceStatus::Active,
     )?;
-
+
+
     workspace.status = WorkspaceStatus::Active;
     workspace.resolved_at = now;
     workspace.last_activated_at = Some(now);
@@ -2433,3 +2440,5 @@ mod tests {
         Ok(())
     }
 }
+
+
