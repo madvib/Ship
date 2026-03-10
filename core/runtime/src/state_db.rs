@@ -594,58 +594,12 @@ pub fn project_db_path(ship_dir: &Path) -> Result<PathBuf> {
 }
 
 /// Stable key used for the project's state directory.
-/// Reads only the `id` field from `ship.toml` — never calls `get_config` to avoid
-/// circular dependency (get_config → get_runtime_settings → open_project_connection → here).
+/// Reads only the `id` field from `ship.toml` and auto-persists one when missing.
+///
+/// This avoids calling `get_config` here to prevent dependency loops.
 fn project_db_key(ship_dir: &Path) -> Result<String> {
-    if let Some(id) = read_project_id_from_toml(ship_dir) {
-        return Ok(id);
-    }
-
-    ensure_project_id_in_toml(ship_dir)
+    crate::project::ensure_project_id(ship_dir)
 }
-
-/// Read just the `id` field from ship.toml without going through the full config system.
-fn read_project_id_from_toml(ship_dir: &Path) -> Option<String> {
-    let path = ship_dir.join(crate::config::PRIMARY_CONFIG_FILE);
-    let content = std::fs::read_to_string(path).ok()?;
-    let parsed: toml::Value = toml::from_str(&content).ok()?;
-    let id = parsed.get("id")?.as_str()?.trim().to_string();
-    if id.is_empty() {
-        None
-    } else {
-        Some(id)
-    }
-}
-
-fn ensure_project_id_in_toml(ship_dir: &Path) -> Result<String> {
-    let path = ship_dir.join(crate::config::PRIMARY_CONFIG_FILE);
-    let content = std::fs::read_to_string(&path).with_context(|| {
-        format!(
-            "Project at {} has no readable ship.toml. Re-run `ship init` to initialize it.",
-            ship_dir.display()
-        )
-    })?;
-
-    let mut parsed: toml::Value = toml::from_str(&content).with_context(|| {
-        format!(
-            "Project at {} has an invalid ship.toml. Re-run `ship init` or fix the file.",
-            ship_dir.display()
-        )
-    })?;
-
-    let table = parsed
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("ship.toml must contain a top-level table."))?;
-
-    let generated_id = crate::gen_nanoid();
-    table.insert("id".to_string(), toml::Value::String(generated_id.clone()));
-
-    let updated = toml::to_string_pretty(&parsed)?;
-    crate::fs_util::write_atomic(&path, updated)?;
-
-    Ok(generated_id)
-}
-
 pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationReport> {
     let db_path = project_db_path(ship_dir)?;
     ensure_database(&db_path, PROJECT_MIGRATIONS)

@@ -1416,7 +1416,7 @@ export default function AgentsPanel({
   }, [discoveryCache]);
   const discoveredMcpToolPatterns = useMemo(() => {
     const fromProbe = (mcpProbeReport?.results ?? []).flatMap((result) =>
-      result.discovered_tools.map((tool) => mcpToolPattern(result.server_id, tool.name))
+      (result.discovered_tools ?? []).map((tool) => mcpToolPattern(result.server_id, tool.name))
     );
     const fromCache = Array.from(cachedMcpToolsByServerId.entries()).flatMap(([serverId, tools]) =>
       tools.map((tool) => mcpToolPattern(serverId, tool.name))
@@ -2929,30 +2929,34 @@ export default function AgentsPanel({
                       <p className="text-[11px] text-muted-foreground">No registry matches.</p>
                     ) : (
                       <div className="space-y-1">
-                        {mcpRegistryEntries.slice(0, 5).map((entry) => (
-                          <div key={entry.server_name} className="flex items-center justify-between gap-2 rounded border bg-background/70 px-2 py-1.5 text-[11px]">
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">{entry.title}</p>
-                              <p className="truncate text-muted-foreground">
-                                {entry.server_name} • {entry.transport} • v{entry.version}
-                              </p>
-                              {(entry.required_env.length > 0 || entry.required_headers.length > 0) && (
-                                <p className="truncate text-amber-700 dark:text-amber-300">
-                                  Requires: {entry.required_env.length > 0 ? `${entry.required_env.length} env` : ''}{entry.required_env.length > 0 && entry.required_headers.length > 0 ? ', ' : ''}{entry.required_headers.length > 0 ? `${entry.required_headers.length} headers` : ''}
+                        {mcpRegistryEntries.slice(0, 5).map((entry) => {
+                          const requiredEnv = entry.required_env ?? [];
+                          const requiredHeaders = entry.required_headers ?? [];
+                          return (
+                            <div key={entry.server_name} className="flex items-center justify-between gap-2 rounded border bg-background/70 px-2 py-1.5 text-[11px]">
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">{entry.title}</p>
+                                <p className="truncate text-muted-foreground">
+                                  {entry.server_name} • {entry.transport} • v{entry.version}
                                 </p>
-                              )}
+                                {(requiredEnv.length > 0 || requiredHeaders.length > 0) && (
+                                  <p className="truncate text-amber-700 dark:text-amber-300">
+                                    Requires: {requiredEnv.length > 0 ? `${requiredEnv.length} env` : ''}{requiredEnv.length > 0 && requiredHeaders.length > 0 ? ', ' : ''}{requiredHeaders.length > 0 ? `${requiredHeaders.length} headers` : ''}
+                                  </p>
+                                )}
+                              </div>
+                              <Button
+                                type="button"
+                                size="xs"
+                                variant="outline"
+                                className="h-6 px-2 text-[10px]"
+                                onClick={() => handleInstallRegistryEntry(entry)}
+                              >
+                                Install
+                              </Button>
                             </div>
-                            <Button
-                              type="button"
-                              size="xs"
-                              variant="outline"
-                              className="h-6 px-2 text-[10px]"
-                              onClick={() => handleInstallRegistryEntry(entry)}
-                            >
-                              Install
-                            </Button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3017,39 +3021,43 @@ export default function AgentsPanel({
                         {formatEpochSeconds(mcpProbeReport.generated_at)}
                       </span>
                     </div>
-                    {mcpProbeReport.results.length === 0 ? (
+                    {(mcpProbeReport.results ?? []).length === 0 ? (
                       <p className="text-[11px] text-muted-foreground">No probe results yet.</p>
                     ) : (
                       <div className="max-h-40 space-y-1 overflow-auto pr-1">
-                        {mcpProbeReport.results.map((result) => (
-                          <div key={`probe-${result.server_id}`} className="rounded border bg-muted/30 px-2 py-1.5 text-[11px]">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="font-medium">{result.server_name || result.server_id}</p>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  'cursor-default text-[10px]',
-                                  result.status === 'ready'
-                                    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-                                    : result.status === 'partial'
-                                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                                      : result.status === 'disabled'
-                                        ? 'text-muted-foreground'
-                                        : 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-                                )}
-                              >
-                                {result.status}
-                              </Badge>
+                        {(mcpProbeReport.results ?? []).map((result) => {
+                          const probeTools = result.discovered_tools ?? [];
+                          const probeWarnings = result.warnings ?? [];
+                          return (
+                            <div key={`probe-${result.server_id}`} className="rounded border bg-muted/30 px-2 py-1.5 text-[11px]">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="font-medium">{result.server_name || result.server_id}</p>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    'cursor-default text-[10px]',
+                                    result.status === 'ready'
+                                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                                      : result.status === 'partial'
+                                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                                        : result.status === 'disabled'
+                                          ? 'text-muted-foreground'
+                                          : 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                                  )}
+                                >
+                                  {result.status}
+                                </Badge>
+                              </div>
+                              <p className="text-muted-foreground">
+                                {result.transport} - {probeTools.length} tool{probeTools.length === 1 ? '' : 's'} - {result.duration_ms}ms
+                              </p>
+                              {result.message && <p>{result.message}</p>}
+                              {probeWarnings.slice(0, 1).map((warning) => (
+                                <p key={warning} className="text-amber-700 dark:text-amber-300">{warning}</p>
+                              ))}
                             </div>
-                            <p className="text-muted-foreground">
-                              {result.transport} • {result.discovered_tools.length} tool{result.discovered_tools.length === 1 ? '' : 's'} • {result.duration_ms}ms
-                            </p>
-                            {result.message && <p>{result.message}</p>}
-                            {result.warnings.slice(0, 1).map((warning) => (
-                              <p key={warning} className="text-amber-700 dark:text-amber-300">{warning}</p>
-                            ))}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

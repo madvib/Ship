@@ -2,9 +2,9 @@ use crate::events::{EventAction, EventEntity, append_event};
 use crate::project::{get_global_dir, project_slug_from_ship_dir, sanitize_file_name};
 use crate::state_db::{
     WorkspaceSessionDb, WorkspaceUpsert, clear_branch_link, delete_workspace_db,
-    get_active_workspace_session_db, get_workspace_db,
-    get_workspace_session_db, insert_workspace_session_db, list_workspace_sessions_db,
-    list_workspaces_db, set_branch_link, update_workspace_session_db, upsert_workspace_db,
+    get_active_workspace_session_db, get_workspace_db, get_workspace_session_db,
+    insert_workspace_session_db, list_workspace_sessions_db, list_workspaces_db, set_branch_link,
+    update_workspace_session_db, upsert_workspace_db,
 };
 use crate::state_db::{get_branch_link, get_feature_by_branch_links, get_feature_links};
 use anyhow::{Result, anyhow};
@@ -14,8 +14,8 @@ use specta::Type;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::process::Command;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str::FromStr;
 
 // ─── Data types ───────────────────────────────────────────────────────────────
@@ -412,7 +412,7 @@ fn default_project_worktree_root(ship_dir: &Path) -> PathBuf {
 fn default_global_worktree_root(ship_dir: &Path) -> Option<PathBuf> {
     let slug = project_slug_from_ship_dir(ship_dir);
     let global_dir = get_global_dir().ok()?;
-    Some(global_dir.join("project").join(slug).join("worktrees"))
+    Some(global_dir.join("projects").join(slug).join("worktrees"))
 }
 
 fn default_worktree_path(ship_dir: &Path, branch: &str) -> Option<String> {
@@ -437,11 +437,10 @@ fn default_worktree_path(ship_dir: &Path, branch: &str) -> Option<String> {
     None
 }
 
-
 fn session_artifacts_root(ship_dir: &Path) -> Option<PathBuf> {
     let slug = project_slug_from_ship_dir(ship_dir);
     let global_dir = get_global_dir().ok()?;
-    Some(global_dir.join("project").join(slug).join("sessions"))
+    Some(global_dir.join("projects").join(slug).join("sessions"))
 }
 
 fn session_artifacts_dir(ship_dir: &Path, session_id: &str) -> Option<PathBuf> {
@@ -449,7 +448,11 @@ fn session_artifacts_dir(ship_dir: &Path, session_id: &str) -> Option<PathBuf> {
     Some(root.join(sanitize_file_name(session_id)))
 }
 
-fn persist_session_artifact(ship_dir: &Path, session: &WorkspaceSession, phase: &str) -> Result<()> {
+fn persist_session_artifact(
+    ship_dir: &Path,
+    session: &WorkspaceSession,
+    phase: &str,
+) -> Result<()> {
     let Some(session_dir) = session_artifacts_dir(ship_dir, &session.id) else {
         return Ok(());
     };
@@ -501,7 +504,6 @@ fn append_session_note_artifact(ship_dir: &Path, session_id: &str, note: &str) -
     Ok(())
 }
 
-
 fn run_post_session_hooks(ship_dir: &Path, session: &WorkspaceSession) -> Result<()> {
     let effective = crate::config::get_effective_config(Some(ship_dir.to_path_buf()))?;
     let hooks: Vec<_> = effective
@@ -546,7 +548,10 @@ fn run_post_session_hooks(ship_dir: &Path, session: &WorkspaceSession) -> Result
                 }
             }
             Err(error) => {
-                eprintln!("Failed to execute post-session hook '{}': {}", hook.id, error);
+                eprintln!(
+                    "Failed to execute post-session hook '{}': {}",
+                    hook.id, error
+                );
             }
         }
     }
@@ -1477,7 +1482,6 @@ pub fn activate_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
         WorkspaceStatus::Active,
     )?;
 
-
     workspace.status = WorkspaceStatus::Active;
     workspace.resolved_at = now;
     workspace.last_activated_at = Some(now);
@@ -1933,26 +1937,26 @@ mod tests {
     }
 
     #[test]
-    fn create_workspace_requires_path_for_worktree_records() -> Result<()> {
+    fn create_workspace_auto_populates_worktree_path_when_missing() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
 
-        let err = create_workspace(
+        let workspace = create_workspace(
             &ship_dir,
             CreateWorkspaceRequest {
                 branch: "feature/missing-path".to_string(),
                 is_worktree: Some(true),
                 ..CreateWorkspaceRequest::default()
             },
-        )
-        .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("Worktree workspace requires a worktree path")
-        );
+        )?;
+        assert!(workspace.is_worktree);
+        let worktree_path = workspace
+            .worktree_path
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("expected auto-generated worktree path"))?;
+        assert!(worktree_path.contains("feature-missing-path"));
         Ok(())
     }
-
     #[test]
     fn workspace_session_start_and_end_happy_path() -> Result<()> {
         let tmp = tempdir()?;
@@ -2440,5 +2444,3 @@ mod tests {
         Ok(())
     }
 }
-
-

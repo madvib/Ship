@@ -204,9 +204,9 @@ pub struct McpProbeServerReport {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub warnings: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub discovered_tools: Vec<McpDiscoveredTool>,
     pub duration_ms: u64,
 }

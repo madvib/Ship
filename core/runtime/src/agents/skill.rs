@@ -411,38 +411,38 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn migrate_legacy_project_skills(project_dir: &Path, target_root: &Path) -> Result<()> {
-    let legacy_root = crate::project::legacy_project_skills_dir(project_dir);
-    if legacy_root == target_root || !legacy_root.exists() || !legacy_root.is_dir() {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(&legacy_root)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        if !source_path.is_dir() {
-            continue;
-        }
-        if !source_path.join("SKILL.md").is_file() {
+    for legacy_root in crate::project::legacy_project_skills_dir_candidates(project_dir) {
+        if legacy_root == target_root || !legacy_root.exists() || !legacy_root.is_dir() {
             continue;
         }
 
-        let destination_path = target_root.join(entry.file_name());
-        if destination_path.exists() {
-            continue;
-        }
+        for entry in fs::read_dir(&legacy_root)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            if !source_path.is_dir() {
+                continue;
+            }
+            if !source_path.join("SKILL.md").is_file() {
+                continue;
+            }
 
-        match fs::rename(&source_path, &destination_path) {
-            Ok(_) => {}
-            Err(_) => {
-                copy_dir_recursive(&source_path, &destination_path)?;
-                fs::remove_dir_all(&source_path)?;
+            let destination_path = target_root.join(entry.file_name());
+            if destination_path.exists() {
+                continue;
+            }
+
+            match fs::rename(&source_path, &destination_path) {
+                Ok(_) => {}
+                Err(_) => {
+                    copy_dir_recursive(&source_path, &destination_path)?;
+                    fs::remove_dir_all(&source_path)?;
+                }
             }
         }
     }
 
     Ok(())
 }
-
 fn find_skill_source_dir(search_root: &Path, skill_id: &str) -> Result<PathBuf> {
     let mut candidates = Vec::new();
     let mut available = Vec::new();
