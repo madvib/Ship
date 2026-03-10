@@ -87,7 +87,7 @@ export default function Sidebar({
   const otherProjects = (recentProjects || [])
     .filter((project) => project.path !== activeProject?.path)
     .slice(0, 3);
-  const avatarLabel = initialsFromProjectName(activeProject?.name ?? 'Shipwright');
+  const avatarLabel = initialsFromProjectName(activeProject?.name ?? 'Ship');
 
   const renderNavButton = (item: NavItem, isCompact = false) => {
     const Icon = item.icon;
@@ -268,7 +268,7 @@ export default function Sidebar({
         {!collapsed && (
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-bold tracking-tight text-sidebar-foreground">
-              {activeProject?.name?.trim() || 'Shipwright'}
+              {activeProject?.name?.trim() || 'Ship'}
             </p>
           </div>
         )}

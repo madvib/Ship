@@ -1,11 +1,17 @@
 # Managed by Ship — edit via `ship git include/exclude`
 
-workflow/**
-project/**
-!project/VISION.md
-!project/vision.md
+workflow/specs
+project/features
+project/releases
+project/adrs
+project/notes
+project/vision.md
+skills
+agents/README.md
+agents/skill-library-strategy.md
+README.md
+project/README.md
+workflow/README.md
 **/TEMPLATE.md
 generated/
 .tmp-global/
-
-events.ndjson

@@ -7,6 +7,7 @@ RUN_ID="$(date +%Y%m%d%H%M%S)"
 WORK_DIR="$TMP_ROOT/project-e2e-$RUN_ID"
 HOME_DIR="$WORK_DIR/home"
 ORIG_HOME="${HOME:-}"
+KEEP_TMP="${KEEP_TMP:-0}"
 
 mkdir -p "$WORK_DIR" "$HOME_DIR"
 
@@ -49,6 +50,20 @@ assert_path_in_gitignore() {
 run_ship() {
   (cd "$WORK_DIR" && "$SHIP_BIN" "$@")
 }
+
+cleanup() {
+  local exit_code=$?
+  if [[ -n "${ORIG_HOME:-}" ]]; then
+    export HOME="$ORIG_HOME"
+  fi
+  if [[ "$KEEP_TMP" != "1" ]]; then
+    rm -rf "$WORK_DIR"
+  fi
+  return "$exit_code"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 echo "Building CLI binary..."
 HOME="$ORIG_HOME" cargo build --manifest-path "$ROOT_DIR/Cargo.toml" -p cli >/dev/null
@@ -134,19 +149,23 @@ echo "Validating MCP workflow parity..."
 HOME="$ORIG_HOME" cargo test --manifest-path "$ROOT_DIR/Cargo.toml" -p mcp mcp_release_feature_flow_emits_events >/dev/null
 
 echo "Validating git scope controls..."
-# Default: issues local; adrs/features/specs/releases committed
-assert_path_in_gitignore "workflow/issues"
+# Default: workflow/project docs local; rules + mcp + permissions + ship.toml tracked
 assert_path_in_gitignore "generated/"
-assert_path_in_gitignore "events.ndjson"
-assert_path_in_gitignore "ship.db"
-assert_path_not_in_gitignore "project/adrs"
-assert_path_not_in_gitignore "project/notes"
-assert_path_not_in_gitignore "agents"
-assert_path_not_in_gitignore "project/features"
-assert_path_not_in_gitignore "project/releases"
-
-run_ship git exclude adrs >/dev/null
+assert_path_in_gitignore ".tmp-global/"
 assert_path_in_gitignore "project/adrs"
+assert_path_in_gitignore "project/notes"
+assert_path_in_gitignore "project/features"
+assert_path_in_gitignore "project/releases"
+assert_path_in_gitignore "workflow/specs"
+assert_path_in_gitignore "project/vision.md"
+assert_path_in_gitignore "skills"
+assert_path_not_in_gitignore "ship.toml"
+assert_path_not_in_gitignore "agents/rules"
+assert_path_not_in_gitignore "agents/mcp.toml"
+assert_path_not_in_gitignore "agents/permissions.toml"
+
+run_ship git include adrs >/dev/null
+assert_path_not_in_gitignore "project/adrs"
 
 echo "Validating issue CRUD baseline..."
 run_ship issue create "Workflow issue" "Validate end-to-end flow" >/dev/null
@@ -179,4 +198,8 @@ assert_contains "$events_after_ingest" "[filesystem]"
 assert_contains "$events_after_ingest" "Spec.Create manual-sync.md"
 
 echo "PASS: project feature e2e checks completed"
-echo "Workspace: $WORK_DIR"
+if [[ "$KEEP_TMP" == "1" ]]; then
+  echo "Workspace: $WORK_DIR"
+else
+  echo "Workspace cleaned up (set KEEP_TMP=1 to retain)"
+fi

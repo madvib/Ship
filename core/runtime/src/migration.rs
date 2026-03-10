@@ -1,7 +1,7 @@
-use crate::config::{LEGACY_CONFIG_FILE, PRIMARY_CONFIG_FILE, SECONDARY_CONFIG_FILE};
+use crate::config::{LEGACY_CONFIG_FILE, PRIMARY_CONFIG_FILE};
 use crate::project::{
-    AppState, ProjectRegistry, adrs_dir, features_dir, generated_ns, issues_dir, notes_dir,
-    project_ns, releases_dir, specs_dir, workflow_ns,
+    AppState, ProjectRegistry, adrs_dir, features_dir, generated_ns, notes_dir, project_ns,
+    releases_dir, specs_dir, workflow_ns,
 };
 use crate::state_db::{DatabaseMigrationReport, ensure_global_database, ensure_project_database};
 use anyhow::{Context, Result};
@@ -130,7 +130,6 @@ fn migrate_project_files(ship_dir: &Path) -> Result<ProjectFileMigrationReport> 
     migrate_template_layout(ship_dir, &mut report)?;
 
     let mappings = [
-        (ship_dir.join("issues"), issues_dir(ship_dir)),
         (ship_dir.join("specs"), specs_dir(ship_dir)),
         (ship_dir.join("features"), features_dir(ship_dir)),
         (ship_dir.join("adrs"), adrs_dir(ship_dir)),
@@ -176,7 +175,7 @@ fn migrate_project_files(ship_dir: &Path) -> Result<ProjectFileMigrationReport> 
 fn migrate_project_config_file(ship_dir: &Path) -> Result<()> {
     let primary = ship_dir.join(PRIMARY_CONFIG_FILE);
     if !primary.exists() {
-        for legacy_name in [SECONDARY_CONFIG_FILE, LEGACY_CONFIG_FILE] {
+        for legacy_name in [LEGACY_CONFIG_FILE] {
             let legacy = ship_dir.join(legacy_name);
             if legacy.exists() {
                 move_file(&legacy, &primary)?;
@@ -186,7 +185,7 @@ fn migrate_project_config_file(ship_dir: &Path) -> Result<()> {
     }
 
     if primary.exists() {
-        for legacy_name in [SECONDARY_CONFIG_FILE, LEGACY_CONFIG_FILE] {
+        for legacy_name in [LEGACY_CONFIG_FILE] {
             let legacy = ship_dir.join(legacy_name);
             if legacy.exists() {
                 fs::remove_file(legacy)?;
@@ -232,7 +231,6 @@ fn migrate_template_layout(ship_dir: &Path, report: &mut ProjectFileMigrationRep
     }
 
     let mappings = [
-        ("ISSUE.md", issues_dir(ship_dir).join("TEMPLATE.md")),
         ("SPEC.md", specs_dir(ship_dir).join("TEMPLATE.md")),
         ("FEATURE.md", features_dir(ship_dir).join("TEMPLATE.md")),
         ("RELEASE.md", releases_dir(ship_dir).join("TEMPLATE.md")),
@@ -469,7 +467,6 @@ mod tests {
     fn migrate_project_files_copies_legacy_documents() -> Result<()> {
         let tmp = tempdir()?;
         let ship = tmp.path().join(".ship");
-        fs::create_dir_all(ship.join("issues/backlog"))?;
         fs::create_dir_all(ship.join("specs"))?;
         fs::create_dir_all(ship.join("features"))?;
         fs::create_dir_all(ship.join("releases"))?;
@@ -481,10 +478,6 @@ mod tests {
             format!("version = \"1\"\nid = \"{}\"\n", crate::gen_nanoid()),
         )?;
 
-        fs::write(
-            ship.join("issues/backlog/legacy.md"),
-            "+++\ntitle = \"Legacy\"\n+++\n\nbody",
-        )?;
         fs::write(ship.join("specs/vision.md"), "legacy vision")?;
         fs::write(
             ship.join("features/auth.md"),
@@ -500,7 +493,6 @@ mod tests {
             report.copied_files + report.copied_directories >= 4,
             "expected documents/directories to be migrated"
         );
-        assert!(ship.join("workflow/issues/backlog/legacy.md").exists());
         assert!(ship.join("project/features/auth.md").exists());
         assert!(ship.join("project/releases/v1.md").exists());
         assert!(ship.join("project/vision.md").exists());

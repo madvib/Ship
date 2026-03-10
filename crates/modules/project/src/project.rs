@@ -418,7 +418,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
 
     let config_exists = [
         ship_path.join(runtime::config::PRIMARY_CONFIG_FILE),
-        ship_path.join(runtime::config::SECONDARY_CONFIG_FILE),
         ship_path.join(runtime::config::LEGACY_CONFIG_FILE),
     ]
     .iter()
@@ -630,10 +629,7 @@ fn cleanup_legacy_config_files(ship_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    for legacy_name in [
-        runtime::config::SECONDARY_CONFIG_FILE,
-        runtime::config::LEGACY_CONFIG_FILE,
-    ] {
+    for legacy_name in [runtime::config::LEGACY_CONFIG_FILE] {
         let legacy = ship_path.join(legacy_name);
         if legacy.exists() {
             fs::remove_file(legacy)?;
@@ -777,11 +773,11 @@ fn write_default_skills(ship_path: &Path) -> Result<()> {
 name: task-policy
 description: Ship workflow policy and execution guardrails for daily delivery.
 metadata:
-  display_name: Shipwright Workflow Policy
+  display_name: Ship Workflow Policy
   source: builtin
 ---
 
-# Shipwright Workflow Policy
+# Ship Workflow Policy
 
 Use Ship as the system of record for workflow state changes.
 
@@ -1241,7 +1237,7 @@ mod tests {
                     path: worktree_root.clone(),
                 },
                 ProjectEntry {
-                    name: "Shipwright Runtime".to_string(),
+                    name: "Ship Runtime".to_string(),
                     path: main_root.clone(),
                 },
             ],
@@ -1250,7 +1246,7 @@ mod tests {
         let (normalized, changed) = normalize_registry(registry, false);
         assert!(changed);
         assert_eq!(normalized.projects.len(), 1);
-        assert_eq!(normalized.projects[0].name, "Shipwright Runtime");
+        assert_eq!(normalized.projects[0].name, "Ship Runtime");
         assert_eq!(normalized.projects[0].path, fs::canonicalize(main_ship)?);
         Ok(())
     }
@@ -1283,7 +1279,7 @@ mod tests {
             projects: vec![
                 ProjectEntry {
                     name: "Main".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/.ship"),
                 },
                 ProjectEntry {
                     name: "Tmp".to_string(),
@@ -1291,11 +1287,11 @@ mod tests {
                 },
                 ProjectEntry {
                     name: "E2E".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/example/projects-e2e/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/example/projects-e2e/.ship"),
                 },
                 ProjectEntry {
                     name: "TargetTmp".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/target/tmp/ship-e2e/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/target/tmp/ship-e2e/.ship"),
                 },
             ],
         };
@@ -1315,13 +1311,13 @@ mod tests {
             "/private/var/folders/x/T/tmp.123/.ship"
         )));
         assert!(should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/example/projects-e2e/.ship"
+            "/Users/me/dev/ship/example/projects-e2e/.ship"
         )));
         assert!(should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/target/tmp/ship-e2e/.ship"
+            "/Users/me/dev/ship/target/tmp/ship-e2e/.ship"
         )));
         assert!(!should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/.ship"
+            "/Users/me/dev/ship/.ship"
         )));
     }
 

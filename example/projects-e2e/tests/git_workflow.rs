@@ -63,7 +63,7 @@ mod new_project {
         .unwrap();
         assert!(content.contains("task-policy"), "skill content missing");
         assert!(
-            content.contains("Shipwright Workflow Policy"),
+            content.contains("Ship Workflow Policy"),
             "skill name missing"
         );
         assert!(content.contains("Canonical Flow"), "policy content missing");
@@ -374,7 +374,7 @@ mod branch_hierarchy {
 
         on_post_checkout(&p.ship_dir, "feature/a", &p.root()).unwrap();
 
-        p.assert_root_file_contains("CLAUDE.md", "Shipwright Workflow Policy");
+        p.assert_root_file_contains("CLAUDE.md", "Ship Workflow Policy");
     }
 
     /// Custom project skill is inlined into CLAUDE.md.
@@ -836,7 +836,7 @@ mod core_loop {
         p.assert_root_file("CLAUDE.md");
         p.assert_root_file_contains("CLAUDE.md", "Payment Processing");
         p.assert_root_file_contains("CLAUDE.md", "Feature Spec");
-        p.assert_root_file_contains("CLAUDE.md", "Shipwright Workflow Policy");
+        p.assert_root_file_contains("CLAUDE.md", "Ship Workflow Policy");
         let workspace = get_workspace(&p.ship_dir, "feature/payments")
             .unwrap()
             .expect("feature workspace should be present");

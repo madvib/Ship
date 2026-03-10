@@ -23,6 +23,7 @@ ALEX_DIR="$STORIES_TMP/handoff-alex-$RUN_ID"
 SAM_HOME="$SAM_DIR/.home"
 ALEX_HOME="$ALEX_DIR/.home"
 ORIG_HOME="${HOME:-}"
+KEEP_TMP="${KEEP_TMP:-0}"
 SHIP_BIN="${SHIP_BIN_OVERRIDE:-$ROOT_DIR/target/debug/ship}"
 if ! "$SHIP_BIN" --version &>/dev/null 2>&1; then
   SHIP_BIN="$(which ship 2>/dev/null || echo ship)"
@@ -58,6 +59,20 @@ as_alex() {
   echo -e "${GREEN}  [Alex]${RESET} ${YELLOW}\$${RESET} ship $*"
   (cd "$ALEX_DIR" && HOME="$ALEX_HOME" "$SHIP_BIN" "$@")
 }
+
+cleanup() {
+  local exit_code=$?
+  if [[ -n "${ORIG_HOME:-}" ]]; then
+    export HOME="$ORIG_HOME"
+  fi
+  if [[ "$KEEP_TMP" != "1" ]]; then
+    rm -rf "$SAM_DIR" "$ALEX_DIR"
+  fi
+  return "$exit_code"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -490,9 +505,13 @@ echo -e "${GREEN}${BOLD}  Story complete.${RESET}"
 echo ""
 echo -e "  ${DIM}Sam → Alex: zero-friction. All context committed, all config shared.${RESET}"
 echo ""
-echo -e "  Sam's workspace:  ${BOLD}$SAM_DIR${RESET}"
-echo -e "  Alex's workspace: ${BOLD}$ALEX_DIR${RESET}"
-echo ""
-echo -e "  Compare them:"
-echo -e "  ${DIM}cd $ALEX_DIR && ship feature list && ship mode list && ship skill list${RESET}"
+if [[ "$KEEP_TMP" == "1" ]]; then
+  echo -e "  Sam's workspace:  ${BOLD}$SAM_DIR${RESET}"
+  echo -e "  Alex's workspace: ${BOLD}$ALEX_DIR${RESET}"
+  echo ""
+  echo -e "  Compare them:"
+  echo -e "  ${DIM}cd $ALEX_DIR && ship feature list && ship mode list && ship skill list${RESET}"
+else
+  echo -e "  ${DIM}Workspaces cleaned up. Set KEEP_TMP=1 to keep artifacts.${RESET}"
+fi
 echo ""

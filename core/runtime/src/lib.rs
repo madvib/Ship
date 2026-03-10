@@ -135,6 +135,25 @@ mod tests {
     }
 
     #[test]
+    fn test_legacy_agents_category_maps_to_rules_mcp_permissions() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        set_category_committed(&project_dir, "agents", false)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(gitignore.contains("agents/rules"));
+        assert!(gitignore.contains("agents/mcp.toml"));
+        assert!(gitignore.contains("agents/permissions.toml"));
+
+        set_category_committed(&project_dir, "agents", true)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
+        Ok(())
+    }
+
+    #[test]
     fn test_agent_layer_is_not_file_backed() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
@@ -171,11 +190,15 @@ mod tests {
         assert!(gitignore.contains("workflow/specs"));
         assert!(gitignore.contains("project/adrs"));
         assert!(gitignore.contains("project/notes"));
-        assert!(!gitignore.contains("project/vision.md"));
+        assert!(gitignore.contains("project/vision.md"));
+        assert!(gitignore.contains("skills"));
+        assert!(gitignore.contains("agents/README.md"));
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
         // DB is now at ~/.ship/state/<slug>/ship.db — not inside .ship/
         assert!(!gitignore.contains("ship.db"));
         assert!(!gitignore.contains("log.md"));
-        assert!(!gitignore.contains("agents"));
         Ok(())
     }
 
@@ -259,7 +282,7 @@ mod tests {
         assert!(project_skills_dir.join("task-policy/SKILL.md").is_file());
         let skill_content = fs::read_to_string(project_skills_dir.join("task-policy/SKILL.md"))?;
         assert!(skill_content.contains("task-policy"));
-        assert!(skill_content.contains("Shipwright Workflow Policy"));
+        assert!(skill_content.contains("Ship Workflow Policy"));
         Ok(())
     }
 

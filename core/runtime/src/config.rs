@@ -10,7 +10,6 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 pub const PRIMARY_CONFIG_FILE: &str = "ship.toml";
-pub const SECONDARY_CONFIG_FILE: &str = "shipwright.toml";
 pub const LEGACY_CONFIG_FILE: &str = "config.toml";
 
 // ─── Data types ───────────────────────────────────────────────────────────────
@@ -41,15 +40,15 @@ pub struct GitConfig {
 impl Default for GitConfig {
     fn default() -> Self {
         // Default:
-        // - Keep generated planning/docs local by default.
-        // - Let teams opt in explicitly via `ship git include <category>`.
+        // - Keep workflow/project docs local by default.
+        // - Keep core control-plane config and always-on rules tracked.
         Self {
             ignore: Vec::new(),
             commit: vec![
-                "agents".to_string(),
                 "ship.toml".to_string(),
-                "templates".to_string(),
-                "vision".to_string(),
+                "mcp".to_string(),
+                "permissions".to_string(),
+                "rules".to_string(),
             ],
         }
     }
@@ -319,6 +318,16 @@ pub struct ProjectConfig {
     pub namespaces: Vec<NamespaceConfig>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+struct ProjectCoreFile {
+    #[serde(default = "default_version")]
+    version: String,
+    #[serde(default)]
+    id: String,
+    name: Option<String>,
+    description: Option<String>,
+}
+
 fn default_version() -> String {
     "1".to_string()
 }
@@ -395,14 +404,13 @@ pub fn get_config(project_dir: Option<PathBuf>) -> Result<ProjectConfig> {
         None => get_global_dir()?,
     };
 
-    // Prefer ship.toml, then shipwright.toml, then legacy config.toml.
+    // Prefer ship.toml, then legacy config.toml.
     let primary_path = config_dir.join(PRIMARY_CONFIG_FILE);
-    let secondary_path = config_dir.join(SECONDARY_CONFIG_FILE);
     let legacy_path = config_dir.join(LEGACY_CONFIG_FILE);
     let json_path = config_dir.join("config.json");
 
     let mut config = None;
-    for path in [&primary_path, &secondary_path, &legacy_path] {
+    for path in [&primary_path, &legacy_path] {
         if !path.exists() {
             continue;
         }
@@ -419,12 +427,27 @@ pub fn get_config(project_dir: Option<PathBuf>) -> Result<ProjectConfig> {
     } else {
         ProjectConfig::default()
     };
+    config.git = normalize_git_config(config.git);
 
     if is_project {
-        if let Some((providers, active_mode, hooks)) = get_runtime_settings(&config_dir)? {
+        if let Some((providers, active_mode, hooks, statuses, ai, git, namespaces)) =
+            get_runtime_settings(&config_dir)?
+        {
             config.providers = providers;
             config.active_mode = active_mode;
             config.hooks = hooks;
+            if let Some(statuses) = statuses {
+                config.statuses = statuses;
+            }
+            if ai.is_some() {
+                config.ai = ai;
+            }
+            if let Some(git) = git {
+                config.git = git;
+            }
+            if let Some(namespaces) = namespaces {
+                config.namespaces = namespaces;
+            }
         } else if let Some(legacy) = get_legacy_agents_config(&config_dir)? {
             // One-time compatibility path: bootstrap SQLite runtime settings from
             // legacy .ship/agents/config.toml if present.
@@ -757,24 +780,95 @@ fn legacy_agents_config_path(ship_dir: &Path) -> PathBuf {
     ship_dir.join("agents").join("config.toml")
 }
 
+fn normalize_git_config(mut git: GitConfig) -> GitConfig {
+    if git.commit.iter().any(|entry| entry == "agents") {
+        for entry in ["mcp", "permissions", "rules"] {
+            if !git.commit.iter().any(|existing| existing == entry) {
+                git.commit.push(entry.to_string());
+            }
+        }
+        git.commit.retain(|entry| entry != "agents");
+    }
+
+    if git.ignore.iter().any(|entry| entry == "agents") {
+        for entry in ["mcp", "permissions", "rules"] {
+            if !git.ignore.iter().any(|existing| existing == entry) {
+                git.ignore.push(entry.to_string());
+            }
+        }
+    }
+
+    git
+}
+
 fn get_runtime_settings(
     ship_dir: &Path,
-) -> Result<Option<(Vec<String>, Option<String>, Vec<HookConfig>)>> {
+) -> Result<
+    Option<(
+        Vec<String>,
+        Option<String>,
+        Vec<HookConfig>,
+        Option<Vec<StatusConfig>>,
+        Option<AiConfig>,
+        Option<GitConfig>,
+        Option<Vec<NamespaceConfig>>,
+    )>,
+> {
     let Some(raw) = crate::state_db::get_agent_runtime_settings_db(ship_dir)? else {
         return Ok(None);
     };
 
     let hooks: Vec<HookConfig> = serde_json::from_str(&raw.hooks_json).unwrap_or_default();
-    Ok(Some((raw.providers, raw.active_mode, hooks)))
+    let statuses: Vec<StatusConfig> = serde_json::from_str(&raw.statuses_json).unwrap_or_default();
+    let statuses = if statuses.is_empty() {
+        None
+    } else {
+        Some(statuses)
+    };
+    let ai = raw
+        .ai_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<AiConfig>(json).ok());
+    let git = if raw.git_json.trim().is_empty() || raw.git_json.trim() == "{}" {
+        None
+    } else {
+        serde_json::from_str::<GitConfig>(&raw.git_json)
+            .ok()
+            .map(normalize_git_config)
+    };
+    let namespaces: Vec<NamespaceConfig> =
+        serde_json::from_str(&raw.namespaces_json).unwrap_or_default();
+    let namespaces = if namespaces.is_empty() {
+        None
+    } else {
+        Some(namespaces)
+    };
+    Ok(Some((
+        raw.providers,
+        raw.active_mode,
+        hooks,
+        statuses,
+        ai,
+        git,
+        namespaces,
+    )))
 }
 
 fn save_runtime_settings(ship_dir: &Path, config: &ProjectConfig) -> Result<()> {
     let hooks_json = serde_json::to_string(&config.hooks)?;
+    let statuses_json = serde_json::to_string(&config.statuses)?;
+    let ai_json = config.ai.as_ref().map(serde_json::to_string).transpose()?;
+    let git_json = serde_json::to_string(&normalize_git_config(config.git.clone()))?;
+    let namespaces_json = serde_json::to_string(&config.namespaces)?;
     crate::state_db::set_agent_runtime_settings_db(
         ship_dir,
         &config.providers,
         config.active_mode.as_deref(),
         &hooks_json,
+        &statuses_json,
+        ai_json.as_deref(),
+        &git_json,
+        &namespaces_json,
     )
 }
 
@@ -830,6 +924,22 @@ fn merge_hooks(base: &[HookConfig], overlay: &[HookConfig]) -> Vec<HookConfig> {
     merged
 }
 
+fn project_core_file(config: &ProjectConfig) -> ProjectCoreFile {
+    ProjectCoreFile {
+        version: config.version.clone(),
+        id: config.id.clone(),
+        name: config.name.clone(),
+        description: config.description.clone(),
+    }
+}
+
+fn write_project_core_config(path: &Path, config: &ProjectConfig) -> Result<()> {
+    let core = project_core_file(config);
+    let toml_str = toml::to_string_pretty(&core)?;
+    write_atomic(path, toml_str)?;
+    Ok(())
+}
+
 pub fn save_config(config: &ProjectConfig, project_dir: Option<PathBuf>) -> Result<()> {
     let config_dir = if let Some(p_dir) = project_dir.clone() {
         p_dir
@@ -870,15 +980,7 @@ pub fn save_config(config: &ProjectConfig, project_dir: Option<PathBuf>) -> Resu
     // Bootstrap ship.toml with project identity before any SQLite-backed writes.
     // save_runtime_settings/open_project_db resolve the DB key from ship.toml:id.
     if !path.exists() {
-        let mut bootstrap = effective.clone();
-        bootstrap.modes.clear();
-        bootstrap.mcp_servers.clear();
-        bootstrap.active_mode = None;
-        bootstrap.hooks.clear();
-        bootstrap.agent = AgentLayerConfig::default();
-        bootstrap.providers.clear();
-        let toml_str = toml::to_string_pretty(&bootstrap)?;
-        write_atomic(&path, toml_str)?;
+        write_project_core_config(&path, &effective)?;
     }
 
     // Project runtime settings + mode bindings live in SQLite.
@@ -887,17 +989,8 @@ pub fn save_config(config: &ProjectConfig, project_dir: Option<PathBuf>) -> Resu
     save_mcp_config(&config_dir, &effective.mcp_servers)?;
     save_modes_config(&config_dir, &effective.modes)?;
 
-    // Keep ship.toml focused on core project/workflow config.
-    let mut core = effective;
-    core.modes.clear();
-    core.mcp_servers.clear();
-    core.active_mode = None;
-    core.hooks.clear();
-    core.agent = AgentLayerConfig::default();
-    core.providers.clear();
-
-    let toml_str = toml::to_string_pretty(&core)?;
-    write_atomic(&path, toml_str)?;
+    // Keep ship.toml focused on stable project identity only.
+    write_project_core_config(&path, &effective)?;
     Ok(())
 }
 
@@ -1043,15 +1136,22 @@ pub fn set_git_config(project_dir: &Path, git: GitConfig) -> Result<()> {
 /// Toggle a named category in/out of git commit tracking.
 pub fn set_category_committed(project_dir: &Path, category: &str, commit: bool) -> Result<()> {
     let mut git = get_git_config(project_dir)?;
-    if commit {
-        if !git.commit.contains(&category.to_string()) {
-            git.commit.push(category.to_string());
-        }
-        git.ignore.retain(|i| i != category);
+    let categories: Vec<&str> = if category == "agents" {
+        vec!["mcp", "permissions", "rules"]
     } else {
-        git.commit.retain(|c| c != category);
-        if !git.ignore.contains(&category.to_string()) {
-            git.ignore.push(category.to_string());
+        vec![category]
+    };
+    for category in categories {
+        if commit {
+            if !git.commit.contains(&category.to_string()) {
+                git.commit.push(category.to_string());
+            }
+            git.ignore.retain(|i| i != category);
+        } else {
+            git.commit.retain(|c| c != category);
+            if !git.ignore.contains(&category.to_string()) {
+                git.ignore.push(category.to_string());
+            }
         }
     }
     set_git_config(project_dir, git)?;
@@ -1071,6 +1171,11 @@ pub fn set_category_committed(project_dir: &Path, category: &str, commit: bool) 
 }
 
 pub fn is_category_committed(git: &GitConfig, category: &str) -> bool {
+    if category == "agents" {
+        return ["mcp", "permissions", "rules"]
+            .iter()
+            .all(|entry| git.commit.contains(&entry.to_string()));
+    }
     git.commit.contains(&category.to_string())
 }
 
@@ -1085,7 +1190,15 @@ pub fn generate_gitignore(ship_dir: &Path, git: &GitConfig) -> Result<()> {
         ("adrs", "project/adrs"),
         ("notes", "project/notes"),
         ("vision", "project/vision.md"),
-        ("agents", "agents"),
+        ("mcp", "agents/mcp.toml"),
+        ("permissions", "agents/permissions.toml"),
+        ("rules", "agents/rules"),
+        ("skills", "skills"),
+        ("agent-docs", "agents/README.md"),
+        ("agent-strategy", "agents/skill-library-strategy.md"),
+        ("ship-readme", "README.md"),
+        ("project-readme", "project/README.md"),
+        ("workflow-readme", "workflow/README.md"),
         ("ship.toml", "ship.toml"),
         ("templates", "**/TEMPLATE.md"),
     ];
@@ -1120,7 +1233,6 @@ pub fn ensure_registered_namespaces(
         "agents",
         "generated",
         "ship.toml",
-        "shipwright.toml",
         "config.toml",
         "log.md",
         "templates",
@@ -1337,13 +1449,8 @@ pub fn list_hooks(project_dir: Option<PathBuf>) -> Result<Vec<HookConfig>> {
 pub fn migrate_json_config_file(project_dir: &Path) -> Result<bool> {
     let json_path = project_dir.join("config.json");
     let primary_path = project_dir.join(PRIMARY_CONFIG_FILE);
-    let secondary_path = project_dir.join(SECONDARY_CONFIG_FILE);
     let legacy_path = project_dir.join(LEGACY_CONFIG_FILE);
-    if !json_path.exists()
-        || primary_path.exists()
-        || secondary_path.exists()
-        || legacy_path.exists()
-    {
+    if !json_path.exists() || primary_path.exists() || legacy_path.exists() {
         return Ok(false);
     }
     let config = migrate_json_config(&json_path)?;
@@ -1600,6 +1707,11 @@ mod tests {
             description: None,
             command: "echo audit".to_string(),
         }];
+        config.ai = Some(AiConfig {
+            provider: Some("codex".to_string()),
+            model: Some("gpt-5".to_string()),
+            cli_path: None,
+        });
         config.agent = AgentLayerConfig {
             skills: vec!["task-policy".to_string()],
             prompts: vec![],
@@ -1649,6 +1761,22 @@ mod tests {
             !ship_toml.contains("active_mode ="),
             "ship.toml must not persist active_mode"
         );
+        assert!(
+            !ship_toml.contains("[[statuses]]"),
+            "ship.toml must not persist statuses"
+        );
+        assert!(
+            !ship_toml.contains("[git]"),
+            "ship.toml must not persist git policy"
+        );
+        assert!(
+            !ship_toml.contains("[ai]"),
+            "ship.toml must not persist ai block"
+        );
+        assert!(
+            !ship_toml.contains("[[namespaces]]"),
+            "ship.toml must not persist namespace claims"
+        );
 
         assert!(
             !ship_dir.join("agents").join("config.toml").exists(),
@@ -1663,6 +1791,15 @@ mod tests {
         );
         assert_eq!(runtime_settings.active_mode.as_deref(), Some("planning"));
         assert!(runtime_settings.hooks_json.contains("\"audit\""));
+        assert!(runtime_settings.statuses_json.contains("\"backlog\""));
+        assert!(
+            runtime_settings
+                .ai_json
+                .as_deref()
+                .is_some_and(|raw| raw.contains("\"codex\""))
+        );
+        assert!(runtime_settings.git_json.contains("\"ship.toml\""));
+        assert!(runtime_settings.namespaces_json.contains("\"project\""));
 
         let mode_rows = crate::state_db::list_agent_modes_db(&ship_dir)?;
         assert_eq!(mode_rows.len(), 1);
@@ -1682,6 +1819,25 @@ mod tests {
         let mut config = ProjectConfig::default();
         config.providers = vec!["gemini".to_string()];
         config.active_mode = Some("focus".to_string());
+        config.ai = Some(AiConfig {
+            provider: Some("codex".to_string()),
+            model: Some("gpt-5".to_string()),
+            cli_path: Some("codex".to_string()),
+        });
+        config.statuses.push(StatusConfig {
+            id: "qa".to_string(),
+            name: "QA".to_string(),
+            color: "teal".to_string(),
+        });
+        config.git = GitConfig {
+            ignore: vec!["project/features".to_string()],
+            commit: vec!["ship.toml".to_string(), "rules".to_string()],
+        };
+        config.namespaces.push(NamespaceConfig {
+            id: "plugin:demo".to_string(),
+            path: "demo".to_string(),
+            owner: "plugins".to_string(),
+        });
         config.modes = vec![ModeConfig {
             id: "focus".to_string(),
             name: "Focus".to_string(),
@@ -1706,6 +1862,17 @@ mod tests {
 
         assert_eq!(loaded.providers, vec!["gemini".to_string()]);
         assert_eq!(loaded.active_mode.as_deref(), Some("focus"));
+        assert_eq!(
+            loaded
+                .ai
+                .as_ref()
+                .and_then(|ai| ai.provider.clone())
+                .as_deref(),
+            Some("codex")
+        );
+        assert!(loaded.statuses.iter().any(|status| status.id == "qa"));
+        assert!(loaded.git.commit.iter().any(|entry| entry == "rules"));
+        assert!(loaded.namespaces.iter().any(|ns| ns.id == "plugin:demo"));
         assert!(loaded.agent.skills.is_empty());
         assert_eq!(loaded.modes.len(), 1);
         assert_eq!(loaded.modes[0].id, "focus");

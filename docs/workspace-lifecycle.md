@@ -1,6 +1,6 @@
 # Workspace and Session Lifecycle
 
-Shipwright manages project memory through **Workspaces** and **Sessions**. This document outlines how these entities interact, how state is persisted, and how context is injected into agent environments.
+Ship manages project memory through **Workspaces** and **Sessions**. This document outlines how these entities interact, how state is persisted, and how context is injected into agent environments.
 
 ## Workspaces
 
@@ -15,10 +15,10 @@ A **Workspace** is the runtime state associated with a specific unit of work, ty
 
 ### Activation Lifecycle
 
-When you switch to a workspace (e.g., via `git checkout` or the Shipwright UI):
+When you switch to a workspace (e.g., via `git checkout` or the Ship UI):
 
 1. **Activation**: The workspace status is set to `active`, and `last_activated_at` is updated.
-2. **Hydration**: Shipwright identifies links to features, specs, and releases based on the branch name.
+2. **Hydration**: Ship identifies links to features, specs, and releases based on the branch name.
 3. **Compilation**: The `export` engine runs for all connected providers (Claude, Gemini, etc.), writing native config files (`CLAUDE.md`, `GEMINI.md`, `.mcp.json`).
 4. **Generation Update**: `config_generation` is incremented.
 
@@ -68,7 +68,7 @@ graph TD
 
 ### Compile Hardening
 
-Shipwright implements "compile hardening" to ensure agents never work with broken context:
+Ship implements "compile hardening" to ensure agents never work with broken context:
 - If a provider export fails (e.g., missing mandatory skill), the `compile_error` is stored on the workspace.
 - The previous context file is preserved if possible, or a "Safe Mode" context is written with the error message.
 - Sessions started during a compile error state will explicitly show the degradation in the UI.

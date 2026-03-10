@@ -1,19 +1,18 @@
 # State & Persistence Audit (UI / CLI / MCP)
 
 Date: 2026-03-10
-Scope: source of truth, persistence layout, git boundaries, interface capability parity, and deprecation fallout.
-Updated after integrating upstream commit `6200736` ("Use stable project slugs and harden MCP install flow").
+Scope: source of truth, persistence layout, git boundaries, interface capability parity, and cleanup actions.
 
 ## 1) Current State Snapshot
 
-- Issue tracking APIs are now removed from active UI/CLI/MCP surfaces.
-- Project and global state remain split across SQLite, TOML, and JSON files.
+- Canonical project DB path is now human-identifiable and path-independent: `~/.ship/state/ship-hrvmuz4p/ship.db` (`<project-name>-<project-id>`).
+- Project and global state are still split across SQLite, TOML, and JSON files.
 - Event/log truth is SQLite (`event_log`); NDJSON is export-only.
-- UI reactivity still relies on filesystem watching (ship config file + sqlite file writes).
-- Project slugging for global `projects/` namespace paths now uses `<project-name>-<project-id>` instead of raw path slugs.
-- In this Codex environment, Ship MCP was audited from repo/runtime code and local binaries; there is no direct MCP client bridge tool available to this agent session (`list_mcp_resources` returns no configured servers).
+- UI reactivity still relies on filesystem watching (`ship.toml` + sqlite file writes).
+- The old secondary TOML fallback has been removed from runtime config lookup; config lookup is now `ship.toml`, then legacy `config.toml`.
+- In this Codex environment, there is no direct Ship MCP bridge in the session (`list_mcp_resources` returns no configured servers).
 
-## 2) Capability Surface By Interface
+## 2) Capability Surface by Interface
 
 ### Planning/workflow entities
 
@@ -26,7 +25,7 @@ Updated after integrating upstream commit `6200736` ("Use stable project slugs a
 | Spec create/list/get/update | Yes | Yes | Yes (create/update) |
 | Spec move/delete | No | Yes | No |
 | Release create/list/get/update | Yes | Yes | Yes (create/update) |
-| Release delete | No | UI not exposed in CLI path | No |
+| Release delete | No | UI path only | No |
 | ADR create/list/get/move | Yes | Yes | Create only |
 | ADR update/delete | No | Yes | No |
 | Notes create/list/get/update | Yes | Yes | Yes (create/update) |
@@ -34,195 +33,112 @@ Updated after integrating upstream commit `6200736` ("Use stable project slugs a
 | Workspace/session lifecycle | Yes | Yes | Yes |
 | Event list/ingest/export | Yes | Yes | Read via `ship://events` |
 
-### Read surfaces in MCP
+### MCP read surfaces
 
-MCP is read-heavy via resources, not many read tools:
+MCP is read-heavy via resources:
 `ship://project_info`, `ship://features`, `ship://releases`, `ship://specs`, `ship://adrs`, `ship://notes`, `ship://skills`, `ship://workspaces`, `ship://sessions`, `ship://modes`, `ship://providers`, `ship://log`, `ship://events`.
 
-## 3) Source-Of-Truth Matrix
+## 3) Source-of-Truth Matrix
 
 | Domain | Canonical store today | Secondary/derived store | Notes |
 |---|---|---|---|
-| Project identity (`id`) | `.ship/ship.toml` | Used to derive DB path `~/.ship/state/<id>/ship.db` | Hard dependency before DB open |
-| Project config core (`name`, `description`, `statuses`, `git`, `namespaces`) | `.ship/ship.toml` | Loaded into runtime structs | Still file-first |
-| Project runtime agent settings (`providers`, `active_mode`, `hooks`) | Project SQLite (`agent_runtime_settings`) | `ship.toml` intentionally stripped on save | DB-first |
-| MCP server registry | `.ship/agents/mcp.toml` | Indexed in SQLite artifact registry | File-first with DB index |
+| Project identity (`id`) | `.ship/ship.toml` | Used to derive slug key `<name>-<id>` | Still required before DB open |
+| Project core metadata (`version`, `id`, `name`, `description`) | `.ship/ship.toml` | Runtime structs | File-first, identity-focused |
+| Project runtime settings (`providers`, `active_mode`, `hooks`, `statuses`, `ai`, `git`, `namespaces`) | Project SQLite (`agent_runtime_settings`) | Migrated out of `ship.toml` | DB-first |
+| MCP server registry | `.ship/agents/mcp.toml` | Indexed in SQLite artifact registry | File-first + DB index |
 | Modes | Project SQLite (`agent_mode`) | Resolved refs from file catalog | DB-first |
-| Skills (project) | `.ship/skills/<id>/SKILL.md` | Indexed for mode ref resolution | File-first |
-| Skills (global) | `~/.ship/skills/<id>/SKILL.md` | Project init seeds built-ins here | File-first |
-| Legacy/global project namespace | `~/.ship/projects/<project-name>-<project-id>/...` | Legacy path-slug fallback is still read for skill migration | Now stable across OS path differences |
-| Features | SQLite `feature*` tables | Markdown files under `.ship/project/features/...` | Dual-write / drift risk |
-| Releases | SQLite `release*` tables | Markdown files under `.ship/project/releases/...` | Dual-write / drift risk |
-| ADRs | SQLite `adr*` tables | Markdown files under `.ship/project/adrs/...` | Dual-write / drift risk |
-| Specs | SQLite `spec` table | `file_name/path` are virtual; markdown files typically absent | Model mismatch |
-| Notes (project/user) | SQLite `note` table (project DB or global DB) | Legacy markdown import path | DB-first |
+| Skills (project) | `.ship/skills/<id>/SKILL.md` | Indexed for mode resolution | Canonical project skill store |
+| Skills (global) | `~/.ship/skills/<id>/SKILL.md` | Seeded built-ins | Canonical user/global skill store |
+| Skill cache / legacy compatibility | `~/.ship/projects/<slug>/skills` | Read+promote into `.ship/skills` | Legacy migration path only (not canonical) |
+| Features | SQLite `feature*` tables | Markdown under `.ship/project/features/...` | Dual-write drift risk |
+| Releases | SQLite `release*` tables | Markdown under `.ship/project/releases/...` | Dual-write drift risk |
+| ADRs | SQLite `adr*` tables | Markdown under `.ship/project/adrs/...` | Dual-write drift risk |
+| Specs | SQLite `spec` table | Virtualized `file_name/path` in some APIs | Model mismatch remains |
+| Notes | SQLite `note` table | Legacy markdown import path | DB-first |
 | Vision | `.ship/project/vision.md` | None | File-only |
-| Events/log | SQLite `event_log` | NDJSON export (`ship event export`), generated snapshot index | DB-first |
+| Events/log | SQLite `event_log` | NDJSON export (`ship event export`) + snapshot index | DB-first |
 | Global tracked projects | `~/.ship/projects.json` | None | JSON file, not in global DB |
-| Global active/recent project | `~/.ship/app_state.json` | None | JSON file, not in global DB |
+| Global active/recent project | `~/.ship/app_state.json` | None | JSON file, not in global DB; paths are canonicalized+deduped on load |
 
-## 4) Git Boundary (What Is / Isn’t In Git)
+### Skill storage policy (canonical)
+
+- Project-scoped skills: `.ship/skills/<id>/SKILL.md`
+- User/global skills: `~/.ship/skills/<id>/SKILL.md`
+- Legacy cache path `~/.ship/projects/<slug>/skills` is migration-only and should not be treated as source of truth.
+- Online/catalog installs do not maintain a separate persistent cache-of-record; installed output is copied into one of the canonical directories above.
+
+## 4) Git Boundary (What Is / Isn’t in Git)
 
 ### Never in git (global/runtime)
 
 - `~/.ship/**` global state (`ship.db`, per-project DBs under `state/`, user notes DB rows, etc.)
-- Runtime process/session internals not under repo root.
+- Runtime process/session internals outside repo root
 
-### Project-local (`.ship/`) default behavior
+### Repository policy applied in this repo
 
-Generated `.ship/.gitignore` now ignores by default:
+This repo now tracks controlled `.ship/` state:
 
-- `workflow/specs`
-- `project/features`
-- `project/releases`
-- `project/adrs`
-- `project/notes`
-- `generated/`
-- `.tmp-global/`
-
-And leaves committed by default:
-
-- `agents`
-- `ship.toml`
-- `templates`
-- `vision` (`project/vision.md`)
-
-### Repo-level ignores
-
-Root `.gitignore` excludes generated client artifacts (`CLAUDE.md`, `.mcp.json`, provider dirs, etc.) and legacy `.ship/ship.db*` patterns.
+- Tracked: `.ship/ship.toml`, `.ship/.gitignore`, `.ship/agents/mcp.toml`, `.ship/agents/permissions.toml`, `.ship/agents/rules/*.md`
+- Removed from git: skills, vision/docs, feature/release/adr/spec markdown, legacy templates
 
 ## 5) Event Stream Reality
 
 - Canonical event stream is SQLite `event_log`.
-- `log_action*` writes event rows; human log output is derived from those rows.
-- `events.ndjson` is export-only (not a live sink).
-- External filesystem changes are ingested into the same `event_log` only when `ingest_external_events` runs.
-- Snapshot state for filesystem diffing is persisted at `.ship/generated/event_index.json`.
+- `log_action*` writes event rows; rendered logs are derived.
+- `events.ndjson` is export-only (not a live append sink).
+- External filesystem edits enter `event_log` only through ingest (`event ingest`).
+- Snapshot diff index persists at `.ship/generated/event_index.json`.
 
-## 6) Main Conflicts To Resolve
+## 6) Main Conflicts Still Open
 
-1. **Issue deprecation is not fully removed from persistence model**
-- `issue` table still exists in project schema.
-- `EventEntity::Issue` remains for compatibility parsing.
-- Migration still moves legacy `issues/` trees and `ISSUE.md` template.
-- Hidden legacy plugins (`ghost-issues`, `time-tracker`) still use issue terminology.
+1. **`ship.toml:id` remains a bootstrap dependency**
+- DB path resolution still needs TOML read before DB connection.
 
-2. **Spec storage model is inconsistent**
-- Specs are DB-native now, but namespace/layout still implies markdown-backed spec files.
-- Spec file names/paths are virtual in DB responses; files are usually absent.
+2. **Global state is still split (DB + JSON)**
+- `projects.json` and `app_state.json` remain outside global SQLite.
 
-3. **`ship.toml:id` is a hard runtime dependency**
-- DB path resolution requires TOML read before DB connection.
-- If this ID is considered non-authoritative, a new bootstrap keying mechanism is needed.
+3. **UI reactivity is still FS-watch-based**
+- Current model depends on file notifications and debounce behavior.
 
-4. **Global state is split across DB + JSON files**
-- `projects.json` and `app_state.json` live outside SQLite.
-- Global DB has `global_state` table but is not currently the single source for these records.
+4. **Issue deprecation is partial in surface area**
+- Issue-centric docs/examples/plugins still exist in parts of the repo, even after persistence cleanup.
 
-5. **Reactivity is file-watch based at UI boundary**
-- Tauri watcher reacts to file changes (`ship.toml`, sqlite file writes), not to a typed in-process event bus.
-- Performance and correctness depend on FS notifications and debounce timing.
-- Runtime perf counters expose `watcher_ingest_*`, but ingestion is not wired into that watcher loop.
+5. **Spec storage model still has dual semantics**
+- DB-native specs coexist with file-oriented assumptions in some APIs/docs.
 
-6. **Tracked repo `.ship/` contains legacy/placement drift**
-- Examples include misplaced files at status-root levels and duplicate vision naming conventions.
-- These create ambiguity for migration/import and contributor expectations.
-  - `.ship/project/adrs/sqlite-as-canonical-data-store---markdown-as-agent-export.md` (not under a status folder)
-  - `.ship/workflow/specs/ship-workspace-project-manager.md` (not under `draft/active/archived`)
-  - `.ship/project/VISION.md` and `.ship/project/vision.md` coexist
+## 7) Cleanup Executed (2026-03-10)
 
-7. **No automatic migration from legacy path-keyed project DBs into ID-keyed DBs**
-- Runtime now keys DBs by `ship.toml:id` (`~/.ship/state/<id>/ship.db`), but path-keyed DB directories from older builds remain on disk and are not auto-reconciled.
-- This causes state splits after upgrades or multi-OS usage if both keying schemes have active histories.
+### DB key and compatibility
 
-## 7) Recommended Target Model (Concrete)
+- Project DB key now resolves as slug `<project-name>-<project-id>`.
+- Runtime includes one-time promotion from legacy ID-only dir (`state/<id>/ship.db`) to slug dir (`state/<slug>/ship.db`) when needed.
 
-1. **Single canonical store for mutable runtime state: SQLite**
-- Keep markdown as export/import interoperability layer, not required canonical state.
+### On-disk archival + deletion
 
-2. **Unify global state into SQLite**
-- Move `projects.json` and `app_state.json` into global DB tables.
-- Keep file export/import only for backup/debug.
+Backups created at:
 
-3. **Replace `ship.toml:id` bootstrap dependency**
-- Add global registry table mapping canonical project path -> stable project_id.
-- Keep `ship.toml:id` as optional mirror during migration, then de-emphasize.
+- `~/.ship/state/backups/20260310-151838-legacy-cleanup/`
 
-4. **Replace FS-driven UI reactivity with event subscription from runtime writes**
-- Emit typed change events directly from mutation paths (`append_event`, config saves, workspace/session writes).
-- Keep file-watch fallback only for truly external edits.
+Archived then removed from active state:
 
-5. **Finish issue deprecation at schema/plugin layer**
-- Mark `issue` table as legacy-only and stop new writes.
-- Remove/rename hidden issue-centric plugins or migrate them to neutral work-item semantics.
+- `~/.ship/state/C-Users-Micah-Desktop-Dev-Ship`
+- `~/.ship/state/Users-micahcotton-dev-landing-page`
+- `~/.ship/state/Users-micahcotton-dev-<legacy-repo-slug>`
+- `~/.ship/projects/C-Users-Micah-Desktop-Dev-Ship`
+- `~/.ship/projects/Users-micahcotton-dev-<legacy-repo-slug>`
 
-6. **Clarify spec persistence policy explicitly**
-- Either write spec markdown exports consistently, or remove virtual-file assumptions from API/UI and docs.
+Current active canonical DB:
 
-7. **Add first-class DB reconciliation for legacy path-keyed state**
-- At project open, detect likely legacy DB candidates and offer/perform an explicit one-time merge into `state/<project-id>/ship.db`.
-- Record reconciliation completion in DB metadata to avoid repeat merges.
+- `~/.ship/state/ship-hrvmuz4p/ship.db`
 
-## 8) Immediate Cleanup Candidates (Low Risk)
+## 8) Cross-Platform Sync Policy (Immediate)
 
-- Remove stale issue references from docs/examples/help text that still imply issue CRUD exists.
-- Normalize tracked `.ship/` files to status-directory conventions.
-- Keep only one vision filename convention (`project/vision.md`).
-
-## 9) Live Reconciliation Performed (This Machine)
-
-### Pre-merge split detected
-
-- Canonical project ID in `.ship/ship.toml`: `hRvMUz4p`.
-- ID-keyed DB path: `~/.ship/state/hRvMUz4p/ship.db`.
-- Legacy path-keyed DB path: `~/.ship/state/Users-micahcotton-dev-shipwright/ship.db`.
-- Before reconciliation:
-  - `hRvMUz4p` had `event_log=5`, `workspace=1`, `spec=0`.
-  - `Users-micahcotton-dev-shipwright` had `event_log=594`, `workspace=16`, `spec=26`.
-
-### Actions executed
-
-1. Created backups under:
-   - `~/.ship/state/backups/20260310-142014/`
-   - Files: `shipwright-legacy-path.db`, `shipwright-id.db`, `windows-path.db`.
-2. Promoted legacy DB into ID-keyed location:
-   - Copied `Users-micahcotton-dev-shipwright/ship.db` -> `hRvMUz4p/ship.db`.
-3. Triggered schema upgrade to current runtime (`0018_runtime_primitives_v3`) by opening via CLI.
-4. Merged ID-only recent rows from backup ID DB into canonical DB for:
-   - `event_log`, `workspace`, `workspace_session`, `managed_mcp_state`,
-   - `agent_runtime_settings`, `agent_artifact_registry`, `adr`, `note`.
-
-### Post-merge canonical state (`~/.ship/state/hRvMUz4p/ship.db`)
-
-- `event_log=599`
-- `workspace=17`
-- `workspace_session=6`
-- `spec=26`
-- `feature=40`
-- `adr=9`
-- `managed_mcp_state=3`
-- `agent_runtime_settings.providers_json=["claude","gemini"]`
-
-Note: `seq` ordering now reflects insertion order, not strict timestamp order, after merging two event streams.
-
-### Remaining irregularity (not auto-merged)
-
-- `~/.ship/state/C-Users-Micah-Desktop-Dev-Ship/ship.db` still has rows not present in canonical:
-  - `event_log`: 59 unique rows
-  - `feature`: 2 rows (includes `Authentication System` and one blank-title row)
-  - `spec`: 1 row (`Ship Workspace: Project Manager Layer`)
-  - `workspace`: 1 row (`claude/wonderful-villani`)
-- This file was backed up as `windows-path.db` and intentionally left out of automatic canonical merge to avoid silently importing probable experiment/test state.
-
-## 10) Cross-Platform Sync Policy (Immediate)
-
-Use one project DB as canonical per project ID and avoid syncing machine-local global UI state.
-
-1. Sync (via Syncthing): `~/.ship/state/<project-id>/ship.db` and companion sqlite files (`-wal`, `-shm`) if present.
+1. Sync one canonical project DB per project slug:
+   - `~/.ship/state/<project-name>-<project-id>/ship.db` (+ `-wal`/`-shm` if present)
 2. Do not sync as shared truth:
    - `~/.ship/app_state.json`
    - `~/.ship/projects.json`
    - `~/.ship/*.sync-conflict-*`
-3. Keep project identity stable through git-tracked `.ship/ship.toml` (`id` must match on both OSes).
-4. Run up-to-date binaries on both machines so both resolve state via `state/<project-id>/ship.db` rather than path-keyed directories.
-5. Treat path-keyed DB directories under `~/.ship/state/` as legacy data to archive/remove after verification.
+   - Rationale: these are machine-local UX pointers; runtime now self-heals path canonicalization for local renames.
+3. Keep `.ship/ship.toml` project identity stable across machines.
+4. Treat path-keyed state dirs under `~/.ship/state/` as legacy and archive/remove after verification.
