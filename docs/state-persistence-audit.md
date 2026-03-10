@@ -2,6 +2,7 @@
 
 Date: 2026-03-10
 Scope: source of truth, persistence layout, git boundaries, interface capability parity, and deprecation fallout.
+Updated after integrating upstream commit `6200736` ("Use stable project slugs and harden MCP install flow").
 
 ## 1) Current State Snapshot
 
@@ -9,7 +10,8 @@ Scope: source of truth, persistence layout, git boundaries, interface capability
 - Project and global state remain split across SQLite, TOML, and JSON files.
 - Event/log truth is SQLite (`event_log`); NDJSON is export-only.
 - UI reactivity still relies on filesystem watching (ship config file + sqlite file writes).
-- In this Codex environment, Ship MCP was audited from repo/runtime code and local binaries; there is no direct MCP client bridge tool available to this agent session.
+- Project slugging for global `projects/` namespace paths now uses `<project-name>-<project-id>` instead of raw path slugs.
+- In this Codex environment, Ship MCP was audited from repo/runtime code and local binaries; there is no direct MCP client bridge tool available to this agent session (`list_mcp_resources` returns no configured servers).
 
 ## 2) Capability Surface By Interface
 
@@ -48,7 +50,7 @@ MCP is read-heavy via resources, not many read tools:
 | Modes | Project SQLite (`agent_mode`) | Resolved refs from file catalog | DB-first |
 | Skills (project) | `.ship/skills/<id>/SKILL.md` | Indexed for mode ref resolution | File-first |
 | Skills (global) | `~/.ship/skills/<id>/SKILL.md` | Project init seeds built-ins here | File-first |
-| Legacy skills location | `~/.ship/projects/<slug>/skills/` | Migrated on access | Legacy fallback |
+| Legacy/global project namespace | `~/.ship/projects/<project-name>-<project-id>/...` | Legacy path-slug fallback is still read for skill migration | Now stable across OS path differences |
 | Features | SQLite `feature*` tables | Markdown files under `.ship/project/features/...` | Dual-write / drift risk |
 | Releases | SQLite `release*` tables | Markdown files under `.ship/project/releases/...` | Dual-write / drift risk |
 | ADRs | SQLite `adr*` tables | Markdown files under `.ship/project/adrs/...` | Dual-write / drift risk |
@@ -129,6 +131,10 @@ Root `.gitignore` excludes generated client artifacts (`CLAUDE.md`, `.mcp.json`,
   - `.ship/workflow/specs/ship-workspace-project-manager.md` (not under `draft/active/archived`)
   - `.ship/project/VISION.md` and `.ship/project/vision.md` coexist
 
+7. **No automatic migration from legacy path-keyed project DBs into ID-keyed DBs**
+- Runtime now keys DBs by `ship.toml:id` (`~/.ship/state/<id>/ship.db`), but path-keyed DB directories from older builds remain on disk and are not auto-reconciled.
+- This causes state splits after upgrades or multi-OS usage if both keying schemes have active histories.
+
 ## 7) Recommended Target Model (Concrete)
 
 1. **Single canonical store for mutable runtime state: SQLite**
@@ -153,8 +159,61 @@ Root `.gitignore` excludes generated client artifacts (`CLAUDE.md`, `.mcp.json`,
 6. **Clarify spec persistence policy explicitly**
 - Either write spec markdown exports consistently, or remove virtual-file assumptions from API/UI and docs.
 
+7. **Add first-class DB reconciliation for legacy path-keyed state**
+- At project open, detect likely legacy DB candidates and offer/perform an explicit one-time merge into `state/<project-id>/ship.db`.
+- Record reconciliation completion in DB metadata to avoid repeat merges.
+
 ## 8) Immediate Cleanup Candidates (Low Risk)
 
 - Remove stale issue references from docs/examples/help text that still imply issue CRUD exists.
 - Normalize tracked `.ship/` files to status-directory conventions.
 - Keep only one vision filename convention (`project/vision.md`).
+
+## 9) Live Reconciliation Performed (This Machine)
+
+### Pre-merge split detected
+
+- Canonical project ID in `.ship/ship.toml`: `hRvMUz4p`.
+- ID-keyed DB path: `~/.ship/state/hRvMUz4p/ship.db`.
+- Legacy path-keyed DB path: `~/.ship/state/Users-micahcotton-dev-shipwright/ship.db`.
+- Before reconciliation:
+  - `hRvMUz4p` had `event_log=5`, `workspace=1`, `spec=0`.
+  - `Users-micahcotton-dev-shipwright` had `event_log=594`, `workspace=16`, `spec=26`.
+
+### Actions executed
+
+1. Created backups under:
+   - `~/.ship/state/backups/20260310-142014/`
+   - Files: `shipwright-legacy-path.db`, `shipwright-id.db`, `windows-path.db`.
+2. Promoted legacy DB into ID-keyed location:
+   - Copied `Users-micahcotton-dev-shipwright/ship.db` -> `hRvMUz4p/ship.db`.
+3. Triggered schema upgrade to current runtime (`0018_runtime_primitives_v3`) by opening via CLI.
+4. Merged ID-only recent rows from backup ID DB into canonical DB for:
+   - `event_log`, `workspace`, `workspace_session`, `managed_mcp_state`,
+   - `agent_runtime_settings`, `agent_artifact_registry`, `adr`, `note`.
+
+### Post-merge canonical state (`~/.ship/state/hRvMUz4p/ship.db`)
+
+- `event_log=599`
+- `workspace=17`
+- `workspace_session=6`
+- `spec=26`
+- `feature=40`
+- `adr=9`
+- `managed_mcp_state=3`
+- `agent_runtime_settings.providers_json=["claude","gemini"]`
+
+Note: `seq` ordering now reflects insertion order, not strict timestamp order, after merging two event streams.
+
+## 10) Cross-Platform Sync Policy (Immediate)
+
+Use one project DB as canonical per project ID and avoid syncing machine-local global UI state.
+
+1. Sync (via Syncthing): `~/.ship/state/<project-id>/ship.db` and companion sqlite files (`-wal`, `-shm`) if present.
+2. Do not sync as shared truth:
+   - `~/.ship/app_state.json`
+   - `~/.ship/projects.json`
+   - `~/.ship/*.sync-conflict-*`
+3. Keep project identity stable through git-tracked `.ship/ship.toml` (`id` must match on both OSes).
+4. Run up-to-date binaries on both machines so both resolve state via `state/<project-id>/ship.db` rather than path-keyed directories.
+5. Treat path-keyed DB directories under `~/.ship/state/` as legacy data to archive/remove after verification.
