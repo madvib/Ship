@@ -101,7 +101,9 @@ fn gitignore_uses_namespace_paths() {
     // ship.db lives at ~/.ship/state/<slug>/ship.db — outside the project, not gitignored here
 
     // Committed by default — must NOT appear in gitignore
-    assert!(!gitignore.contains("agents"));
+    assert!(!gitignore.contains("agents/rules"));
+    assert!(!gitignore.contains("agents/mcp.toml"));
+    assert!(!gitignore.contains("agents/permissions.toml"));
     assert!(!gitignore.contains("ship.toml"));
 
     // Optional (local by default) — must appear in gitignore
@@ -110,6 +112,8 @@ fn gitignore_uses_namespace_paths() {
     assert!(gitignore.contains("project/features"));
     assert!(gitignore.contains("project/releases"));
     assert!(gitignore.contains("workflow/specs"));
+    assert!(gitignore.contains("project/vision.md"));
+    assert!(gitignore.contains("skills"));
 }
 
 /// Events track creates in both workflow/ and project/ namespaces.

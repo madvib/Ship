@@ -39,5 +39,5 @@ bash example/stories/solo-dev/story.sh --skip-build
 - **Narrative**: output is structured like a story with scene headings and
   commentary explaining *why* each step matters
 - **Runnable**: every command is real — no mocking, no stubs
-- **Inspectable**: the temp workspace is preserved after the run so you can
-  poke around with `ship` commands
+- **Inspectable**: set `KEEP_TMP=1` to preserve the temp workspace after the run
+  so you can poke around with `ship` commands

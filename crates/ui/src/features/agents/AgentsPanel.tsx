@@ -334,7 +334,7 @@ function McpServerForm({
           <Input
             value={draft.name}
             onChange={(e) => setField('name', e.target.value)}
-            placeholder="e.g. shipwright"
+            placeholder="e.g. ship"
             className="h-8 text-xs"
             autoFocus={isNew}
           />

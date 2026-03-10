@@ -28,7 +28,7 @@ pub fn project_ns(ship_dir: &Path) -> PathBuf {
     ship_dir.join("project")
 }
 
-/// `.ship/workflow/` — features, specs, issues
+/// `.ship/workflow/` — specs and workflow documents
 pub fn workflow_ns(ship_dir: &Path) -> PathBuf {
     ship_dir.join("workflow")
 }
@@ -66,10 +66,6 @@ pub fn specs_dir(ship_dir: &Path) -> PathBuf {
 
 pub fn features_dir(ship_dir: &Path) -> PathBuf {
     project_ns(ship_dir).join("features")
-}
-
-pub fn issues_dir(ship_dir: &Path) -> PathBuf {
-    workflow_ns(ship_dir).join("issues")
 }
 
 pub fn modes_dir(ship_dir: &Path) -> PathBuf {
@@ -774,7 +770,12 @@ pub fn load_app_state() -> Result<AppState> {
         return Ok(AppState::default());
     }
     let content = fs::read_to_string(path)?;
-    serde_json::from_str(&content).context("Failed to parse app state")
+    let mut state: AppState =
+        serde_json::from_str(&content).context("Failed to parse app state")?;
+    if normalize_app_state_paths(&mut state) {
+        let _ = save_app_state(&state);
+    }
+    Ok(state)
 }
 
 pub fn save_app_state(state: &AppState) -> Result<()> {
@@ -808,6 +809,38 @@ pub fn get_active_project_global() -> Result<Option<PathBuf>> {
 pub fn get_recent_projects_global() -> Result<Vec<PathBuf>> {
     let state = load_app_state()?;
     Ok(state.recent_projects)
+}
+
+fn normalize_app_state_paths(state: &mut AppState) -> bool {
+    let mut changed = false;
+
+    if let Some(active) = state.active_project.clone() {
+        let normalized = normalize_registry_project_path(&active);
+        if normalized != active {
+            state.active_project = Some(normalized);
+            changed = true;
+        }
+    }
+
+    let mut normalized_recent = Vec::with_capacity(state.recent_projects.len());
+    for path in &state.recent_projects {
+        let normalized = normalize_registry_project_path(path);
+        if normalized != *path {
+            changed = true;
+        }
+        if !normalized_recent.contains(&normalized) {
+            normalized_recent.push(normalized);
+        } else {
+            changed = true;
+        }
+    }
+
+    if normalized_recent != state.recent_projects {
+        state.recent_projects = normalized_recent;
+        changed = true;
+    }
+
+    changed
 }
 
 fn normalize_registry_project_path(path: &Path) -> PathBuf {
@@ -991,7 +1024,7 @@ mod tests {
             "/repo/target/tmp/ship-e2e"
         )));
         assert!(is_transient_project_root(Path::new(
-            "C:\\Users\\me\\AppData\\Local\\Temp\\ship-e2e"
+            "C:/Users/me/AppData/Local/Temp/ship-e2e"
         )));
         assert!(is_transient_project_root(Path::new(
             "/work/example/projects-e2e/sandbox"
@@ -1021,6 +1054,41 @@ mod tests {
             .and_then(|value| value.as_str())
             .unwrap_or_default();
         assert_eq!(persisted_id, id);
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_app_state_paths_canonicalizes_and_dedupes_entries() -> Result<()> {
+        let tmp = tempdir()?;
+        let root = tmp.path().join("workspace");
+        let ship = root.join(SHIP_DIR_NAME);
+        fs::create_dir_all(&ship)?;
+
+        let mut state = AppState {
+            active_project: Some(root.clone()),
+            recent_projects: vec![root.clone(), ship.clone()],
+        };
+
+        assert!(normalize_app_state_paths(&mut state));
+        let canonical_ship = canonicalize_lossy(&ship);
+        assert_eq!(state.active_project, Some(canonical_ship.clone()));
+        assert_eq!(state.recent_projects, vec![canonical_ship]);
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_app_state_paths_reports_no_change_for_canonical_state() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship = tmp.path().join("workspace").join(SHIP_DIR_NAME);
+        fs::create_dir_all(&ship)?;
+        let canonical_ship = canonicalize_lossy(&ship);
+
+        let mut state = AppState {
+            active_project: Some(canonical_ship.clone()),
+            recent_projects: vec![canonical_ship],
+        };
+
+        assert!(!normalize_app_state_paths(&mut state));
         Ok(())
     }
 }
@@ -1116,17 +1184,17 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
 name: task-policy
 description: Ship workflow policy and execution guardrails for daily delivery.
 metadata:
-  display_name: Shipwright Workflow Policy
+  display_name: Ship Workflow Policy
   source: builtin
 ---
 
-# Shipwright Workflow Policy
+# Ship Workflow Policy
 
 Use Ship as the system of record for workflow state changes.
 
 ## Canonical Flow
 
-Vision -> Release -> Feature -> Spec -> Issues -> Close Feature -> Ship Release
+Vision -> Release -> Feature -> Spec -> Close Feature -> Ship Release
 "#,
     )?;
 

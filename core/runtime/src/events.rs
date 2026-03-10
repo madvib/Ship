@@ -11,7 +11,6 @@ use walkdir::WalkDir;
 pub const EVENTS_FILE_NAME: &str = "events.ndjson";
 const EVENT_INDEX_FILE: &str = "generated/event_index.json";
 const TRACKED_DIRS: &[&str] = &[
-    "workflow/issues",
     "workflow/specs",
     "project/features",
     "project/releases",
@@ -26,7 +25,6 @@ pub enum EventEntity {
     Project,
     Workspace,
     Session,
-    Issue,
     Note,
     Spec,
     Adr,
@@ -48,7 +46,6 @@ impl EventEntity {
             EventEntity::Project => "project",
             EventEntity::Workspace => "workspace",
             EventEntity::Session => "session",
-            EventEntity::Issue => "issue",
             EventEntity::Note => "note",
             EventEntity::Spec => "spec",
             EventEntity::Adr => "adr",
@@ -70,7 +67,6 @@ impl EventEntity {
             "project" => Ok(EventEntity::Project),
             "workspace" => Ok(EventEntity::Workspace),
             "session" => Ok(EventEntity::Session),
-            "issue" => Ok(EventEntity::Issue),
             "note" => Ok(EventEntity::Note),
             "spec" => Ok(EventEntity::Spec),
             "adr" => Ok(EventEntity::Adr),
@@ -470,16 +466,6 @@ pub fn sync_event_snapshot(project_dir: &Path) -> Result<usize> {
 }
 
 fn classify_path(rel_path: &str) -> Option<(EventEntity, String, Option<String>)> {
-    if let Some(rest) = rel_path.strip_prefix("workflow/issues/") {
-        let mut parts = rest.splitn(2, '/');
-        let status = parts.next().unwrap_or("").to_string();
-        let file_name = parts.next().unwrap_or("").to_string();
-        return Some((
-            EventEntity::Issue,
-            file_name.clone(),
-            Some(format!("status={} path={}", status, rel_path)),
-        ));
-    }
     if let Some(file) = rel_path.strip_prefix("workflow/specs/") {
         return Some((
             EventEntity::Spec,

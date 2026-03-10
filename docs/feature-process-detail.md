@@ -620,7 +620,7 @@ in the global registry.
     prompts/             — prompt files
     rules/               — always-active rule files
     mcp.toml             — MCP server registry
-    permissions.toml     — Shipwright permissions
+    permissions.toml     — Ship permissions
 ```
 
 <!-- this is just false...databases are at ~/.ship/state/$project/db and ~/.ship/ship.db scrub references to wrong files -->
@@ -672,7 +672,7 @@ Git-committed by default (part of `agents/` category).
 
 I want to expand this to be compatible with sandboxes if provider allows and we are also going to start hooking into providers so we can do things like add our own pre-post tool call logic and improve the experience with too many approval requests (without going to yolo mode like everyone else)
 -->
-**What it does:** Reads and writes the Shipwright permission model for the project. Controls
+**What it does:** Reads and writes the Ship permission model for the project. Controls
 what the agent is allowed to do — tool access, filesystem paths, shell commands, network.
 
 **Structure:**
@@ -868,7 +868,7 @@ providers = ["claude"]
 active_mode = "focus"   # optional
 ```
 
-**Config file lookup:** Ship checks for `ship.toml`, then `shipwright.toml`
+**Config file lookup:** Ship checks for `ship.toml`, then legacy `config.toml`
 (alias), then `config.toml` (legacy). First found wins.
 
 **`get_effective_config(project_dir, mode_id)`** — returns config with mode-level tool

@@ -18,6 +18,7 @@ RUN_ID="$(date +%Y%m%d%H%M%S)"
 WORK_DIR="$STORIES_TMP/solo-dev-$RUN_ID"
 HOME_DIR="$WORK_DIR/.home"
 ORIG_HOME="${HOME:-}"
+KEEP_TMP="${KEEP_TMP:-0}"
 SHIP_BIN="${SHIP_BIN_OVERRIDE:-$ROOT_DIR/target/debug/ship}"
 # Fall back to system ship if the debug binary is missing or stale
 if ! "$SHIP_BIN" --version &>/dev/null 2>&1; then
@@ -48,6 +49,20 @@ run_ship() {
   echo -e "${YELLOW}  \$${RESET} ship $*"
   (cd "$WORK_DIR" && "$SHIP_BIN" "$@")
 }
+
+cleanup() {
+  local exit_code=$?
+  if [[ -n "${ORIG_HOME:-}" ]]; then
+    export HOME="$ORIG_HOME"
+  fi
+  if [[ "$KEEP_TMP" != "1" ]]; then
+    rm -rf "$WORK_DIR"
+  fi
+  return "$exit_code"
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -288,11 +303,15 @@ echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━�
 echo -e "${GREEN}${BOLD}  Story complete.${RESET}"
 echo -e "${GREEN}${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
 echo ""
-echo -e "  Workspace preserved at:"
-echo -e "  ${BOLD}$WORK_DIR${RESET}"
-echo ""
-echo -e "  To explore:"
-echo -e "  ${DIM}cd $WORK_DIR && ship release list${RESET}"
-echo -e "  ${DIM}cd $WORK_DIR && ship feature list${RESET}"
-echo -e "  ${DIM}cd $WORK_DIR && ship event list --since 0 --limit 50${RESET}"
+if [[ "$KEEP_TMP" == "1" ]]; then
+  echo -e "  Workspace preserved at:"
+  echo -e "  ${BOLD}$WORK_DIR${RESET}"
+  echo ""
+  echo -e "  To explore:"
+  echo -e "  ${DIM}cd $WORK_DIR && ship release list${RESET}"
+  echo -e "  ${DIM}cd $WORK_DIR && ship feature list${RESET}"
+  echo -e "  ${DIM}cd $WORK_DIR && ship event list --since 0 --limit 50${RESET}"
+else
+  echo -e "  ${DIM}Workspace cleaned up. Set KEEP_TMP=1 to keep artifacts.${RESET}"
+fi
 echo ""

@@ -1221,12 +1221,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 GitCommands::Status => {
                     let git = get_git_config(&project_dir)?;
                     let cats = [
-                        "issues",
                         "releases",
                         "features",
                         "adrs",
                         "specs",
                         "notes",
+                        "vision",
                         "agents",
                         "ship.toml",
                         "templates",
@@ -1349,7 +1349,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 ConfigCommands::Status { action } => match action {
                     StatusCommands::List => {
                         let statuses = get_project_statuses(project_dir)?;
-                        println!("Issue statuses:");
+                        println!("Workflow statuses:");
                         for s in statuses {
                             println!("  - {}", s);
                         }
@@ -2558,15 +2558,15 @@ fn launch_ui_dev_command(watch: bool, release: bool) -> Result<()> {
     Ok(())
 }
 
-fn launch_ui_executable(_repo_root: Option<&Path>) -> Result<()> {
+fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         if let Some(root) = repo_root {
-            let candidates = [
-                root.join("target/release/bundle/macos/Shipwright.app"),
-                root.join("target/debug/bundle/macos/Shipwright.app"),
-                root.join("crates/ui/src-tauri/target/release/bundle/macos/Shipwright.app"),
-                root.join("crates/ui/src-tauri/target/debug/bundle/macos/Shipwright.app"),
+            let candidates: [PathBuf; 4] = [
+                root.join("target/release/bundle/macos/Ship.app"),
+                root.join("target/debug/bundle/macos/Ship.app"),
+                root.join("crates/ui/src-tauri/target/release/bundle/macos/Ship.app"),
+                root.join("crates/ui/src-tauri/target/debug/bundle/macos/Ship.app"),
             ];
             for bundled_app in candidates {
                 if bundled_app.exists() {
@@ -2578,9 +2578,7 @@ fn launch_ui_executable(_repo_root: Option<&Path>) -> Result<()> {
             }
         }
 
-        let status = ProcessCommand::new("open")
-            .args(["-a", "Shipwright"])
-            .status()?;
+        let status = ProcessCommand::new("open").args(["-a", "Ship"]).status()?;
         if status.success() {
             return Ok(());
         }
@@ -2588,7 +2586,7 @@ fn launch_ui_executable(_repo_root: Option<&Path>) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        let status = ProcessCommand::new("shipwright").status();
+        let status = ProcessCommand::new("ship").status();
         if let Ok(status) = status {
             if status.success() {
                 return Ok(());
@@ -2599,7 +2597,7 @@ fn launch_ui_executable(_repo_root: Option<&Path>) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         let status = ProcessCommand::new("cmd")
-            .args(["/C", "start", "", "Shipwright.exe"])
+            .args(["/C", "start", "", "Ship.exe"])
             .status();
         if let Ok(status) = status {
             if status.success() {
@@ -2609,7 +2607,7 @@ fn launch_ui_executable(_repo_root: Option<&Path>) -> Result<()> {
     }
 
     anyhow::bail!(
-        "Could not launch Shipwright executable. Build/install the desktop app, or run `ship ui --dev` from the Ship repository."
+        "Could not launch Ship executable. Build/install the desktop app, or run `ship ui --dev` from the Ship repository."
     )
 }
 

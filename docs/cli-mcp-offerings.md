@@ -14,7 +14,7 @@
 - Binary name: `ship-mcp`
 - Purpose: standalone MCP stdio server for agent/tool integrations.
 
-### 3) Shipwright Desktop App (Tauri)
+### 3) Ship Desktop App (Tauri)
 
 - Crate: `crates/ui/src-tauri`
 - Binary name in this crate: `ship`

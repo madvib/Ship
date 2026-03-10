@@ -173,6 +173,10 @@ CREATE TABLE IF NOT EXISTS agent_runtime_settings (
   active_mode    TEXT,
   providers_json TEXT NOT NULL DEFAULT '[]',
   hooks_json     TEXT NOT NULL DEFAULT '[]',
+  statuses_json  TEXT NOT NULL DEFAULT '[]',
+  ai_json        TEXT,
+  git_json       TEXT NOT NULL DEFAULT '{}',
+  namespaces_json TEXT NOT NULL DEFAULT '[]',
   updated_at     TEXT NOT NULL
 );
 "#;
@@ -324,24 +328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS feature_doc_revision_feature_idx
   ON feature_doc_revision(feature_id, revision);
 "#;
 
-const PROJECT_SCHEMA_ISSUES_SPECS: &str = r#"
-CREATE TABLE IF NOT EXISTS issue (
-  id              TEXT PRIMARY KEY,
-  title           TEXT NOT NULL,
-  description     TEXT NOT NULL DEFAULT '',
-  status          TEXT NOT NULL DEFAULT 'backlog',
-  assignee        TEXT,
-  priority        TEXT,
-  release_id      TEXT,
-  feature_id      TEXT,
-  spec_id         TEXT,
-  tags_json       TEXT NOT NULL DEFAULT '[]',
-  links_json      TEXT NOT NULL DEFAULT '[]',
-  created_at      TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS issue_status_idx ON issue(status);
-
+const PROJECT_SCHEMA_SPECS: &str = r#"
 CREATE TABLE IF NOT EXISTS spec (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
@@ -391,7 +378,7 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0005_notes", PROJECT_SCHEMA_NOTES),
     ("0006_features_releases", PROJECT_SCHEMA_FEATURES_RELEASES),
     ("0007_workspace_lifecycle", PROJECT_SCHEMA_WORKSPACE_V2),
-    ("0008_issues_specs", PROJECT_SCHEMA_ISSUES_SPECS),
+    ("0008_specs", PROJECT_SCHEMA_SPECS),
     ("0009_migration_meta", SCHEMA_MIGRATION_META),
     ("0010_event_log", PROJECT_SCHEMA_EVENTS),
     (
@@ -550,6 +537,10 @@ pub struct AgentRuntimeSettingsDb {
     pub providers: Vec<String>,
     pub active_mode: Option<String>,
     pub hooks_json: String,
+    pub statuses_json: String,
+    pub ai_json: Option<String>,
+    pub git_json: String,
+    pub namespaces_json: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -577,28 +568,79 @@ pub struct AgentModeDb {
     pub target_agents_json: String,
 }
 
-/// Returns `~/.ship/state/<project-id>/ship.db` for the given ship_dir.
+/// Returns `~/.ship/state/<project-slug>/ship.db` for the given ship_dir.
 ///
-/// The key is the `id` field from `ship.toml` — a stable nanoid generated at `ship init`.
-/// This means the DB location is independent of the project's path on disk, so worktrees,
-/// renames, and multi-machine setups all resolve to the same DB as long as `ship.toml` is present.
+/// The state key is a human-readable, stable slug (`<project-name>-<project-id>`), so
+/// operators can identify project DBs at a glance while still staying path-independent.
 ///
-/// If `ship.toml` exists but lacks an `id`, Ship auto-generates and persists one
-/// so legacy projects heal themselves without requiring a manual `ship init`.
+/// For compatibility, if an older ID-only directory exists (`state/<id>/ship.db`) and the
+/// slug directory does not, Ship promotes the old directory to the slug directory once.
 pub fn project_db_path(ship_dir: &Path) -> Result<PathBuf> {
     let global_dir = ship_global_dir()?;
     ensure_global_dir_outside_project(ship_dir, &global_dir)?;
 
     let key = project_db_key(ship_dir)?;
+    promote_legacy_project_state_dir(ship_dir, &global_dir, &key)?;
     Ok(global_dir.join("state").join(key).join("ship.db"))
 }
 
 /// Stable key used for the project's state directory.
-/// Reads only the `id` field from `ship.toml` and auto-persists one when missing.
+/// Uses a stable, human-readable slug derived from `ship.toml`.
 ///
 /// This avoids calling `get_config` here to prevent dependency loops.
 fn project_db_key(ship_dir: &Path) -> Result<String> {
+    Ok(crate::project::project_slug_from_ship_dir(ship_dir))
+}
+
+fn legacy_project_db_key(ship_dir: &Path) -> Result<String> {
     crate::project::ensure_project_id(ship_dir)
+}
+
+fn promote_legacy_project_state_dir(
+    ship_dir: &Path,
+    global_dir: &Path,
+    project_key: &str,
+) -> Result<()> {
+    let legacy_key = legacy_project_db_key(ship_dir)?;
+    if legacy_key == project_key {
+        return Ok(());
+    }
+
+    let state_root = global_dir.join("state");
+    let project_dir = state_root.join(project_key);
+    let project_db = project_dir.join("ship.db");
+    if project_db.exists() {
+        return Ok(());
+    }
+
+    let legacy_dir = state_root.join(&legacy_key);
+    let legacy_db = legacy_dir.join("ship.db");
+    if !legacy_db.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = project_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if std::fs::rename(&legacy_dir, &project_dir).is_ok() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&project_dir)?;
+    for suffix in ["", "-wal", "-shm"] {
+        let src = legacy_dir.join(format!("ship.db{}", suffix));
+        if !src.exists() {
+            continue;
+        }
+        let dst = project_dir.join(format!("ship.db{}", suffix));
+        let _ = std::fs::rename(&src, &dst).or_else(|_| {
+            std::fs::copy(&src, &dst)?;
+            std::fs::remove_file(&src)
+        });
+    }
+    let _ = std::fs::remove_dir(&legacy_dir);
+    Ok(())
 }
 pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationReport> {
     let db_path = project_db_path(ship_dir)?;
@@ -772,7 +814,7 @@ pub fn get_agent_runtime_settings_db(ship_dir: &Path) -> Result<Option<AgentRunt
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
         sqlx::query(
-            "SELECT providers_json, active_mode, hooks_json
+            "SELECT providers_json, active_mode, hooks_json, statuses_json, ai_json, git_json, namespaces_json
              FROM agent_runtime_settings
              WHERE id = 1",
         )
@@ -788,12 +830,20 @@ pub fn get_agent_runtime_settings_db(ship_dir: &Path) -> Result<Option<AgentRunt
     let providers_json: String = row.get(0);
     let active_mode: Option<String> = row.get(1);
     let hooks_json: String = row.get(2);
+    let statuses_json: String = row.get(3);
+    let ai_json: Option<String> = row.get(4);
+    let git_json: String = row.get(5);
+    let namespaces_json: String = row.get(6);
     let providers: Vec<String> = serde_json::from_str(&providers_json).unwrap_or_default();
 
     Ok(Some(AgentRuntimeSettingsDb {
         providers,
         active_mode,
         hooks_json,
+        statuses_json,
+        ai_json,
+        git_json,
+        namespaces_json,
     }))
 }
 
@@ -802,6 +852,10 @@ pub fn set_agent_runtime_settings_db(
     providers: &[String],
     active_mode: Option<&str>,
     hooks_json: &str,
+    statuses_json: &str,
+    ai_json: Option<&str>,
+    git_json: &str,
+    namespaces_json: &str,
 ) -> Result<()> {
     let mut conn = open_project_db(ship_dir)?;
     let providers_json = serde_json::to_string(providers)
@@ -809,17 +863,26 @@ pub fn set_agent_runtime_settings_db(
     let now = Utc::now().to_rfc3339();
     block_on(async {
         sqlx::query(
-            "INSERT INTO agent_runtime_settings (id, providers_json, active_mode, hooks_json, updated_at)
-             VALUES (1, ?, ?, ?, ?)
+            "INSERT INTO agent_runtime_settings
+             (id, providers_json, active_mode, hooks_json, statuses_json, ai_json, git_json, namespaces_json, updated_at)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                providers_json = excluded.providers_json,
                active_mode = excluded.active_mode,
                hooks_json = excluded.hooks_json,
+               statuses_json = excluded.statuses_json,
+               ai_json = excluded.ai_json,
+               git_json = excluded.git_json,
+               namespaces_json = excluded.namespaces_json,
                updated_at = excluded.updated_at",
         )
         .bind(&providers_json)
         .bind(active_mode)
         .bind(hooks_json)
+        .bind(statuses_json)
+        .bind(ai_json)
+        .bind(git_json)
+        .bind(namespaces_json)
         .bind(&now)
         .execute(&mut conn)
         .await
@@ -1781,9 +1844,27 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
     )?;
     ensure_column(
         connection,
-        "issue",
-        "description",
-        "ALTER TABLE issue ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+        "agent_runtime_settings",
+        "statuses_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN statuses_json TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "ai_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN ai_json TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "git_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN git_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "namespaces_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN namespaces_json TEXT NOT NULL DEFAULT '[]'",
     )?;
     ensure_column(
         connection,
@@ -2182,7 +2263,8 @@ mod tests {
             .unwrap_or_default()
             .to_string();
 
-        assert_eq!(persisted_id, key);
+        assert!(key.contains("legacy-project-"));
+        assert!(key.ends_with(&persisted_id.to_ascii_lowercase()));
         Ok(())
     }
 
@@ -2489,33 +2571,13 @@ mod tests {
     }
 
     #[test]
-    fn compat_adds_issue_description_and_spec_workspace_columns() -> Result<()> {
+    fn compat_adds_spec_body_and_workspace_columns() -> Result<()> {
         let tmp = tempdir()?;
-        let db_path = tmp.path().join("issue-spec-compat.db");
+        let db_path = tmp.path().join("spec-compat.db");
         let db_url = sqlite_url(&db_path);
         let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
         let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
 
-        block_on(async {
-            sqlx::query(
-                "CREATE TABLE issue (
-                   id TEXT PRIMARY KEY,
-                   title TEXT NOT NULL,
-                   status TEXT NOT NULL DEFAULT 'backlog',
-                   assignee TEXT,
-                   priority TEXT,
-                   release_id TEXT,
-                   feature_id TEXT,
-                   spec_id TEXT,
-                   tags_json TEXT NOT NULL DEFAULT '[]',
-                   links_json TEXT NOT NULL DEFAULT '[]',
-                   created_at TEXT NOT NULL,
-                   updated_at TEXT NOT NULL
-                 )",
-            )
-            .execute(&mut conn)
-            .await
-        })?;
         block_on(async {
             sqlx::query(
                 "CREATE TABLE spec (
@@ -2537,7 +2599,6 @@ mod tests {
 
         ensure_project_schema_compat(&mut conn)?;
 
-        assert!(column_exists(&mut conn, "issue", "description")?);
         assert!(column_exists(&mut conn, "spec", "body")?);
         assert!(column_exists(&mut conn, "spec", "workspace_id")?);
         Ok(())

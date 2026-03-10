@@ -46,7 +46,7 @@ Then open this folder in the UI as the active project.
 
 See `feature-matrix.md` for the requirement-to-implementation matrix used during alpha validation.
 
-By default this workflow treats release/feature/spec/ADR artifacts as committed project memory, while issue execution data remains local unless explicitly included.
+By default this workflow keeps project/workflow docs local, while `ship.toml`, MCP config, permissions, and rules remain tracked.
 
 ## E2E Checks
 
@@ -55,6 +55,8 @@ Run the end-to-end check suite from repo root:
 ```bash
 ./example/projects-e2e/e2e/project-features.sh
 ```
+
+Set `KEEP_TMP=1` to preserve the generated workspace for post-run inspection.
 
 This suite validates:
 - CLI release/feature/spec/issue workflows

@@ -1800,7 +1800,8 @@ mod tests {
     }
 
     #[test]
-    fn activating_workspace_demotes_other_active_workspace() -> Result<()> {
+    fn activating_workspace_keeps_other_workspace_status_when_both_are_feature_workspaces()
+    -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
 
@@ -1825,12 +1826,13 @@ mod tests {
             },
         )?;
         assert_eq!(second.status, WorkspaceStatus::Active);
+        let _ = activate_workspace(&ship_dir, "feature/beta")?;
 
         let first_after = get_workspace(&ship_dir, "feature/alpha")?
             .ok_or_else(|| anyhow::anyhow!("feature/alpha workspace missing"))?;
         let second_after = get_workspace(&ship_dir, "feature/beta")?
             .ok_or_else(|| anyhow::anyhow!("feature/beta workspace missing"))?;
-        assert_eq!(first_after.status, WorkspaceStatus::Archived);
+        assert_eq!(first_after.status, WorkspaceStatus::Active);
         assert_eq!(second_after.status, WorkspaceStatus::Active);
         assert!(second_after.last_activated_at.is_some());
         Ok(())

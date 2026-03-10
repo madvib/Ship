@@ -113,12 +113,10 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_status_blocked_by_issues() -> anyhow::Result<()> {
+    fn test_remove_status_without_issue_guard() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         add_status(Some(project_dir.clone()), "review")?;
-        // Removed create_issue call as it's no longer in runtime.
-        // In the future, we could add a similar test using the project module.
         let result = remove_status(Some(project_dir), "review");
         assert!(result.is_ok());
         Ok(())
@@ -128,11 +126,30 @@ mod tests {
     fn test_git_config_roundtrip() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        set_category_committed(&project_dir, "issues", true)?;
+        set_category_committed(&project_dir, "features", true)?;
         set_category_committed(&project_dir, "notes", false)?;
         let git = get_git_config(&project_dir)?;
-        assert!(is_category_committed(&git, "issues"));
+        assert!(is_category_committed(&git, "features"));
         assert!(!is_category_committed(&git, "notes"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_agents_category_maps_to_rules_mcp_permissions() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        set_category_committed(&project_dir, "agents", false)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(gitignore.contains("agents/rules"));
+        assert!(gitignore.contains("agents/mcp.toml"));
+        assert!(gitignore.contains("agents/permissions.toml"));
+
+        set_category_committed(&project_dir, "agents", true)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
         Ok(())
     }
 
@@ -166,7 +183,6 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
         // Default config keeps project docs local unless explicitly included.
-        assert!(gitignore.contains("workflow/issues"));
         assert!(gitignore.contains("generated/"));
         assert!(gitignore.contains(".tmp-global/"));
         assert!(gitignore.contains("project/releases"));
@@ -174,10 +190,15 @@ mod tests {
         assert!(gitignore.contains("workflow/specs"));
         assert!(gitignore.contains("project/adrs"));
         assert!(gitignore.contains("project/notes"));
+        assert!(gitignore.contains("project/vision.md"));
+        assert!(gitignore.contains("skills"));
+        assert!(gitignore.contains("agents/README.md"));
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
         // DB is now at ~/.ship/state/<slug>/ship.db — not inside .ship/
         assert!(!gitignore.contains("ship.db"));
         assert!(!gitignore.contains("log.md"));
-        assert!(!gitignore.contains("agents"));
         Ok(())
     }
 
@@ -261,7 +282,7 @@ mod tests {
         assert!(project_skills_dir.join("task-policy/SKILL.md").is_file());
         let skill_content = fs::read_to_string(project_skills_dir.join("task-policy/SKILL.md"))?;
         assert!(skill_content.contains("task-policy"));
-        assert!(skill_content.contains("Shipwright Workflow Policy"));
+        assert!(skill_content.contains("Ship Workflow Policy"));
         Ok(())
     }
 
