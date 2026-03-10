@@ -647,6 +647,7 @@ mod tests {
         let home = tempdir().unwrap();
         let _home_guard = lock_home_for_test(home.path());
         let _managed_guard = lock_env_var_for_test("SHIP_MANAGED_HOOKS", Some("1"));
+        let _hooks_bin_guard = lock_env_var_for_test("SHIP_HOOKS_BIN", Some("ship hooks run"));
 
         let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
         config.hooks = vec![
@@ -697,6 +698,7 @@ mod tests {
         let home = tempdir().unwrap();
         let _home_guard = lock_home_for_test(home.path());
         let _managed_guard = lock_env_var_for_test("SHIP_MANAGED_HOOKS", Some("1"));
+        let _hooks_bin_guard = lock_env_var_for_test("SHIP_HOOKS_BIN", Some("ship hooks run"));
 
         export_to(project_dir, "claude").unwrap();
         let settings_path = home.path().join(".claude").join("settings.json");
@@ -810,6 +812,7 @@ mod tests {
     fn gemini_exports_hooks_to_settings_json() {
         let (tmp, project_dir) = project_with_servers(vec![]);
         let _managed_guard = lock_env_var_for_test("SHIP_MANAGED_HOOKS", Some("1"));
+        let _hooks_bin_guard = lock_env_var_for_test("SHIP_HOOKS_BIN", Some("ship hooks run"));
         let mut config = crate::config::get_config(Some(project_dir.clone())).unwrap();
         config.hooks = vec![HookConfig {
             id: "before-tool-guard".to_string(),
@@ -844,6 +847,7 @@ mod tests {
     fn gemini_exports_ship_managed_hook_commands_with_provider_hint() {
         let (tmp, project_dir) = project_with_servers(vec![]);
         let _managed_guard = lock_env_var_for_test("SHIP_MANAGED_HOOKS", Some("1"));
+        let _hooks_bin_guard = lock_env_var_for_test("SHIP_HOOKS_BIN", Some("ship hooks run"));
 
         export_to(project_dir, "gemini").unwrap();
         let settings_path = tmp.path().join(".gemini").join("settings.json");
@@ -866,6 +870,7 @@ mod tests {
     fn export_writes_hook_runtime_artifacts() {
         let (tmp, project_dir) = project_with_servers(vec![make_stdio_server("github")]);
         let _managed_guard = lock_env_var_for_test("SHIP_MANAGED_HOOKS", Some("1"));
+        let _hooks_bin_guard = lock_env_var_for_test("SHIP_HOOKS_BIN", Some("ship hooks run"));
         save_permissions(
             project_dir.clone(),
             &Permissions {
