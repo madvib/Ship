@@ -47,23 +47,35 @@ fn managed_hooks_enabled() -> bool {
     }
 }
 
-fn managed_hooks_command() -> String {
-    std::env::var("SHIP_HOOKS_BIN")
+fn managed_hooks_command() -> Option<String> {
+    if let Some(explicit) = std::env::var("SHIP_HOOKS_BIN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "ship hooks run".to_string())
+    {
+        return Some(explicit);
+    }
+
+    let probe = std::process::Command::new("ship")
+        .args(["hooks", "run", "--help"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match probe {
+        Ok(status) if status.success() => Some("ship hooks run".to_string()),
+        _ => None,
+    }
 }
 
-fn managed_hooks_command_for_provider(provider_id: &str) -> String {
-    let base = managed_hooks_command();
+fn managed_hooks_command_for_provider(provider_id: &str) -> Option<String> {
+    let base = managed_hooks_command()?;
     if base.contains("--provider") {
-        return base;
+        return Some(base);
     }
     if base.trim_start().starts_with("ship hooks run") {
-        return format!("{base} --provider {provider_id}");
+        return Some(format!("{base} --provider {provider_id}"));
     }
-    base
+    Some(base)
 }
 
 fn managed_hook(
@@ -85,7 +97,9 @@ fn managed_hook(
 }
 
 fn managed_hooks_for_provider(provider_id: &str) -> Vec<HookConfig> {
-    let command = managed_hooks_command_for_provider(provider_id);
+    let Some(command) = managed_hooks_command_for_provider(provider_id) else {
+        return Vec::new();
+    };
     match provider_id {
         "claude" => vec![
             managed_hook(
