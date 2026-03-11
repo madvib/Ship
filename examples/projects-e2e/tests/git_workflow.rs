@@ -31,7 +31,6 @@ mod new_project {
         let p = TestProject::with_git().unwrap();
 
         // Core namespace directories
-        p.assert_ship_file("project/specs");
         p.assert_ship_file("project/features");
         p.assert_ship_file("project/releases");
         p.assert_ship_file("project/adrs");
@@ -43,7 +42,6 @@ mod new_project {
 
         // Default templates
         p.assert_ship_file("project/features/TEMPLATE.md");
-        p.assert_ship_file("project/specs/TEMPLATE.md");
         p.assert_ship_file("project/adrs/TEMPLATE.md");
 
         // Runtime state is SQLite-first; no NDJSON event file is required on init.
@@ -286,12 +284,11 @@ mod branch_hierarchy {
 
         p.assert_root_file("CLAUDE.md");
         p.assert_root_file_contains("CLAUDE.md", "Auth System");
-        p.assert_root_file_contains("CLAUDE.md", "Feature Spec");
     }
 
-    /// Checking out main tears down CLAUDE.md and .mcp.json.
+    /// Checking out main rewrites generated context to workspace baseline.
     #[test]
-    fn checkout_main_removes_generated_files() {
+    fn checkout_main_rewrites_to_workspace_context() {
         let p = setup();
         create_feature(
             p.ship_dir.clone(),
@@ -311,9 +308,11 @@ mod branch_hierarchy {
         // Simulate checkout back to main
         on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
         assert!(
-            !p.root().join("CLAUDE.md").exists(),
-            "CLAUDE.md should be removed on main"
+            p.root().join("CLAUDE.md").exists(),
+            "CLAUDE.md should exist with workspace context on main"
         );
+        p.assert_root_file_contains("CLAUDE.md", "# [ship] Workspace: main");
+        p.assert_root_file_not_contains("CLAUDE.md", "# [ship] Auth System");
     }
 
     /// Multiple features each generate correct isolated context.
@@ -716,9 +715,9 @@ mod existing_agent_configs {
         );
     }
 
-    /// Teardown (checkout main) removes only Ship-managed servers, not user servers.
+    /// Checkout to main preserves baseline Ship servers and existing user servers.
     #[test]
-    fn teardown_removes_only_ship_servers_preserves_user_servers() {
+    fn checkout_main_preserves_baseline_and_user_servers() {
         use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
 
         let user_config = r#"{"mcpServers":{"github":{"type":"stdio","command":"gh-mcp"}}}"#;
@@ -762,17 +761,15 @@ mod existing_agent_configs {
         assert!(after_checkout.contains("ship"));
         assert!(after_checkout.contains("github"));
 
-        // Checkout main — Ship removes only its own server
+        // Checkout main — baseline config should still include ship + user server
         on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
 
-        // After teardown: .mcp.json should still have github but not ship
-        // (or .mcp.json may not exist if Ship started from scratch — either is fine
-        //  as long as github isn't lost if it was user-managed before Ship touched it)
+        // .mcp.json should still have both ship and github.
         if p.root().join(".mcp.json").exists() {
             let after_teardown = fs::read_to_string(p.root().join(".mcp.json")).unwrap();
             assert!(
-                !after_teardown.contains("\"ship\""),
-                "Ship's server should be removed on teardown"
+                after_teardown.contains("\"ship\""),
+                "Ship's baseline server should persist on non-feature branches"
             );
             assert!(
                 after_teardown.contains("github"),
@@ -826,7 +823,6 @@ mod core_loop {
         // 5. CLAUDE.md generated with feature context
         p.assert_root_file("CLAUDE.md");
         p.assert_root_file_contains("CLAUDE.md", "Payment Processing");
-        p.assert_root_file_contains("CLAUDE.md", "Feature Spec");
         p.assert_root_file_contains("CLAUDE.md", "Ship Workflow Policy");
         let workspace = get_workspace(&p.ship_dir, "feature/payments")
             .unwrap()
@@ -840,10 +836,11 @@ mod core_loop {
         let (ok, _) = p.git_commit("add payment module");
         assert!(ok, "normal work commit should succeed");
 
-        // 7. Teardown on return to main
+        // 7. Return to main (workspace baseline context remains active)
         on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
-        p.assert_no_root_file("CLAUDE.md");
-        p.assert_no_root_file(".mcp.json");
+        p.assert_root_file("CLAUDE.md");
+        p.assert_root_file_contains("CLAUDE.md", "# [ship] Workspace: main");
+        p.assert_root_file_not_contains("CLAUDE.md", "# [ship] Payment Processing");
         let main_workspace = get_workspace(&p.ship_dir, "main")
             .unwrap()
             .expect("main workspace should be active after checkout");
@@ -890,7 +887,6 @@ mod core_loop {
         on_post_checkout(&p.ship_dir, "feature/dashboard", &p.root()).unwrap();
 
         p.assert_root_file_contains("CLAUDE.md", "User Dashboard");
-        p.assert_root_file_contains("CLAUDE.md", "Feature Spec");
 
         // Existing source files not touched
         assert!(p.root().join("package.json").exists());

@@ -4,9 +4,10 @@ use helpers::TestProject;
 use runtime::{
     AgentLimits, CommandPermissions, McpServerConfig, McpServerType, ModeConfig,
     NetworkPermissions, NetworkPolicy, Permissions, ProjectConfig, ToolPermissions, create_skill,
-    save_config, save_permissions, sync_active_mode,
+    delete_skill, save_config, save_permissions, sync_active_mode,
 };
 use std::collections::HashMap;
+use std::path::Path;
 
 fn stdio_server(id: &str) -> McpServerConfig {
     McpServerConfig {
@@ -36,6 +37,27 @@ fn http_server(id: &str, url: &str) -> McpServerConfig {
         disabled: false,
         timeout_secs: None,
     }
+}
+
+fn assert_skill_has_yaml_frontmatter(path: &Path, expected_name: &str) {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|_| panic!("missing skill file at {}", path.display()));
+    assert!(
+        content.starts_with("---\n"),
+        "expected YAML frontmatter in {}",
+        path.display()
+    );
+    assert!(
+        content.contains(&format!("\nname: {expected_name}\n")),
+        "expected name '{}' in frontmatter at {}",
+        expected_name,
+        path.display()
+    );
+    assert!(
+        content.contains("\ndescription: "),
+        "expected description in frontmatter at {}",
+        path.display()
+    );
 }
 
 #[test]
@@ -125,6 +147,18 @@ fn compiler_matrix_webapp_multi_provider_exports_all_surfaces() {
             .join(".agents/skills/release-guard/SKILL.md")
             .exists(),
         "codex skill should be exported"
+    );
+    assert_skill_has_yaml_frontmatter(
+        &p.root().join(".claude/skills/release-guard/SKILL.md"),
+        "release-guard",
+    );
+    assert_skill_has_yaml_frontmatter(
+        &p.root().join(".gemini/skills/release-guard/SKILL.md"),
+        "release-guard",
+    );
+    assert_skill_has_yaml_frontmatter(
+        &p.root().join(".agents/skills/release-guard/SKILL.md"),
+        "release-guard",
     );
 
     let claude_mcp: serde_json::Value =
@@ -232,5 +266,56 @@ fn compiler_matrix_rust_fixture_codex_only_respects_provider_scope() {
     assert!(
         !p.root().join(".gemini/settings.json").exists(),
         "gemini settings should not be emitted"
+    );
+}
+
+#[test]
+fn compiler_matrix_prunes_stale_managed_skills_for_all_providers() {
+    let p = TestProject::with_fixture_project("webapp-nextjs").unwrap();
+    create_skill(&p.ship_dir, "rt-live", "Live", "live body").unwrap();
+    create_skill(&p.ship_dir, "rt-stale", "Stale", "stale body").unwrap();
+
+    let mut config = ProjectConfig::default();
+    config.providers = vec![
+        "claude".to_string(),
+        "gemini".to_string(),
+        "codex".to_string(),
+    ];
+    config.active_mode = Some("tri-provider".to_string());
+    config.modes = vec![ModeConfig {
+        id: "tri-provider".to_string(),
+        name: "Tri Provider".to_string(),
+        target_agents: vec![
+            "claude".to_string(),
+            "gemini".to_string(),
+            "codex".to_string(),
+        ],
+        ..Default::default()
+    }];
+    save_config(&config, Some(p.ship_dir.clone())).unwrap();
+
+    sync_active_mode(&p.ship_dir).unwrap();
+    assert!(p.root().join(".claude/skills/rt-stale/SKILL.md").exists());
+    assert!(p.root().join(".gemini/skills/rt-stale/SKILL.md").exists());
+    assert!(p.root().join(".agents/skills/rt-stale/SKILL.md").exists());
+
+    delete_skill(&p.ship_dir, "rt-stale").unwrap();
+    sync_active_mode(&p.ship_dir).unwrap();
+
+    assert!(p.root().join(".claude/skills/rt-live/SKILL.md").exists());
+    assert!(p.root().join(".gemini/skills/rt-live/SKILL.md").exists());
+    assert!(p.root().join(".agents/skills/rt-live/SKILL.md").exists());
+
+    assert!(
+        !p.root().join(".claude/skills/rt-stale").exists(),
+        "stale claude skill dir should be pruned"
+    );
+    assert!(
+        !p.root().join(".gemini/skills/rt-stale").exists(),
+        "stale gemini skill dir should be pruned"
+    );
+    assert!(
+        !p.root().join(".agents/skills/rt-stale").exists(),
+        "stale codex skill dir should be pruned"
     );
 }

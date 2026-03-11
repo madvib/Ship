@@ -1,7 +1,7 @@
 /// Branch → Agent Configuration E2E Tests
 ///
 /// Tests the full lifecycle: feature creation → branch checkout → CLAUDE.md/.mcp.json
-/// generation → teardown on branch switch. Also covers worktrees and multi-provider.
+/// generation → baseline workspace context on non-feature branches.
 ///
 /// Tests marked #[ignore] document planned behaviour that is not yet implemented.
 /// Run passing tests: cargo test --test branch_config
@@ -220,9 +220,9 @@ fn mcp_json_falls_back_to_all_project_servers() {
     assert!(mcp_json["mcpServers"]["linear"].is_object());
 }
 
-/// Non-feature branch (no match) does not produce CLAUDE.md.
+/// Non-feature branch (no linked feature) produces baseline workspace context.
 #[test]
-fn non_feature_branch_does_not_generate_claude_md() {
+fn non_feature_branch_generates_workspace_claude_md() {
     let p = TestProject::with_git().unwrap();
     create_feature(
         p.ship_dir.clone(),
@@ -236,14 +236,17 @@ fn non_feature_branch_does_not_generate_claude_md() {
 
     on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
 
-    p.assert_no_root_file("CLAUDE.md");
+    p.assert_root_file("CLAUDE.md");
+    p.assert_root_file_contains("CLAUDE.md", "# [ship] Workspace: main");
+    p.assert_root_file_not_contains("CLAUDE.md", "Auth Flow");
 }
 
-// ─── Teardown (currently broken — no cleanup pass) ───────────────────────────
+// ─── Branch switch behavior ───────────────────────────────────────────────────
 
-/// When switching away from a feature branch to main, CLAUDE.md should be removed.
+/// When switching away from a feature branch to main, feature context should be replaced
+/// by workspace context.
 #[test]
-fn switching_to_main_removes_stale_claude_md() {
+fn switching_to_main_rewrites_claude_md_to_workspace_context() {
     let p = TestProject::with_git().unwrap();
     create_feature(
         p.ship_dir.clone(),
@@ -259,18 +262,20 @@ fn switching_to_main_removes_stale_claude_md() {
     on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
     p.assert_root_file("CLAUDE.md");
 
-    // Switch to main — should clean up
+    // Switch to main — should rewrite to baseline workspace context
     on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
-    p.assert_no_root_file("CLAUDE.md");
+    p.assert_root_file("CLAUDE.md");
+    p.assert_root_file_contains("CLAUDE.md", "# [ship] Workspace: main");
+    p.assert_root_file_not_contains("CLAUDE.md", "# [ship] Auth Flow");
 }
 
-/// Same teardown requirement for .mcp.json: Ship-managed servers should be removed
-/// when checking out a non-feature branch. User servers must be preserved.
+/// Feature-specific MCP selections should be cleared when switching to a non-feature
+/// branch and baseline project MCP configuration should be restored.
 #[test]
-fn switching_to_main_removes_ship_managed_mcp_servers() {
+fn switching_to_main_restores_baseline_mcp_servers() {
     let p = TestProject::with_git().unwrap();
     let mut config = ProjectConfig::default();
-    config.mcp_servers = vec![stdio_server("github")];
+    config.mcp_servers = vec![stdio_server("linear"), stdio_server("github")];
     save_config(&config, Some(p.ship_dir.clone())).unwrap();
 
     let feat = create_feature(
@@ -288,22 +293,25 @@ fn switching_to_main_removes_ship_managed_mcp_servers() {
             providers: vec![],
             model: None,
             max_cost_per_session: None,
-            mcp_servers: vec!["github".to_string()],
+            mcp_servers: vec!["linear".to_string()],
             skills: vec![],
         },
     );
     on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
+    let val: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(p.root().join(".mcp.json")).unwrap())
+            .unwrap();
+    assert!(val["mcpServers"]["linear"].is_object());
+    assert!(val["mcpServers"]["github"].is_null());
 
-    // Switch away — ship-managed github entry should be removed
+    // Switch away — feature filter should be cleared back to baseline (all project servers)
     on_post_checkout(&p.ship_dir, "main", &p.root()).unwrap();
     let mcp_path = p.root().join(".mcp.json");
     if mcp_path.exists() {
         let val: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&mcp_path).unwrap()).unwrap();
-        assert!(
-            val["mcpServers"]["github"].is_null(),
-            "ship-managed server should be removed on teardown"
-        );
+        assert!(val["mcpServers"]["linear"].is_object());
+        assert!(val["mcpServers"]["github"].is_object());
     }
 }
 

@@ -524,11 +524,10 @@ pub fn create_feature(
     title: &str,
     body: &str,
     release_id: Option<&str>,
-    spec_id: Option<&str>,
+    _spec_id: Option<&str>,
     branch: Option<&str>,
 ) -> Result<(String, PathBuf)> {
-    let entry =
-        ship_module_project::create_feature(&ship_dir, title, body, release_id, spec_id, branch)?;
+    let entry = ship_module_project::create_feature(&ship_dir, title, body, release_id, branch)?;
     Ok((entry.id, PathBuf::from(entry.path)))
 }
 
@@ -539,24 +538,4 @@ pub fn create_release(ship_dir: PathBuf, version: &str, notes: &str) -> Result<P
 
 pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     ship_module_project::init_project(base_dir)
-}
-
-pub fn create_spec(ship_dir: PathBuf, title: &str, body: &str, status: &str) -> Result<PathBuf> {
-    let branch = format!(
-        "feature/spec-{}",
-        runtime::project::sanitize_file_name(title)
-    );
-    runtime::create_workspace(
-        &ship_dir,
-        runtime::CreateWorkspaceRequest {
-            branch: branch.clone(),
-            status: Some(runtime::WorkspaceStatus::Active),
-            ..Default::default()
-        },
-    )?;
-    let entry = ship_module_project::create_spec(&ship_dir, title, body, Some(&branch))?;
-    if status != "draft" {
-        anyhow::bail!("unsupported e2e helper status for create_spec: {}", status);
-    }
-    Ok(PathBuf::from(entry.path))
 }

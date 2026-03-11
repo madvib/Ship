@@ -3,44 +3,36 @@ use helpers::TestProject;
 use runtime::project::*;
 use ship_module_project::create_adr;
 
-/// After init, all namespace directories exist in the right places.
+/// After init, core agent/runtime assets and top-level vision exist.
 #[test]
 fn init_creates_namespace_structure() {
     let p = TestProject::new().unwrap();
 
-    // project/
-    p.assert_ship_file("project/specs");
-    p.assert_ship_file("project/features");
-    p.assert_ship_file("project/releases");
-    p.assert_ship_file("project/adrs");
-    p.assert_ship_file("project/notes");
-    p.assert_ship_file("project/vision.md");
-    p.assert_ship_file("project/TEMPLATE.md");
-    p.assert_ship_file("project/releases/TEMPLATE.md");
-    p.assert_ship_file("project/adrs/TEMPLATE.md");
-    p.assert_ship_file("project/notes/TEMPLATE.md");
+    // top-level vision
+    p.assert_ship_file("vision.md");
+    p.assert_no_ship_file("project/vision.md");
 
     // agents/
     p.assert_ship_file("agents/rules");
+    p.assert_ship_file("agents/mcp.toml");
+    p.assert_ship_file("agents/permissions.toml");
+    p.assert_ship_file("agents/skills/task-policy/SKILL.md");
 
     // shared
     p.assert_ship_file("generated");
     p.assert_ship_file("ship.toml");
-    p.assert_ship_file("README.md");
-    p.assert_ship_file("agents/README.md");
-    p.assert_ship_file("project/specs/TEMPLATE.md");
-    p.assert_ship_file("project/features/TEMPLATE.md");
 }
 
-/// Vision document is seeded in project/.
+/// Vision document is seeded at .ship/vision.md.
 #[test]
-fn vision_doc_lives_in_project_namespace() {
+fn vision_doc_lives_at_top_level() {
     let p = TestProject::new().unwrap();
-    p.assert_ship_file("project/vision.md");
+    p.assert_ship_file("vision.md");
     p.assert_no_ship_file("specs/vision.md"); // old flat path must not exist
+    p.assert_no_ship_file("project/vision.md");
 }
 
-/// Core loop: release → feature → spec → issue, all resolve to correct paths.
+/// Core loop: release → feature, all resolve to correct paths.
 #[test]
 fn core_loop_paths_resolve_correctly() {
     let p = TestProject::new().unwrap();
@@ -58,9 +50,6 @@ fn core_loop_paths_resolve_correctly() {
     )
     .unwrap();
     assert!(feature.1.starts_with(features_dir(&p.ship_dir)));
-
-    let spec = crate::helpers::create_spec(p.ship_dir.clone(), "Auth Spec", "", "draft").unwrap();
-    assert!(spec.starts_with(specs_dir(&p.ship_dir)));
 }
 
 /// ADRs land in project/adrs/.
@@ -109,8 +98,7 @@ fn gitignore_uses_namespace_paths() {
     assert!(gitignore.contains("project/notes"));
     assert!(gitignore.contains("project/features"));
     assert!(gitignore.contains("project/releases"));
-    assert!(gitignore.contains("project/specs"));
-    assert!(gitignore.contains("project/vision.md"));
+    assert!(gitignore.contains("vision.md"));
     assert!(gitignore.contains("agents/skills"));
 }
 

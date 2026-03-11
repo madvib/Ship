@@ -143,19 +143,21 @@ fn workspace_session_cli_rejects_updated_spec_and_emits_session_record() {
 
     let out = run_cli(
         &project,
-        &[
-            "workspace",
-            "session",
-            "end",
-            "--summary",
-            "validated",
-        ],
+        &["workspace", "session", "end", "--summary", "validated"],
     );
     assert_success(&out, "workspace session end failed");
 
     let out = run_cli(
         &project,
-        &["workspace", "session", "list", "--branch", "main", "--limit", "1"],
+        &[
+            "workspace",
+            "session",
+            "list",
+            "--branch",
+            "main",
+            "--limit",
+            "1",
+        ],
     );
     assert_success(&out, "workspace session list failed");
     let stdout = String::from_utf8_lossy(&out.stdout);
