@@ -1345,7 +1345,7 @@ prefix_rules = [
         let (tmp, project_dir) = project_with_servers(vec![]);
         create_skill(&project_dir, "rt-legacy-guard", "Guard", "body").unwrap();
         let legacy = tmp.path().join("agents").join("skills");
-        let err = export_skills_to_dir(&project_dir, &legacy).unwrap_err();
+        let err = export_skills_to_dir(&project_dir, &legacy, None).unwrap_err();
         assert!(
             err.to_string().contains("legacy path"),
             "unexpected error for legacy agents/skills guard: {err}"

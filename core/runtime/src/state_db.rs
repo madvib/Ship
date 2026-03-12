@@ -1,3 +1,4 @@
+use crate::agents::config::FeatureAgentConfig;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use serde_json;
@@ -289,6 +290,7 @@ CREATE TABLE IF NOT EXISTS release (
   status          TEXT NOT NULL DEFAULT 'planned',
   target_date     TEXT,
   supported       INTEGER,
+  body            TEXT NOT NULL DEFAULT '',
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
@@ -399,19 +401,13 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     (
         "0017_workspace_runtime_contract",
         "UPDATE workspace
-         SET workspace_type = 'patch'
-         WHERE lower(trim(workspace_type)) IN ('hotfix', 'patch');
-         UPDATE workspace
-         SET workspace_type = 'feature'
-         WHERE lower(trim(workspace_type)) IN ('feature', 'refactor', 'experiment');
-         UPDATE workspace
-         SET workspace_type = 'service'
-         WHERE lower(trim(workspace_type)) = 'service';
+         SET workspace_type = lower(trim(workspace_type))
+         WHERE workspace_type IS NOT NULL
+           AND trim(workspace_type) != '';
          UPDATE workspace
          SET workspace_type = 'feature'
          WHERE workspace_type IS NULL
-            OR trim(workspace_type) = ''
-            OR lower(trim(workspace_type)) NOT IN ('feature', 'patch', 'service');
+            OR trim(workspace_type) = '';
          UPDATE workspace
          SET status = 'active'
          WHERE lower(trim(status)) = 'active';
@@ -1332,6 +1328,22 @@ pub fn get_feature_agent_providers(
     ship_dir: &Path,
     feature_id: &str,
 ) -> Result<Option<Vec<String>>> {
+    let feature_agent = get_feature_agent_config(ship_dir, feature_id)?;
+    let Some(agent) = feature_agent else {
+        return Ok(None);
+    };
+    Ok(Some(agent.providers))
+}
+
+/// Read and parse a feature's `agent_json` payload.
+/// Returns:
+/// - `None` when the feature row does not exist
+/// - `Some(None)` semantics are represented as `Some(FeatureAgentConfig::default())`
+///   when `agent_json` is unset/empty/invalid
+pub fn get_feature_agent_config(
+    ship_dir: &Path,
+    feature_id: &str,
+) -> Result<Option<FeatureAgentConfig>> {
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
         sqlx::query("SELECT agent_json FROM feature WHERE id = ?")
@@ -1346,33 +1358,18 @@ pub fn get_feature_agent_providers(
 
     let agent_json: Option<String> = row.get(0);
     let Some(raw) = agent_json else {
-        return Ok(Some(Vec::new()));
+        return Ok(Some(FeatureAgentConfig::default()));
     };
     let trimmed = raw.trim();
     if trimmed.is_empty() || trimmed == "{}" || trimmed.eq_ignore_ascii_case("null") {
-        return Ok(Some(Vec::new()));
+        return Ok(Some(FeatureAgentConfig::default()));
     }
 
-    let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
+    let parsed: FeatureAgentConfig = match serde_json::from_str(trimmed) {
         Ok(value) => value,
-        Err(_) => return Ok(Some(Vec::new())),
+        Err(_) => return Ok(Some(FeatureAgentConfig::default())),
     };
-
-    let providers = parsed
-        .get("providers")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Ok(Some(providers))
+    Ok(Some(parsed))
 }
 
 /// Replace the ordered feature slice for a target/release.
@@ -2232,6 +2229,12 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
     )?;
     ensure_column(
         connection,
+        "release",
+        "body",
+        "ALTER TABLE release ADD COLUMN body TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
         "agent_runtime_settings",
         "statuses_json",
         "ALTER TABLE agent_runtime_settings ADD COLUMN statuses_json TEXT NOT NULL DEFAULT '[]'",
@@ -2441,26 +2444,9 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
         block_on(async {
             sqlx::query(
                 "UPDATE workspace
-                 SET workspace_type = 'patch'
-                 WHERE lower(trim(workspace_type)) IN ('hotfix', 'patch');",
-            )
-            .execute(&mut *connection)
-            .await
-        })?;
-        block_on(async {
-            sqlx::query(
-                "UPDATE workspace
-                 SET workspace_type = 'feature'
-                 WHERE lower(trim(workspace_type)) IN ('feature', 'refactor', 'experiment');",
-            )
-            .execute(&mut *connection)
-            .await
-        })?;
-        block_on(async {
-            sqlx::query(
-                "UPDATE workspace
-                 SET workspace_type = 'service'
-                 WHERE lower(trim(workspace_type)) = 'service';",
+                 SET workspace_type = lower(trim(workspace_type))
+                 WHERE workspace_type IS NOT NULL
+                   AND trim(workspace_type) != '';",
             )
             .execute(&mut *connection)
             .await
@@ -2470,8 +2456,7 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
                 "UPDATE workspace
                  SET workspace_type = 'feature'
                  WHERE workspace_type IS NULL
-                    OR trim(workspace_type) = ''
-                    OR lower(trim(workspace_type)) NOT IN ('feature', 'patch', 'service');",
+                    OR trim(workspace_type) = '';",
             )
             .execute(&mut *connection)
             .await
@@ -2743,7 +2728,7 @@ mod tests {
     }
 
     #[test]
-    fn compat_workspace_contract_enforces_legacy_values() -> Result<()> {
+    fn compat_workspace_contract_enforces_canonical_workspace_values() -> Result<()> {
         let tmp = tempdir()?;
         let db_path = tmp.path().join("compat-contract.db");
         let db_url = sqlite_url(&db_path);
@@ -2774,9 +2759,9 @@ mod tests {
             sqlx::query(
                 "INSERT INTO workspace (branch, id, workspace_type, status, resolved_at)
                  VALUES
-                   ('legacy/hotfix', 'legacy-hotfix', 'hotfix', 'planned', '2026-01-01T00:00:00Z'),
-                   ('legacy/refactor', 'legacy-refactor', 'refactor', 'review', '2026-01-01T00:00:00Z'),
-                   ('legacy/uppercase', 'legacy-upper', 'PATCH', 'ARCHIVED', '2026-01-01T00:00:00Z'),
+                   ('legacy/patch', 'legacy-patch', 'PATCH', 'planned', '2026-01-01T00:00:00Z'),
+                   ('legacy/service', 'legacy-service', 'SERVICE', 'ARCHIVED', '2026-01-01T00:00:00Z'),
+                   ('legacy/unknown', 'legacy-unknown', 'spike', 'review', '2026-01-01T00:00:00Z'),
                    ('legacy/empty', 'legacy-empty', 'feature', '', '2026-01-01T00:00:00Z')",
             )
             .execute(&mut conn)
@@ -2800,16 +2785,16 @@ mod tests {
         }
 
         assert_eq!(
-            normalized.get("legacy/hotfix"),
+            normalized.get("legacy/patch"),
             Some(&("patch".to_string(), "archived".to_string()))
         );
         assert_eq!(
-            normalized.get("legacy/refactor"),
-            Some(&("feature".to_string(), "archived".to_string()))
+            normalized.get("legacy/service"),
+            Some(&("service".to_string(), "archived".to_string()))
         );
         assert_eq!(
-            normalized.get("legacy/uppercase"),
-            Some(&("patch".to_string(), "archived".to_string()))
+            normalized.get("legacy/unknown"),
+            Some(&("spike".to_string(), "archived".to_string()))
         );
         assert_eq!(
             normalized.get("legacy/empty"),
@@ -2820,7 +2805,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_runtime_contract_migration_normalizes_legacy_kind_and_status() -> Result<()> {
+    fn workspace_runtime_contract_migration_normalizes_status_and_casing_only() -> Result<()> {
         let tmp = tempdir()?;
         let db_path = tmp.path().join("workspace-contract.db");
         let db_url = sqlite_url(&db_path);
@@ -2852,9 +2837,8 @@ mod tests {
             sqlx::query(
                 "INSERT INTO workspace (branch, id, workspace_type, status, resolved_at)
                  VALUES
-                 ('legacy/hotfix', 'w-hotfix', 'hotfix', 'planned', '2026-01-01T00:00:00Z'),
-                   ('legacy/refactor', 'w-refactor', 'refactor', 'review', '2026-01-01T00:00:00Z'),
-                   ('legacy/experiment', 'w-experiment', 'experiment', 'review', '2026-01-01T00:00:00Z'),
+                 ('legacy/patch', 'w-patch', 'PATCH', 'planned', '2026-01-01T00:00:00Z'),
+                   ('legacy/service', 'w-service', 'SERVICE', 'ARCHIVED', '2026-01-01T00:00:00Z'),
                    ('legacy/unknown', 'w-unknown', 'spike', 'review', '2026-01-01T00:00:00Z'),
                    ('legacy/empty-status', 'w-empty', 'feature', '', '2026-01-01T00:00:00Z')",
             )
@@ -2871,41 +2855,29 @@ mod tests {
             .ok_or_else(|| anyhow!("migration 0017 not found"))?;
         block_on(async { sqlx::query(ddl_0017).execute(&mut conn).await })?;
 
-        let hotfix_row = block_on(async {
+        let patch_row = block_on(async {
             sqlx::query(
-                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/hotfix'",
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/patch'",
             )
             .fetch_one(&mut conn)
             .await
         })?;
-        let hotfix_kind: String = hotfix_row.get(0);
-        let hotfix_status: String = hotfix_row.get(1);
-        assert_eq!(hotfix_kind, "patch");
-        assert_eq!(hotfix_status, "archived");
+        let patch_kind: String = patch_row.get(0);
+        let patch_status: String = patch_row.get(1);
+        assert_eq!(patch_kind, "patch");
+        assert_eq!(patch_status, "archived");
 
-        let refactor_row = block_on(async {
+        let service_row = block_on(async {
             sqlx::query(
-                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/refactor'",
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/service'",
             )
             .fetch_one(&mut conn)
             .await
         })?;
-        let refactor_kind: String = refactor_row.get(0);
-        let refactor_status: String = refactor_row.get(1);
-        assert_eq!(refactor_kind, "feature");
-        assert_eq!(refactor_status, "archived");
-
-        let experiment_row = block_on(async {
-            sqlx::query(
-                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/experiment'",
-            )
-            .fetch_one(&mut conn)
-            .await
-        })?;
-        let experiment_kind: String = experiment_row.get(0);
-        let experiment_status: String = experiment_row.get(1);
-        assert_eq!(experiment_kind, "feature");
-        assert_eq!(experiment_status, "archived");
+        let service_kind: String = service_row.get(0);
+        let service_status: String = service_row.get(1);
+        assert_eq!(service_kind, "service");
+        assert_eq!(service_status, "archived");
 
         let unknown_row = block_on(async {
             sqlx::query(
@@ -2916,7 +2888,7 @@ mod tests {
         })?;
         let unknown_kind: String = unknown_row.get(0);
         let unknown_status: String = unknown_row.get(1);
-        assert_eq!(unknown_kind, "feature");
+        assert_eq!(unknown_kind, "spike");
         assert_eq!(unknown_status, "archived");
 
         let empty_status_row = block_on(async {

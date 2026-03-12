@@ -1,3 +1,4 @@
+use crate::agents::config::{AgentConfig, resolve_agent_config_with_mode_override};
 use crate::events::{EventAction, EventEntity, append_event};
 use crate::project::{get_global_dir, project_slug_from_ship_dir, sanitize_file_name};
 use crate::state_db::{
@@ -8,7 +9,7 @@ use crate::state_db::{
     set_branch_link, update_workspace_session_db, upsert_workspace_db,
 };
 use crate::state_db::{
-    get_branch_link, get_feature_agent_providers, get_feature_by_branch_links, get_feature_links,
+    get_branch_link, get_feature_agent_config, get_feature_by_branch_links, get_feature_links,
 };
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -56,14 +58,17 @@ fn parse_workspace_kind(value: &str) -> Option<ShipWorkspaceKind> {
         "feature" => Some(ShipWorkspaceKind::Feature),
         "patch" => Some(ShipWorkspaceKind::Patch),
         "service" => Some(ShipWorkspaceKind::Service),
-        "hotfix" => Some(ShipWorkspaceKind::Patch),
-        "refactor" | "experiment" => Some(ShipWorkspaceKind::Feature),
         _ => None,
     }
 }
 
-fn normalize_workspace_type(value: &str) -> ShipWorkspaceKind {
-    parse_workspace_kind(value).unwrap_or_default()
+fn parse_workspace_type_required(value: &str) -> Result<ShipWorkspaceKind> {
+    parse_workspace_kind(value).ok_or_else(|| {
+        anyhow!(
+            "Invalid workspace type '{}'; expected one of: feature, patch, service",
+            value
+        )
+    })
 }
 
 fn parse_workspace_status(value: &str) -> Option<WorkspaceStatus> {
@@ -74,8 +79,13 @@ fn parse_workspace_status(value: &str) -> Option<WorkspaceStatus> {
     }
 }
 
-fn normalize_workspace_status(value: &str) -> WorkspaceStatus {
-    parse_workspace_status(value).unwrap_or_default()
+fn parse_workspace_status_required(value: &str) -> Result<WorkspaceStatus> {
+    parse_workspace_status(value).ok_or_else(|| {
+        anyhow!(
+            "Invalid workspace status '{}'; expected one of: active, archived",
+            value
+        )
+    })
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type, Default)]
@@ -625,52 +635,62 @@ fn resolve_session_providers(
     workspace: &Workspace,
     mode_id: Option<&str>,
 ) -> Result<Vec<String>> {
-    let matrix = build_workspace_provider_matrix(ship_dir, workspace, mode_id)?;
-    if let Some(error) = matrix.resolution_error {
-        return Err(anyhow!(error));
+    let resolved = resolve_workspace_agent_config(ship_dir, workspace, mode_id)?;
+    if resolved.providers.is_empty() {
+        return Err(anyhow!(
+            "No valid providers resolved for workspace '{}'",
+            workspace.branch
+        ));
     }
-    Ok(matrix.allowed_providers)
+    Ok(resolved.providers)
 }
 
-fn resolve_provider_candidates(
+fn resolve_workspace_agent_config(
     ship_dir: &Path,
-    config: &crate::config::ProjectConfig,
     workspace: &Workspace,
     mode_id: Option<&str>,
-) -> Result<(Vec<String>, &'static str, Option<String>)> {
-    let resolved_mode_id = mode_id.and_then(normalize_mode_ref).or_else(|| {
-        workspace
-            .active_mode
-            .as_deref()
-            .and_then(normalize_mode_ref)
-    });
+) -> Result<AgentConfig> {
+    let mode_id = mode_id
+        .and_then(normalize_mode_ref)
+        .or_else(|| {
+            workspace
+                .active_mode
+                .as_deref()
+                .and_then(normalize_mode_ref)
+        })
+        .map(|mode| mode.to_string());
 
-    let mode_targets = resolved_mode_id
-        .as_deref()
-        .and_then(|id| config.modes.iter().find(|mode| mode.id == id))
-        .map(|mode| mode.target_agents.clone())
-        .unwrap_or_default();
-
-    let feature_targets = workspace
+    let feature_agent = workspace
         .feature_id
         .as_deref()
-        .map(|feature_id| get_feature_agent_providers(ship_dir, feature_id))
+        .map(|feature_id| get_feature_agent_config(ship_dir, feature_id))
         .transpose()?
-        .flatten()
-        .unwrap_or_default();
+        .flatten();
 
-    let (candidates, source) = if !workspace.providers.is_empty() {
-        (workspace.providers.clone(), "workspace")
-    } else if !feature_targets.is_empty() {
-        (feature_targets, "feature")
-    } else if !mode_targets.is_empty() {
-        (mode_targets, "mode")
-    } else if !config.providers.is_empty() {
-        (config.providers.clone(), "config")
-    } else {
-        (vec!["claude".to_string()], "default")
-    };
-    Ok((candidates, source, resolved_mode_id))
+    let mut resolved = resolve_agent_config_with_mode_override(
+        ship_dir,
+        feature_agent.as_ref(),
+        mode_id.as_deref(),
+    )?;
+
+    if !workspace.providers.is_empty() {
+        let mut workspace_providers = Vec::new();
+        for candidate in &workspace.providers {
+            let Some(normalized) = normalize_provider_ref(candidate) else {
+                continue;
+            };
+            if crate::agents::export::get_provider(&normalized).is_some()
+                && !workspace_providers.iter().any(|p| p == &normalized)
+            {
+                workspace_providers.push(normalized);
+            }
+        }
+        if !workspace_providers.is_empty() {
+            resolved.providers = workspace_providers;
+        }
+    }
+
+    Ok(resolved)
 }
 
 fn build_workspace_provider_matrix(
@@ -678,20 +698,14 @@ fn build_workspace_provider_matrix(
     workspace: &Workspace,
     mode_id: Option<&str>,
 ) -> Result<WorkspaceProviderMatrix> {
-    let config = crate::config::get_effective_config(Some(ship_dir.to_path_buf()))?;
-    let (candidates, source, resolved_mode_id) =
-        resolve_provider_candidates(ship_dir, &config, workspace, mode_id)?;
-    let mut providers = Vec::new();
-    for candidate in candidates {
-        let Some(normalized) = normalize_provider_ref(&candidate) else {
-            continue;
-        };
-        if crate::agents::export::get_provider(&normalized).is_some()
-            && !providers.iter().any(|p| p == &normalized)
-        {
-            providers.push(normalized);
-        }
-    }
+    let resolved_mode_id = mode_id.and_then(normalize_mode_ref).or_else(|| {
+        workspace
+            .active_mode
+            .as_deref()
+            .and_then(normalize_mode_ref)
+    });
+    let resolved = resolve_workspace_agent_config(ship_dir, workspace, mode_id)?;
+    let providers = resolved.providers;
 
     let supported_providers = crate::agents::export::list_providers(ship_dir)?
         .into_iter()
@@ -700,8 +714,8 @@ fn build_workspace_provider_matrix(
 
     let resolution_error = if providers.is_empty() {
         Some(format!(
-            "No valid providers resolved for workspace '{}' (source: {})",
-            workspace.branch, source
+            "No valid providers resolved for workspace '{}'",
+            workspace.branch
         ))
     } else {
         None
@@ -710,7 +724,15 @@ fn build_workspace_provider_matrix(
     Ok(WorkspaceProviderMatrix {
         workspace_branch: workspace.branch.clone(),
         mode_id: resolved_mode_id,
-        source: source.to_string(),
+        source: if !workspace.providers.is_empty() {
+            "workspace".to_string()
+        } else if workspace.feature_id.is_some() {
+            "feature".to_string()
+        } else if resolved.active_mode.is_some() {
+            "mode/config".to_string()
+        } else {
+            "config/default".to_string()
+        },
         allowed_providers: providers,
         supported_providers,
         resolution_error,
@@ -745,6 +767,76 @@ fn missing_provider_configs_for_workspace(
             }
         })
         .collect()
+}
+
+fn stable_hash(value: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn compute_workspace_context_hash(
+    ship_dir: &Path,
+    workspace: &Workspace,
+    resolved_agent: &AgentConfig,
+) -> Result<String> {
+    let config = crate::config::get_effective_config(Some(ship_dir.to_path_buf()))?;
+    let config_hash = stable_hash(&toml::to_string(&config)?);
+
+    let permissions_hash = stable_hash(&toml::to_string(&resolved_agent.permissions)?);
+
+    let mut skill_hashes = resolved_agent
+        .skills
+        .iter()
+        .map(|skill| (skill.id.clone(), stable_hash(&skill.content)))
+        .collect::<Vec<_>>();
+    skill_hashes.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut rule_hashes = resolved_agent
+        .rules
+        .iter()
+        .map(|rule| (rule.file_name.clone(), stable_hash(&rule.content)))
+        .collect::<Vec<_>>();
+    rule_hashes.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut mcp_hashes = resolved_agent
+        .mcp_servers
+        .iter()
+        .map(|server| -> Result<(String, String)> {
+            let digest = stable_hash(&toml::to_string(&server)?);
+            Ok((server.id.clone(), digest))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    mcp_hashes.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut normalized_providers = resolved_agent
+        .providers
+        .iter()
+        .map(|provider| provider.trim().to_ascii_lowercase())
+        .filter(|provider| !provider.is_empty())
+        .collect::<Vec<_>>();
+    normalized_providers.sort();
+    normalized_providers.dedup();
+
+    let fingerprint = serde_json::json!({
+        "workspace": {
+            "branch": workspace.branch,
+            "workspace_type": workspace.workspace_type.to_string(),
+            "environment_id": workspace.environment_id,
+            "feature_id": workspace.feature_id,
+            "target_id": workspace.target_id,
+            "mode_id": resolved_agent.active_mode,
+        },
+        "providers": normalized_providers,
+        "model": resolved_agent.model,
+        "max_cost_per_session": resolved_agent.max_cost_per_session,
+        "config_hash": config_hash,
+        "permissions_hash": permissions_hash,
+        "skill_hashes": skill_hashes,
+        "rule_hashes": rule_hashes,
+        "mcp_hashes": mcp_hashes,
+    });
+    Ok(stable_hash(&serde_json::to_string(&fingerprint)?))
 }
 
 pub fn get_workspace_provider_matrix(
@@ -837,33 +929,75 @@ fn compile_workspace_context(
         .map(|mode| mode.to_string())
         .or_else(|| workspace.active_mode.clone());
     let mode_id = mode_id.and_then(|value| normalize_optional_text(Some(value)));
-    let providers = match resolve_session_providers(ship_dir, workspace, mode_id.as_deref()) {
-        Ok(providers) => providers,
-        Err(error) => {
-            let now = Utc::now();
-            workspace.compiled_at = Some(now);
-            workspace.compile_error = Some(error.to_string());
-            workspace.resolved_at = now;
-            upsert_workspace(ship_dir, workspace)?;
-            return Err(error);
-        }
-    };
+    let resolved_agent =
+        match resolve_workspace_agent_config(ship_dir, workspace, mode_id.as_deref()) {
+            Ok(agent) => agent,
+            Err(error) => {
+                let now = Utc::now();
+                workspace.compiled_at = Some(now);
+                workspace.compile_error = Some(error.to_string());
+                workspace.resolved_at = now;
+                upsert_workspace(ship_dir, workspace)?;
+                return Err(error);
+            }
+        };
+    let providers = resolved_agent.providers.clone();
+    if providers.is_empty() {
+        let error = anyhow!(
+            "No valid providers resolved for workspace '{}'",
+            workspace.branch
+        );
+        let now = Utc::now();
+        workspace.compiled_at = Some(now);
+        workspace.compile_error = Some(error.to_string());
+        workspace.resolved_at = now;
+        upsert_workspace(ship_dir, workspace)?;
+        return Err(error);
+    }
+
+    let mcp_server_filter = resolved_agent
+        .mcp_servers
+        .iter()
+        .map(|server| server.id.clone())
+        .collect::<Vec<_>>();
+    let skill_filter = resolved_agent
+        .skills
+        .iter()
+        .map(|skill| skill.id.clone())
+        .collect::<Vec<_>>();
 
     let now = Utc::now();
+    let next_context_hash =
+        match compute_workspace_context_hash(ship_dir, workspace, &resolved_agent) {
+            Ok(hash) => hash,
+            Err(error) => {
+                workspace.compiled_at = Some(now);
+                workspace.compile_error = Some(error.to_string());
+                workspace.resolved_at = now;
+                upsert_workspace(ship_dir, workspace)?;
+                return Err(error);
+            }
+        };
+
     let context_root = resolve_workspace_context_root(ship_dir, workspace);
     for provider in &providers {
-        if let Err(error) = crate::agents::export::export_to_with_mode_override_at_root(
-            ship_dir.to_path_buf(),
-            provider,
-            mode_id.as_deref(),
-            &context_root,
-        ) {
+        if let Err(error) =
+            crate::agents::export::export_to_filtered_with_mode_override_and_skills_at_root(
+                ship_dir.to_path_buf(),
+                provider,
+                Some(mcp_server_filter.as_slice()),
+                Some(skill_filter.as_slice()),
+                mode_id.as_deref(),
+                &context_root,
+            )
+        {
             let contextual = error.context(format!(
                 "Failed to compile provider '{}' for workspace '{}'",
                 provider, workspace.branch
             ));
             workspace.compiled_at = Some(now);
             workspace.compile_error = Some(contextual.to_string());
+            workspace.context_hash = Some(next_context_hash.clone());
             workspace.resolved_at = now;
             upsert_workspace(ship_dir, workspace)?;
             return Err(contextual);
@@ -873,6 +1007,7 @@ fn compile_workspace_context(
     workspace.config_generation = workspace.config_generation.saturating_add(1);
     workspace.compiled_at = Some(now);
     workspace.compile_error = None;
+    workspace.context_hash = Some(next_context_hash);
     workspace.resolved_at = now;
     upsert_workspace(ship_dir, workspace)?;
     Ok(())
@@ -1001,47 +1136,52 @@ pub fn validate_workspace_transition(
 
 pub fn get_workspace(ship_dir: &Path, branch: &str) -> Result<Option<Workspace>> {
     let row = get_workspace_db(ship_dir, branch)?;
-    Ok(row.map(
-        |(
-            id,
-            workspace_type,
-            status,
-            environment_id,
-            feature_id,
-            target_id,
-            active_mode,
-            providers,
-            resolved_at,
-            is_worktree,
-            worktree_path,
-            last_activated_at,
-            context_hash,
-            config_generation,
-            compiled_at,
-            compile_error,
-        )| {
-            let resolved_at = parse_datetime(&resolved_at);
-            Workspace {
-                id,
-                branch: branch.to_string(),
-                workspace_type: normalize_workspace_type(&workspace_type),
-                status: normalize_workspace_status(&status),
-                environment_id,
-                feature_id,
-                target_id,
-                active_mode,
-                providers,
-                resolved_at,
-                last_activated_at: parse_datetime_opt(last_activated_at),
-                is_worktree,
-                worktree_path,
-                context_hash,
-                config_generation,
-                compiled_at: parse_datetime_opt(compiled_at),
-                compile_error,
-            }
-        },
-    ))
+    let Some((
+        id,
+        workspace_type,
+        status,
+        environment_id,
+        feature_id,
+        target_id,
+        active_mode,
+        providers,
+        resolved_at,
+        is_worktree,
+        worktree_path,
+        last_activated_at,
+        context_hash,
+        config_generation,
+        compiled_at,
+        compile_error,
+    )) = row
+    else {
+        return Ok(None);
+    };
+
+    let workspace_type = parse_workspace_type_required(&workspace_type)
+        .map_err(|err| anyhow!("Workspace '{}' has invalid type value: {}", branch, err))?;
+    let status = parse_workspace_status_required(&status)
+        .map_err(|err| anyhow!("Workspace '{}' has invalid status value: {}", branch, err))?;
+
+    Ok(Some(Workspace {
+        id,
+        branch: branch.to_string(),
+        workspace_type,
+        status,
+        environment_id,
+        feature_id,
+        target_id,
+        active_mode,
+        providers,
+        resolved_at: parse_datetime(&resolved_at),
+        last_activated_at: parse_datetime_opt(last_activated_at),
+        is_worktree,
+        worktree_path,
+        context_hash,
+        config_generation,
+        compiled_at: parse_datetime_opt(compiled_at),
+        compile_error,
+    }))
 }
 
 pub fn list_workspaces(ship_dir: &Path) -> Result<Vec<Workspace>> {
@@ -1067,11 +1207,16 @@ pub fn list_workspaces(ship_dir: &Path) -> Result<Vec<Workspace>> {
         compile_error,
     ) in rows
     {
+        let parsed_workspace_type = parse_workspace_type_required(&workspace_type)
+            .map_err(|err| anyhow!("Workspace '{}' has invalid type value: {}", branch, err))?;
+        let parsed_status = parse_workspace_status_required(&status)
+            .map_err(|err| anyhow!("Workspace '{}' has invalid status value: {}", branch, err))?;
+
         workspaces.push(Workspace {
             id,
             branch,
-            workspace_type: normalize_workspace_type(&workspace_type),
-            status: normalize_workspace_status(&status),
+            workspace_type: parsed_workspace_type,
+            status: parsed_status,
             environment_id,
             feature_id,
             target_id,
@@ -1282,9 +1427,7 @@ pub fn start_workspace_session(
             .ok_or_else(|| anyhow!("No providers resolved for workspace '{}'", workspace.branch))?
     };
 
-    if workspace.compiled_at.is_none() || workspace.compile_error.is_some() {
-        compile_workspace_context(ship_dir, &mut workspace, mode_id.as_deref())?;
-    }
+    compile_workspace_context(ship_dir, &mut workspace, mode_id.as_deref())?;
 
     let now = Utc::now();
     let session = WorkspaceSessionDb {
@@ -1469,7 +1612,6 @@ pub fn create_workspace(ship_dir: &Path, request: CreateWorkspaceRequest) -> Res
     });
 
     hydrate_from_feature_links(ship_dir, &mut workspace)?;
-
     let base_status = existing
         .as_ref()
         .map(|entry| entry.status)
@@ -1488,6 +1630,38 @@ pub fn create_workspace(ship_dir: &Path, request: CreateWorkspaceRequest) -> Res
 
     persist_branch_link_from_workspace(ship_dir, &workspace)?;
     upsert_workspace(ship_dir, &workspace)?;
+    let action = if existing.is_some() {
+        EventAction::Update
+    } else {
+        EventAction::Create
+    };
+    let mut details = vec![
+        format!("type={}", workspace.workspace_type),
+        format!("status={}", workspace.status),
+    ];
+    if let Some(feature_id) = workspace.feature_id.as_deref() {
+        details.push(format!("feature={feature_id}"));
+    }
+    if let Some(target_id) = workspace.target_id.as_deref() {
+        details.push(format!("target={target_id}"));
+    }
+    if let Some(mode_id) = workspace.active_mode.as_deref() {
+        details.push(format!("mode={mode_id}"));
+    }
+    if workspace.is_worktree {
+        details.push("worktree=true".to_string());
+        if let Some(path) = workspace.worktree_path.as_deref() {
+            details.push(format!("worktree_path={path}"));
+        }
+    }
+    append_event(
+        ship_dir,
+        "ship",
+        EventEntity::Workspace,
+        action,
+        workspace.branch.clone(),
+        Some(details.join(" ")),
+    )?;
     Ok(workspace)
 }
 
@@ -1509,6 +1683,17 @@ pub fn transition_workspace_status(
     workspace.status = next_status;
     workspace.resolved_at = now;
     upsert_workspace(ship_dir, &workspace)?;
+    append_event(
+        ship_dir,
+        "ship",
+        EventEntity::Workspace,
+        EventAction::Set,
+        workspace.branch.clone(),
+        Some(format!(
+            "status={} type={}",
+            workspace.status, workspace.workspace_type
+        )),
+    )?;
     Ok(workspace)
 }
 
@@ -1528,7 +1713,6 @@ pub fn activate_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
     if workspace.workspace_type == ShipWorkspaceKind::Feature {
         workspace.workspace_type = infer_workspace_type(branch, workspace.feature_id.as_deref());
     }
-
     validate_workspace_transition(
         workspace.workspace_type,
         workspace.status,
@@ -1542,6 +1726,17 @@ pub fn activate_workspace(ship_dir: &Path, branch: &str) -> Result<Workspace> {
     persist_branch_link_from_workspace(ship_dir, &workspace)?;
     let active_mode = workspace.active_mode.clone();
     compile_workspace_context(ship_dir, &mut workspace, active_mode.as_deref())?;
+    append_event(
+        ship_dir,
+        "ship",
+        EventEntity::Workspace,
+        EventAction::Start,
+        workspace.branch.clone(),
+        Some(format!(
+            "status={} type={} generation={}",
+            workspace.status, workspace.workspace_type, workspace.config_generation
+        )),
+    )?;
     Ok(workspace)
 }
 
@@ -1717,7 +1912,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_kind_from_str_accepts_legacy_aliases() {
+    fn workspace_kind_from_str_accepts_only_canonical_values() {
         assert_eq!(
             ShipWorkspaceKind::from_str("feature").unwrap(),
             ShipWorkspaceKind::Feature
@@ -1731,28 +1926,38 @@ mod tests {
             ShipWorkspaceKind::Service
         );
         assert_eq!(
-            ShipWorkspaceKind::from_str("hotfix").unwrap(),
-            ShipWorkspaceKind::Patch
+            ShipWorkspaceKind::from_str("hotfix")
+                .expect_err("hotfix should not parse")
+                .to_string(),
+            "Invalid workspace type: hotfix"
         );
         assert_eq!(
-            ShipWorkspaceKind::from_str("refactor").unwrap(),
-            ShipWorkspaceKind::Feature
+            ShipWorkspaceKind::from_str("refactor")
+                .expect_err("refactor should not parse")
+                .to_string(),
+            "Invalid workspace type: refactor"
         );
         assert_eq!(
-            ShipWorkspaceKind::from_str("experiment").unwrap(),
-            ShipWorkspaceKind::Feature
+            ShipWorkspaceKind::from_str("experiment")
+                .expect_err("experiment should not parse")
+                .to_string(),
+            "Invalid workspace type: experiment"
         );
     }
 
     #[test]
-    fn workspace_read_models_normalize_unknown_values() {
+    fn workspace_read_model_parsers_reject_unknown_values() {
         assert_eq!(
-            normalize_workspace_type("weird-type"),
-            ShipWorkspaceKind::Feature
+            parse_workspace_type_required("weird-type")
+                .expect_err("invalid workspace type should fail")
+                .to_string(),
+            "Invalid workspace type 'weird-type'; expected one of: feature, patch, service"
         );
         assert_eq!(
-            normalize_workspace_status("in-progress"),
-            WorkspaceStatus::Active
+            parse_workspace_status_required("in-progress")
+                .expect_err("invalid status should fail")
+                .to_string(),
+            "Invalid workspace status 'in-progress'; expected one of: active, archived"
         );
     }
 
@@ -2054,6 +2259,96 @@ mod tests {
         assert!(
             !tmp.path().join(".mcp.json").exists(),
             "main checkout root should not receive worktree provider config"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_feature_agent_invalid_provider_override_falls_back_to_project_providers()
+    -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        let mut config = crate::config::get_config(Some(ship_dir.clone()))?;
+        config.providers = vec!["codex".to_string()];
+        crate::config::save_config(&config, Some(ship_dir.clone()))?;
+
+        insert_feature_for_branch_with_agent(
+            &ship_dir,
+            "feat-provider-fallback",
+            "feature/provider-fallback",
+            None,
+            r#"{"providers":["totally-unknown-provider"]}"#,
+        )?;
+
+        create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/provider-fallback".to_string(),
+                status: Some(WorkspaceStatus::Active),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+
+        let workspace = activate_workspace(&ship_dir, "feature/provider-fallback")?;
+        assert!(workspace.compile_error.is_none());
+
+        let matrix = get_workspace_provider_matrix(&ship_dir, "feature/provider-fallback", None)?;
+        assert_eq!(matrix.allowed_providers, vec!["codex".to_string()]);
+        assert!(matrix.resolution_error.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_compile_exports_only_feature_filtered_skills() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        let mut config = crate::config::get_config(Some(ship_dir.clone()))?;
+        config.providers = vec!["codex".to_string()];
+        crate::config::save_config(&config, Some(ship_dir.clone()))?;
+
+        crate::skill::create_skill(&ship_dir, "selected-skill", "Selected", "selected content")?;
+        crate::skill::create_skill(&ship_dir, "other-skill", "Other", "other content")?;
+
+        insert_feature_for_branch_with_agent(
+            &ship_dir,
+            "feat-skill-filter",
+            "feature/skill-filter",
+            None,
+            r#"{"providers":["codex"],"skills":["selected-skill"]}"#,
+        )?;
+
+        create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/skill-filter".to_string(),
+                status: Some(WorkspaceStatus::Active),
+                ..CreateWorkspaceRequest::default()
+            },
+        )?;
+
+        let workspace = activate_workspace(&ship_dir, "feature/skill-filter")?;
+        assert!(workspace.compile_error.is_none());
+
+        let project_root = ship_dir.parent().unwrap_or(&ship_dir).to_path_buf();
+        assert!(
+            project_root
+                .join(".agents")
+                .join("skills")
+                .join("selected-skill")
+                .join("SKILL.md")
+                .exists(),
+            "selected feature skill should be exported"
+        );
+        assert!(
+            !project_root
+                .join(".agents")
+                .join("skills")
+                .join("other-skill")
+                .join("SKILL.md")
+                .exists(),
+            "non-selected feature skill should not be exported"
         );
         Ok(())
     }
@@ -2540,6 +2835,27 @@ mod tests {
     }
 
     #[test]
+    fn activate_workspace_always_recompiles_and_bumps_generation() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+
+        create_workspace(
+            &ship_dir,
+            CreateWorkspaceRequest {
+                branch: "feature/hash-short-circuit".to_string(),
+                ..Default::default()
+            },
+        )?;
+
+        let first = activate_workspace(&ship_dir, "feature/hash-short-circuit")?;
+        let second = activate_workspace(&ship_dir, "feature/hash-short-circuit")?;
+
+        assert!(second.config_generation > first.config_generation);
+        assert!(second.compile_error.is_none());
+        Ok(())
+    }
+
+    #[test]
     fn session_stale_context_turns_true_after_recompile() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
@@ -2571,6 +2887,10 @@ mod tests {
         let workspace_after_start = get_workspace(&ship_dir, "feature/stale-session")?
             .ok_or_else(|| anyhow::anyhow!("workspace missing"))?;
         assert_eq!(workspace_after_start.config_generation, start_generation);
+
+        let mut updated_config = crate::config::get_config(Some(ship_dir.clone()))?;
+        updated_config.providers = vec!["codex".to_string()];
+        crate::config::save_config(&updated_config, Some(ship_dir.clone()))?;
 
         let _ = set_workspace_active_mode(&ship_dir, "feature/stale-session", None)?;
 

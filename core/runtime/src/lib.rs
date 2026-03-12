@@ -268,11 +268,7 @@ mod tests {
         // shared
         assert!(ship_path.join("project/releases/TEMPLATE.md").is_file());
         assert!(ship_path.join("project/features/TEMPLATE.md").is_file());
-        assert!(ship_path.join("TEMPLATE.md").is_file());
         assert!(ship_path.join("project/notes/TEMPLATE.md").is_file());
-        assert!(ship_path.join("README.md").is_file());
-        assert!(ship_path.join("project/README.md").is_file());
-        assert!(ship_path.join("agents/README.md").is_file());
         let cfg = crate::config::get_config(Some(ship_path.clone()))?;
         assert!(
             cfg.modes.is_empty(),

@@ -88,7 +88,8 @@ pub fn vision_doc_path(ship_dir: &Path) -> PathBuf {
     ship_dir.join("vision.md")
 }
 
-/// `.ship/TEMPLATE.md` — vision template
+/// Legacy path for vision template (`.ship/TEMPLATE.md`).
+/// New projects should rely on `.ship/vision.md` as the canonical document.
 pub fn vision_template_path(ship_dir: &Path) -> PathBuf {
     ship_dir.join("TEMPLATE.md")
 }
@@ -244,6 +245,7 @@ fn is_transient_project_root(project_root: &Path) -> bool {
         || starts_with_components(&canonical, &["var", "folders"])
         || starts_with_components(&canonical, &["private", "var", "folders"])
         || contains_component_sequence(&canonical, &["appdata", "local", "temp"])
+        || contains_component_sequence(&canonical, &["examples", "e2e"])
         || contains_component_sequence(&canonical, &["examples", "projects-e2e"])
         || contains_component_sequence(&canonical, &["target", "tmp"])
 }
@@ -1037,7 +1039,7 @@ mod tests {
             "C:/Users/me/AppData/Local/Temp/ship-e2e"
         )));
         assert!(is_transient_project_root(Path::new(
-            "/work/examples/projects-e2e/sandbox"
+            "/work/examples/e2e/sandbox"
         )));
         assert!(!is_transient_project_root(Path::new(
             "/Users/me/dev/real-project"
@@ -1163,19 +1165,9 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         "+++\ntitle = \"\"\n+++\n\n",
     )?;
     write_if_missing(
-        &vision_template_path(&ship_path),
-        "# Vision\n\nDescribe what this project is trying to achieve.\n",
-    )?;
-    write_if_missing(
         &vision_doc_path(&ship_path),
         "# Vision\n\nDescribe what this project is trying to achieve.\n",
     )?;
-    write_if_missing(&ship_path.join("README.md"), "# Ship Project\n")?;
-    write_if_missing(
-        &ship_path.join("project/README.md"),
-        "# Project Namespace\n",
-    )?;
-    write_if_missing(&ship_path.join("agents/README.md"), "# Agents Namespace\n")?;
 
     // Write ship.toml (with a stable project ID) BEFORE any DB access so that
     // project_db_key can read the ID and derive a stable state directory path.

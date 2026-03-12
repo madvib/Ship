@@ -42,12 +42,12 @@ pub fn write_context(project_root: &Path, provider_id: &str, content: &str) -> R
 
 /// Export the active mode (or global config) to the specified provider.
 pub fn export_to(project_dir: PathBuf, target: &str) -> Result<()> {
-    export_to_inner(project_dir, target, None, None, None)
+    export_to_inner(project_dir, target, None, None, None, None)
 }
 
 /// Export using an explicit project root for generated provider files.
 pub fn export_to_at_root(project_dir: PathBuf, target: &str, project_root: &Path) -> Result<()> {
-    export_to_inner(project_dir, target, None, None, Some(project_root))
+    export_to_inner(project_dir, target, None, None, None, Some(project_root))
 }
 
 /// Like `export_to` but restricts project MCP servers to those whose IDs appear in
@@ -57,7 +57,7 @@ pub fn export_to_filtered(
     target: &str,
     server_filter: Option<&[String]>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter, None, None)
+    export_to_inner(project_dir, target, server_filter, None, None, None)
 }
 
 /// Like `export_to_filtered` but writes generated files under `project_root`.
@@ -67,7 +67,14 @@ pub fn export_to_filtered_at_root(
     server_filter: Option<&[String]>,
     project_root: &Path,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter, None, Some(project_root))
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        None,
+        None,
+        Some(project_root),
+    )
 }
 
 /// Like `export_to_with_mode_override` but writes generated files under `project_root`.
@@ -80,6 +87,7 @@ pub fn export_to_with_mode_override_at_root(
     export_to_inner(
         project_dir,
         target,
+        None,
         None,
         active_mode_override,
         Some(project_root),
@@ -98,6 +106,27 @@ pub fn export_to_filtered_with_mode_override_at_root(
         project_dir,
         target,
         server_filter,
+        None,
+        active_mode_override,
+        Some(project_root),
+    )
+}
+
+/// Like `export_to_filtered_with_mode_override_at_root` but also restricts exported
+/// skills to `skill_filter` IDs.
+pub fn export_to_filtered_with_mode_override_and_skills_at_root(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+    skill_filter: Option<&[String]>,
+    active_mode_override: Option<&str>,
+    project_root: &Path,
+) -> Result<()> {
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        skill_filter,
         active_mode_override,
         Some(project_root),
     )
@@ -109,7 +138,7 @@ pub fn export_to_with_mode_override(
     target: &str,
     active_mode_override: Option<&str>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, None, active_mode_override, None)
+    export_to_inner(project_dir, target, None, None, active_mode_override, None)
 }
 
 /// Like `export_to_filtered` but applies a mode override when building payload.
@@ -119,13 +148,21 @@ pub fn export_to_filtered_with_mode_override(
     server_filter: Option<&[String]>,
     active_mode_override: Option<&str>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter, active_mode_override, None)
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        None,
+        active_mode_override,
+        None,
+    )
 }
 
 fn export_to_inner(
     project_dir: PathBuf,
     target: &str,
     server_filter: Option<&[String]>,
+    skill_filter: Option<&[String]>,
     active_mode_override: Option<&str>,
     project_root_override: Option<&Path>,
 ) -> Result<()> {
@@ -146,13 +183,19 @@ fn export_to_inner(
 
     // Skills output (provider-specific)
     match desc.skills_output {
-        SkillsOutput::ClaudeSkills => export_skills_to_claude(&project_dir, project_root)?,
-        SkillsOutput::AgentSkills => {
-            export_skills_to_dir(&project_dir, &project_root.join(".gemini").join("skills"))?
+        SkillsOutput::ClaudeSkills => {
+            export_skills_to_claude(&project_dir, project_root, skill_filter)?
         }
-        SkillsOutput::CodexSkills => {
-            export_skills_to_dir(&project_dir, &project_root.join(".agents").join("skills"))?
-        }
+        SkillsOutput::AgentSkills => export_skills_to_dir(
+            &project_dir,
+            &project_root.join(".gemini").join("skills"),
+            skill_filter,
+        )?,
+        SkillsOutput::CodexSkills => export_skills_to_dir(
+            &project_dir,
+            &project_root.join(".agents").join("skills"),
+            skill_filter,
+        )?,
         SkillsOutput::None => {}
     }
 
@@ -161,8 +204,7 @@ fn export_to_inner(
         "claude" => {
             write_hook_runtime_artifacts(project_root, &payload)?;
             let provider_hooks = hooks_for_provider("claude", &payload.hooks);
-            if !provider_hooks.is_empty() || has_claude_permission_overrides(&payload.permissions)
-            {
+            if !provider_hooks.is_empty() || has_claude_permission_overrides(&payload.permissions) {
                 export_claude_settings(&provider_hooks, &payload.permissions)?;
             }
         }
@@ -509,7 +551,10 @@ fn provider_import_paths(desc: &ProviderDescriptor, project_dir: &Path) -> Resul
     Ok(candidates)
 }
 
-fn provider_skill_import_paths(desc: &ProviderDescriptor, project_dir: &Path) -> Result<Vec<PathBuf>> {
+fn provider_skill_import_paths(
+    desc: &ProviderDescriptor,
+    project_dir: &Path,
+) -> Result<Vec<PathBuf>> {
     let Some(relative_path) = provider_skills_relative_path(desc) else {
         return Ok(Vec::new());
     };
@@ -1023,7 +1068,8 @@ fn export_toml(
         apply_codex_permissions(root, project_root, &payload.permissions);
     }
 
-    let header = "# Generated by Ship. Do not edit manually — run `ship git sync` to regenerate.\n\n";
+    let header =
+        "# Generated by Ship. Do not edit manually — run `ship git sync` to regenerate.\n\n";
     let content = format!("{}{}", header, toml::to_string_pretty(&doc)?);
     crate::fs_util::write_atomic(&config_path, content)?;
     if desc.id == "codex" {
@@ -1227,12 +1273,32 @@ fn toml_mcp_entry(desc: &ProviderDescriptor, s: &McpServerConfig) -> toml::Value
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 
-fn export_skills_to_claude(project_dir: &Path, project_root: &Path) -> Result<()> {
-    export_skills_to_dir(project_dir, &project_root.join(".claude").join("skills"))
+fn export_skills_to_claude(
+    project_dir: &Path,
+    project_root: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<()> {
+    export_skills_to_dir(
+        project_dir,
+        &project_root.join(".claude").join("skills"),
+        skill_filter,
+    )
 }
 
-fn resolve_skills_for_export(project_dir: &Path) -> Result<Vec<crate::skill::Skill>> {
-    list_effective_skills(project_dir)
+fn resolve_skills_for_export(
+    project_dir: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<Vec<crate::skill::Skill>> {
+    let mut skills = list_effective_skills(project_dir)?;
+    if let Some(allowed) = skill_filter {
+        let allowed = allowed
+            .iter()
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty())
+            .collect::<HashSet<_>>();
+        skills.retain(|skill| allowed.contains(skill.id.as_str()));
+    }
+    Ok(skills)
 }
 
 #[derive(Serialize)]
@@ -1306,7 +1372,11 @@ fn is_ship_managed_skill_markdown(content: &str) -> bool {
 }
 
 /// Write skills using the agentskills.io layout: `<skills_dir>/<skill-id>/SKILL.md`
-fn export_skills_to_dir(project_dir: &Path, skills_dir: &Path) -> Result<()> {
+fn export_skills_to_dir(
+    project_dir: &Path,
+    skills_dir: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<()> {
     let project_root = project_dir.parent().unwrap_or(project_dir);
     let legacy_agents_skills_dir = project_root.join("agents").join("skills");
     if skills_dir == legacy_agents_skills_dir {
@@ -1316,7 +1386,7 @@ fn export_skills_to_dir(project_dir: &Path, skills_dir: &Path) -> Result<()> {
         ));
     }
 
-    let skills = resolve_skills_for_export(project_dir)?;
+    let skills = resolve_skills_for_export(project_dir, skill_filter)?;
     let retain_ids: HashSet<String> = skills.iter().map(|skill| skill.id.clone()).collect();
     prune_stale_managed_skill_dirs(skills_dir, &retain_ids);
     if skills.is_empty() {

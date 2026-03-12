@@ -577,8 +577,10 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
 fn import_provider_surface(project_dir: &Path, provider_id: &str) -> Result<ProviderImportSummary> {
     let mcp_servers_added =
         runtime::agents::export::import_from_provider(provider_id, project_dir.to_path_buf())?;
-    let skills_added =
-        runtime::agents::export::import_skills_from_provider(provider_id, project_dir.to_path_buf())?;
+    let skills_added = runtime::agents::export::import_skills_from_provider(
+        provider_id,
+        project_dir.to_path_buf(),
+    )?;
     let permissions_imported = runtime::agents::export::import_permissions_from_provider(
         provider_id,
         project_dir.to_path_buf(),
