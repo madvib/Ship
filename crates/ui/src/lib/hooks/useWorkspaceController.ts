@@ -81,7 +81,7 @@ export function useWorkspaceController() {
     refreshActivity,
     setError,
   });
-  const { loadProjectData, loadProjectConfig, refreshDetectedProject } = useWorkspaceLifecycle({
+  const { loadProjectData, loadProjectConfig, refreshDetectedProject, refreshRecentProjects } = useWorkspaceLifecycle({
     activeProject,
     sidebarCollapsed,
     setEventEntries,
@@ -120,6 +120,7 @@ export function useWorkspaceController() {
     setCreatingProject,
     loadProjectData,
     loadProjectConfig,
+    refreshRecentProjects,
   });
 
   const { handleSaveSettings, handleSaveProjectSettings, handleSaveGlobalAgentSettings } = useSettingsActions({
@@ -189,6 +190,7 @@ export function useWorkspaceController() {
     setIsWorkspaceFocusMode,
     setError,
     refreshDetectedProject,
+    refreshRecentProjects,
     handleOpenProject,
     handleNewProject,
     handlePickProjectDirectory,
@@ -232,6 +234,7 @@ export function useWorkspaceController() {
     setIsWorkspaceFocusMode,
     setError,
     refreshDetectedProject,
+    refreshRecentProjects,
     handleOpenProject,
     handleNewProject,
     handlePickProjectDirectory,

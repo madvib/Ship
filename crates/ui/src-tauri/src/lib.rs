@@ -10,9 +10,9 @@ use runtime::config::{
     ProjectDiscovery,
 };
 use runtime::project::{
-    features_dir, get_active_project_global, get_project_dir, releases_dir,
-    project_slug_from_ship_dir, resolve_project_ship_dir, sanitize_file_name,
-    set_active_project_global, SHIP_DIR_NAME,
+    features_dir, get_active_project_global, get_project_dir, project_slug_from_ship_dir,
+    releases_dir, resolve_project_ship_dir, sanitize_file_name, set_active_project_global,
+    SHIP_DIR_NAME,
 };
 use runtime::{
     activate_workspace, autodetect_providers, create_skill, create_user_skill, create_workspace,
@@ -32,12 +32,12 @@ use serde::{Deserialize, Serialize};
 use ship_module_project::{
     create_adr, create_feature, create_note, create_release_with_metadata, delete_adr,
     feature_done, feature_start, get_adr_by_id, get_feature_by_id, get_feature_documentation,
-    get_note_by_id, get_project_name, get_release_by_id, init_project, list_adrs, list_features,
-    list_notes, list_registered_projects, list_releases, move_adr, read_template, register_project,
-    rename_project, update_adr, update_feature_content, update_feature_documentation,
-    update_note_content, update_release, AdrEntry, AdrStatus, FeatureDocStatus,
-    FeatureEntry as ProjectFeatureEntry, NoteScope, ReleaseEntry as ProjectReleaseEntry,
-    ReleaseStatus as ProjectReleaseStatus, ADR,
+    get_feature_model, get_note_by_id, get_project_name, get_release_by_id, init_project,
+    list_adrs, list_features, list_notes, list_registered_projects, list_releases, move_adr,
+    read_template, register_project, rename_project, update_adr, update_feature_content,
+    update_feature_documentation, update_note_content, update_release, AdrEntry, AdrStatus,
+    FeatureDocStatus, FeatureEntry as ProjectFeatureEntry, FeatureModel as ProjectFeatureModel,
+    NoteScope, ReleaseEntry as ProjectReleaseEntry, ReleaseStatus as ProjectReleaseStatus, ADR,
 };
 use specta::Type;
 use std::collections::{HashMap, HashSet};
@@ -456,6 +456,8 @@ pub struct FeatureDocument {
     pub todos: Vec<FeatureTodoItem>,
     #[serde(default)]
     pub acceptance_criteria: Vec<FeatureCriterionItem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<ProjectFeatureModel>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -806,6 +808,7 @@ fn map_feature_document(project_dir: &Path, entry: &ProjectFeatureEntry) -> Feat
         .map(strip_generated_export_header)
         .unwrap_or_else(|| entry.feature.body.clone());
     let docs = get_feature_documentation(project_dir, &entry.id).ok();
+    let model = get_feature_model(project_dir, &entry.id).ok();
     FeatureDocument {
         id: info.id,
         file_name: info.file_name,
@@ -842,6 +845,7 @@ fn map_feature_document(project_dir: &Path, entry: &ProjectFeatureEntry) -> Feat
                 met: criterion.met,
             })
             .collect(),
+        model,
     }
 }
 
@@ -3162,6 +3166,45 @@ async fn get_workspace_git_status_cmd(
 
 #[tauri::command]
 #[specta::specta]
+async fn get_git_status_for_path_cmd(path: String) -> Result<WorkspaceGitStatusSummary, String> {
+    let target_dir = PathBuf::from(path);
+    tauri::async_runtime::spawn_blocking(move || {
+        if !target_dir.exists() {
+            return Err("Path does not exist".to_string());
+        }
+
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&target_dir)
+            .output();
+
+        let branch = match output {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => "unknown".to_string(),
+        };
+
+        let changes = collect_workspace_changes(&target_dir).unwrap_or_default();
+        let (insertions, deletions) = collect_workspace_loc_delta(&target_dir).unwrap_or((0, 0));
+        let (upstream, ahead, behind) = collect_workspace_ahead_behind(&target_dir);
+
+        Ok(WorkspaceGitStatusSummary {
+            branch,
+            touched_files: changes.len(),
+            insertions,
+            deletions,
+            ahead,
+            behind,
+            upstream,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+#[specta::specta]
 async fn open_workspace_editor_cmd(
     branch: String,
     editor: String,
@@ -4165,7 +4208,10 @@ fn discovery_cache_path(
                 .join(slug)
                 .join("cache.json"))
         }
-        _ => Ok(global.join("state").join("discovery").join("global-cache.json")),
+        _ => Ok(global
+            .join("state")
+            .join("discovery")
+            .join("global-cache.json")),
     }
 }
 
@@ -5949,8 +5995,9 @@ async fn import_agent_config_cmd(
         let imported_mcp_servers =
             runtime::agent_export::import_from_provider(&target, dir.clone())
                 .map_err(|e| e.to_string())?;
-        let imported_skills = runtime::agent_export::import_skills_from_provider(&target, dir.clone())
-            .map_err(|e| e.to_string())?;
+        let imported_skills =
+            runtime::agent_export::import_skills_from_provider(&target, dir.clone())
+                .map_err(|e| e.to_string())?;
         let imported_permissions = if include_permissions.unwrap_or(true) {
             runtime::agent_export::import_permissions_from_provider(&target, dir)
                 .map_err(|e| e.to_string())?
@@ -6094,6 +6141,7 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             end_workspace_session_cmd,
             list_workspace_changes_cmd,
             get_workspace_git_status_cmd,
+            get_git_status_for_path_cmd,
             get_branch_detail_cmd,
             get_branch_file_diff_cmd,
             open_workspace_editor_cmd,

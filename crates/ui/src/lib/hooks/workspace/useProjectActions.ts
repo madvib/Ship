@@ -2,6 +2,7 @@ import { Dispatch, SetStateAction, useCallback, useMemo } from 'react';
 import {
   AdrEntry,
   FeatureDocument,
+  ModeConfig,
   ProjectDiscovery as Project,
   ProjectConfig,
   ReleaseDocument,
@@ -30,6 +31,7 @@ interface UseProjectActionsParams {
   setCreatingProject: Dispatch<SetStateAction<boolean>>;
   loadProjectData: () => Promise<void>;
   loadProjectConfig: () => Promise<void>;
+  refreshRecentProjects: () => Promise<void>;
 }
 
 export function useProjectActions({
@@ -42,6 +44,7 @@ export function useProjectActions({
   setCreatingProject,
   loadProjectData,
   loadProjectConfig,
+  refreshRecentProjects,
 }: UseProjectActionsParams) {
   const resetSelection = useCallback(() => {
     setSelectedAdr(null);
@@ -104,7 +107,7 @@ export function useProjectActions({
   const handleCreateProjectFromForm = useCallback(async (input: CreateProjectInput) => {
     if (!isTauriRuntime()) {
       setError('Project creation is only available in Tauri runtime.');
-      return;
+      return null;
     }
 
     const payload: CreateProjectPayload = {
@@ -117,6 +120,13 @@ export function useProjectActions({
       const statuses = DEFAULT_STATUSES.filter((status: StatusConfig) =>
         input.selectedStatuses.includes(status.id)
       );
+      
+      // Ensure ship.toml is ALWAYS committed
+      const commitCategories = [...input.gitCommitCategories];
+      if (!commitCategories.includes('ship.toml')) {
+        commitCategories.push('ship.toml');
+      }
+
       payload.config = {
         version: '1',
         name: input.name,
@@ -124,8 +134,13 @@ export function useProjectActions({
         statuses,
         git: {
           ignore: [] as string[],
-          commit: ['releases', 'features', 'adrs', 'vision', 'ship.toml', 'templates'],
+          commit: commitCategories,
         },
+        providers: input.enabledAgents,
+        // Set active_mode to the first selected mode
+        active_mode: input.selectedModes[0] || 'frontend-react',
+        // Map selected mode IDs to full ModeConfig objects (partial is fine for creation)
+        modes: input.selectedModes.map(id => ({ id, name: id } as ModeConfig)),
       } as ProjectConfig;
     }
 
@@ -133,13 +148,15 @@ export function useProjectActions({
     try {
       const info = await createProjectWithOptionsCmd(payload);
       await activateProjectFromInfo(info);
+      await refreshRecentProjects();
+      return info;
     } catch (error) {
       setError(String(error));
       throw error;
     } finally {
       setCreatingProject(false);
     }
-  }, [setError, setCreatingProject, activateProjectFromInfo]);
+  }, [setError, setCreatingProject, activateProjectFromInfo, refreshRecentProjects]);
 
   const handleSelectProject = useCallback(async (project: Project): Promise<boolean> => {
     if (!isTauriRuntime()) {

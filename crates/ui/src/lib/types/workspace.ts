@@ -1,4 +1,4 @@
-import { Workspace, WorkspaceType } from '@/bindings';
+import { Workspace } from '@/bindings';
 
 /**
  * Extended Workspace type that includes fields provided by the backend 
@@ -6,12 +6,5 @@ import { Workspace, WorkspaceType } from '@/bindings';
  * runtime representation.
  */
 export interface RuntimeWorkspace extends Workspace {
-    workspace_type?: WorkspaceType;
-    environment_id?: string | null;
-    release_id?: string | null;
-    last_activated_at?: string | null;
-    context_hash?: string | null;
-    config_generation?: number;
-    compiled_at?: string | null;
-    compile_error?: string | null;
+  release_id?: string | null;
 }

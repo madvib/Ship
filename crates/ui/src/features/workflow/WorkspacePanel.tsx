@@ -148,8 +148,7 @@ export default function WorkspacePanel() {
       const res = await endWorkspaceSessionCmd(
         state.detail.branch,
         summary.length > 0 ? summary : null,
-        state.linkFeatureId ? [state.linkFeatureId] : [],
-        []
+        state.linkFeatureId ? [state.linkFeatureId] : []
       );
       if (res.status === 'ok') {
         if (terminal.terminalSession?.branch === state.detail.branch) {
@@ -193,8 +192,7 @@ export default function WorkspacePanel() {
         'Session restarted to apply updated workspace context.',
         state.linkFeatureId
           ? [state.linkFeatureId]
-          : [],
-        []
+          : []
       );
       if (endRes.status === 'error') {
         state.setError(endRes.error || 'Failed to end current session for restart.');
@@ -407,20 +405,6 @@ export default function WorkspacePanel() {
     [ship.features],
   );
 
-  const releaseLabels = useMemo(() => {
-    const entries: Array<[string, string]> = [];
-    for (const release of ship.releases) {
-      const label = release.version || release.id;
-      entries.push([release.id, label]);
-      if (release.file_name) {
-        entries.push([release.file_name, label]);
-      }
-      if (release.version) {
-        entries.push([release.version, label]);
-      }
-    }
-    return Object.fromEntries(entries);
-  }, [ship.releases]);
 
   useEffect(() => {
     const allowedProviders = state.providerMatrix?.allowed_providers ?? [];
@@ -511,7 +495,6 @@ export default function WorkspacePanel() {
           }}
           onCollapse={() => setWorkspaceSidebarCollapsed(true)}
           featureLabels={featureLabels}
-          releaseLabels={releaseLabels}
         />
       </aside>
 

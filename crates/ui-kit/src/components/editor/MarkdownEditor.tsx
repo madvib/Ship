@@ -238,12 +238,12 @@ export default function MarkdownEditor({
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
+                                    <DropdownMenuTrigger render={
                                         <Button variant="outline" size="xs" disabled={sampling}>
                                             <Wand2 className="size-3.5" />
                                             AI Actions
                                         </Button>
-                                    </DropdownMenuTrigger>
+                                    } />
                                     <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
                                 <DropdownMenuGroup>
                                     <DropdownMenuLabel className="px-2 pb-2 opacity-50 uppercase text-[9px] tracking-[0.2em] font-black">

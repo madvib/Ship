@@ -7,7 +7,6 @@ import {
   Edit3,
   FileText,
   GitBranch,
-  Info,
   Save,
   X,
 } from 'lucide-react';
@@ -16,11 +15,14 @@ import remarkGfm from 'remark-gfm';
 import MarkdownEditor from '@/components/editor';
 import { FeatureHeaderMetadata } from './FeatureHeaderMetadata';
 import { FeatureChecklistSection } from './FeatureChecklistSection';
-import { Button } from '@ship/ui';
+import {
+  toggleFeatureChecklistItem,
+} from '@/features/planning/common/hub/utils/featureMetrics';
+import { Badge, Button } from '@ship/ui';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ship/ui';
 import { Progress } from '@ship/ui';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@ship/ui';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@ship/ui';
 import {
   readFrontmatterStringListField,
   splitFrontmatterDocument,
@@ -183,6 +185,81 @@ export default function FeatureDetail({
     [documentModel.frontmatter]
   );
   const docsPreview = useMemo(() => docsContent.trim(), [docsContent]);
+  const docsStatusLabel = (feature.docs_status ?? 'not-started').replace(/-/g, ' ');
+  const docsStatusBadgeClass = useMemo(() => {
+    switch (feature.docs_status ?? 'not-started') {
+      case 'draft':
+        return 'border-amber-300 bg-amber-100/80 text-amber-900';
+      case 'reviewed':
+        return 'border-blue-300 bg-blue-100/80 text-blue-900';
+      case 'published':
+        return 'border-emerald-300 bg-emerald-100/80 text-emerald-900';
+      default:
+        return 'border-muted-foreground/30 bg-muted/60 text-muted-foreground';
+    }
+  }, [feature.docs_status]);
+  const modelDelta = feature.model?.delta;
+  const modelDeltaActionableItems = modelDelta?.actionable_items ?? [];
+  const deltaSignals = useMemo(() => {
+    if (modelDelta) {
+      const signals: string[] = [];
+      if (modelDelta.declaration_missing) {
+        signals.push('Declaration is missing.');
+      }
+      if (modelDelta.status_missing) {
+        signals.push('Status is missing.');
+      }
+      for (const criterion of modelDelta.unmet_acceptance_criteria ?? []) {
+        signals.push(`Unmet acceptance criterion: ${criterion}`);
+      }
+      for (const check of modelDelta.failing_checks ?? []) {
+        signals.push(`Failing status check: ${check}`);
+      }
+      for (const criterion of modelDelta.missing_pass_fail_criteria ?? []) {
+        signals.push(`Missing PASS/FAIL condition: ${criterion}`);
+      }
+      return signals;
+    }
+
+    const signals: string[] = [];
+    if (!hasChecklistCoverage) {
+      signals.push('Declaration checklist is missing (no todos or acceptance criteria).');
+    }
+    if (readiness.acceptance.open > 0) {
+      signals.push(
+        `${readiness.acceptance.open} acceptance criteria currently unmet.`
+      );
+    }
+    if (readiness.acceptance.open === 0 && readiness.todos.open > 0) {
+      signals.push(`${readiness.todos.open} delivery todos still open.`);
+    }
+    return signals;
+  }, [
+    hasChecklistCoverage,
+    modelDelta,
+    readiness.acceptance.open,
+    readiness.todos.open,
+  ]);
+
+  const handleToggleChecklistItem = useCallback(async (
+    section: 'todos' | 'acceptance',
+    itemIndex: number
+  ) => {
+    if (saving) return;
+    const nextContent = toggleFeatureChecklistItem(content, section, itemIndex);
+    if (!nextContent || nextContent === content) return;
+    const previousContent = content;
+    setContent(nextContent);
+    setDirty(false);
+    setSaving(true);
+    try {
+      await onSave(feature.file_name, nextContent);
+    } catch {
+      setContent(previousContent);
+    } finally {
+      setSaving(false);
+    }
+  }, [content, feature.file_name, onSave, saving]);
 
   const handleMetadataUpdate = useCallback((updates: {
     release_id?: string;
@@ -338,7 +415,10 @@ export default function FeatureDetail({
             <div className="space-y-1.5 rounded-md border bg-card px-2.5 py-2">
               <p className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
                 <FileText className="size-3.5" />
-                Docs: <span className="font-medium text-foreground">{feature.docs_status ?? 'not-started'}</span>
+                Docs:
+                <Badge variant="outline" className={cn('h-5 px-1.5 capitalize', docsStatusBadgeClass)}>
+                  {docsStatusLabel}
+                </Badge>
               </p>
               <p className="text-muted-foreground text-xs">
                 Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span>
@@ -375,33 +455,11 @@ export default function FeatureDetail({
               className="flex min-h-0 flex-1 flex-col"
             >
               <div className="border-b px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-sm font-semibold">
-                      {activeTab === 'feature' ? 'Feature Document' : 'Feature Documentation'}
-                    </h3>
-                    <p className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
-                      {activeTab === 'feature'
-                        ? 'Read-first feature markdown with full-screen editing when needed.'
-                        : 'Feature documentation linked to this feature.'}
-                      {activeTab === 'docs' && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground inline-flex"
-                              aria-label="Documentation storage details"
-                            >
-                              <Info className="size-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            Feature docs are stored in Ship state and tracked by revision.
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                    </p>
-                  </div>
+                <div className="flex items-center justify-between gap-2">
+                  <TabsList className="h-8 w-fit">
+                    <TabsTrigger value="feature" className="h-6 px-3 text-xs">Feature</TabsTrigger>
+                    <TabsTrigger value="docs" className="h-6 px-3 text-xs">Documentation</TabsTrigger>
+                  </TabsList>
                   {activeTab === 'feature' && (
                     <Button
                       variant="outline"
@@ -416,10 +474,6 @@ export default function FeatureDetail({
                     </Button>
                   )}
                 </div>
-                <TabsList className="h-8 w-fit">
-                  <TabsTrigger value="feature" className="h-6 px-3 text-xs">Feature</TabsTrigger>
-                  <TabsTrigger value="docs" className="h-6 px-3 text-xs">Documentation</TabsTrigger>
-                </TabsList>
               </div>
 
               <div className="min-h-0 flex-1 overflow-hidden p-3">
@@ -440,13 +494,58 @@ export default function FeatureDetail({
                         title="Delivery Todos"
                         items={todoItems}
                         emptyLabel="No delivery todos defined."
+                        disabled={saving}
+                        onToggleItem={(itemIndex) => {
+                          void handleToggleChecklistItem('todos', itemIndex);
+                        }}
                       />
                       <FeatureChecklistSection
                         title="Acceptance Criteria"
                         items={acceptanceItems}
                         emptyLabel="No acceptance criteria defined."
+                        disabled={saving}
+                        onToggleItem={(itemIndex) => {
+                          void handleToggleChecklistItem('acceptance', itemIndex);
+                        }}
                       />
                     </div>
+
+                    <section className="space-y-2 rounded-md border bg-card px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-sm font-medium">Delta</h4>
+                        {deltaSignals.length > 0 ? (
+                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                            {modelDelta ? `Drift ${modelDelta.drift_score}` : `${deltaSignals.length} Open`}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="h-5 px-1.5 text-[10px] text-emerald-700 border-emerald-300 bg-emerald-100/70">
+                            Aligned
+                          </Badge>
+                        )}
+                      </div>
+                      {deltaSignals.length > 0 ? (
+                        <ul className="space-y-1 text-xs text-amber-700">
+                          {deltaSignals.map((signal, index) => (
+                            <li key={`${signal}-${index}`} className="inline-flex items-start gap-1.5">
+                              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                              <span>{signal}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-emerald-700 inline-flex items-center gap-1.5">
+                          <CheckCircle2 className="size-3.5" />
+                          Declaration and checklist status currently align.
+                        </p>
+                      )}
+                      {modelDelta && modelDeltaActionableItems.length > 0 && (
+                        <ul className="space-y-1 rounded-sm border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                          {modelDeltaActionableItems.map((item, index) => (
+                            <li key={`${item}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
 
                     {hasChecklistCoverage && readiness.blocking && (
                       <p className="inline-flex items-center gap-1.5 text-xs text-amber-600">
@@ -465,30 +564,37 @@ export default function FeatureDetail({
 
                 <TabsContent value="docs" className="mt-0 h-full overflow-auto">
                   <div className="space-y-3">
-                    <div className="text-muted-foreground flex flex-wrap items-center gap-4 text-xs">
-                      <label className="flex items-center gap-1.5">
-                        Status:
-                        <select
-                          className="bg-card border-muted-foreground/30 rounded border px-2 py-1 text-xs"
-                          value={docsStatus}
-                          onChange={(event) => {
-                            setDocsStatus(event.target.value);
-                            setDocsDirty(true);
-                          }}
-                          disabled={!editingDocs || docsSaving}
-                        >
-                          {DOC_STATUS_OPTIONS.map((nextStatus) => (
-                            <option key={nextStatus} value={nextStatus}>
-                              {nextStatus}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <span>Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span></span>
-                    </div>
-                    <div className="ml-auto inline-flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-2.5 py-2">
+                      <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span>Status:</span>
+                          <Select
+                            value={docsStatus}
+                            onValueChange={(nextStatus) => {
+                              if (!nextStatus) return;
+                              setDocsStatus(nextStatus);
+                              setDocsDirty(true);
+                            }}
+                            disabled={!editingDocs || docsSaving}
+                          >
+                            <SelectTrigger size="sm" className="h-7 min-w-[140px] text-xs capitalize">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {DOC_STATUS_OPTIONS.map((nextStatus) => (
+                                <SelectItem key={nextStatus} value={nextStatus} className="capitalize">
+                                  {nextStatus}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <span>
+                          Revision: <span className="font-medium text-foreground">{feature.docs_revision ?? 0}</span>
+                        </span>
+                      </div>
                       {editingDocs ? (
-                        <>
+                        <div className="inline-flex items-center gap-2">
                           <Button variant="outline" size="sm" onClick={cancelDocsEditing} disabled={docsSaving}>
                             <X className="size-4" />
                             Cancel
@@ -497,7 +603,7 @@ export default function FeatureDetail({
                             <Save className="size-4" />
                             {docsSaving ? 'Saving…' : 'Save'}
                           </Button>
-                        </>
+                        </div>
                       ) : (
                         <Button size="sm" onClick={() => setEditingDocs(true)}>
                           <Edit3 className="size-4" />

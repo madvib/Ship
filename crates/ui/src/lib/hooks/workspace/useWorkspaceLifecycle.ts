@@ -81,6 +81,19 @@ export function useWorkspaceLifecycle({
     setProjectConfig(cfg);
   }, [setProjectConfig]);
 
+  const refreshRecentProjects = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setRecentProjects([]);
+      return;
+    }
+
+    const projects = await listProjects().catch((error) => {
+      console.error('Failed to load projects:', error);
+      return [];
+    });
+    setRecentProjects(dedupeProjects(projects));
+  }, [setRecentProjects]);
+
   const refreshDetectedProject = useCallback(async (): Promise<Project | null> => {
     if (!isTauriRuntime()) {
       setDetectedProject(null);
@@ -246,11 +259,7 @@ export function useWorkspaceLifecycle({
           return;
         }
 
-        const projects = await listProjects().catch((error) => {
-          console.error('Failed to load projects:', error);
-          return [];
-        });
-        setRecentProjects(dedupeProjects(projects));
+        await refreshRecentProjects();
 
         await refreshDetectedProject();
 
@@ -283,5 +292,6 @@ export function useWorkspaceLifecycle({
     loadProjectData,
     loadProjectConfig,
     refreshDetectedProject,
-  }), [loadProjectData, loadProjectConfig, refreshDetectedProject]);
+    refreshRecentProjects,
+  }), [loadProjectData, loadProjectConfig, refreshDetectedProject, refreshRecentProjects]);
 }

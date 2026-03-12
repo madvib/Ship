@@ -23,7 +23,6 @@ export function NoteMetadata({
     tagSuggestions,
     isEditing,
     onChange,
-    onNavigate,
 }: NoteMetadataProps) {
     const summary = readFrontmatterSummary(frontmatter);
     const { tags = [] } = summary;

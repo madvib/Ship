@@ -303,6 +303,12 @@ export const getWorkspaceGitStatusCmd = (
   invoke('get_workspace_git_status_cmd', { branch })
     .then(data => ({ status: 'ok', data } as Result<WorkspaceGitStatusSummary, string>))
     .catch(error => ({ status: 'error', error: String(error) }));
+export const getGitStatusForPathCmd = (
+  path: string
+): Promise<Result<WorkspaceGitStatusSummary, string>> =>
+  invoke('get_git_status_for_path_cmd', { path })
+    .then(data => ({ status: 'ok', data } as Result<WorkspaceGitStatusSummary, string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
 export const getBranchDetailCmd = (
   branch: string,
 ): Promise<Result<BranchDetailSummary, string>> =>

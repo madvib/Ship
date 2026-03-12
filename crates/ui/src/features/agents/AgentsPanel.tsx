@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Bot, Plus, Shield, ShieldAlert, FileSearch, Trash2, Upload, Download, Globe, Folder, Package, PenLine, ChevronDown, ChevronRight, Check, ScrollText, LockIcon, Info, Zap, BookOpen, Terminal, Link, Wrench } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { commands, AgentDiscoveryCache, CatalogEntry, HookConfig, McpProbeReport, McpRegistryEntry, McpServerConfig, McpServerType, McpValidationIssue, McpValidationReport, ModeConfig, Permissions, ProjectConfig, ProviderInfo, SkillToolHint } from '@/bindings';
@@ -11,7 +11,6 @@ import { Input } from '@ship/ui';
 import { Label } from '@ship/ui';
 import { PageFrame, PageHeader } from '@ship/ui';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@ship/ui';
-import { Textarea } from '@ship/ui';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@ship/ui';
 import { FileTree, FileTreeFile, FileTreeFolder } from '@ship/ui';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@ship/ui';
@@ -90,6 +89,7 @@ type HookEventOption = {
   label: string;
   providers: string[];
   matcherHint?: string;
+  description?: string;
 };
 
 const HOOK_EVENTS: HookEventOption[] = [
@@ -617,9 +617,7 @@ function slugifyId(value: string): string {
     .slice(0, 64);
 }
 
-function inferSkillIdFromSource(source: string): string {
-  return parseSkillSourceInstallSpec(source).inferredSkillId;
-}
+
 
 type SkillSourceInstallSpec = {
   source: string;
@@ -921,7 +919,7 @@ export default function AgentsPanel({
   const [exportStatus, setExportStatus] = useState<Record<string, 'idle' | 'loading' | 'ok' | 'error'>>({});
   const [importStatus, setImportStatus] = useState<Record<string, 'idle' | 'loading' | 'ok' | 'error'>>({});
   const [importSummary, setImportSummary] = useState<Record<string, string>>({});
-  const [agentError, setAgentError] = useState<string | null>(null);
+
   const [mcpEditDraft, setMcpEditDraft] = useState<McpEditDraft | null>(null);
   const [skillStudioMode, setSkillStudioMode] = useState<boolean>(true);
   const [skillTreeExpanded, setSkillTreeExpanded] = useState<Set<string>>(() => new Set());
@@ -990,7 +988,7 @@ export default function AgentsPanel({
     enabled: initialSection === 'rules',
   });
 
-  const activeDocs =
+  const activeDocs: AgentDoc[] =
     activeDocKind === 'skills'
       ? skills.map((s) => ({
           id: s.id,
@@ -1337,14 +1335,7 @@ export default function AgentsPanel({
       })),
     [skillCatalogEntries]
   );
-  const catalogSkillSourceOptions = useMemo(
-    () =>
-      skillCatalogEntries
-        .map((entry) => entry.source_url?.trim() ?? '')
-        .filter(Boolean)
-        .map((value) => ({ value })),
-    [skillCatalogEntries]
-  );
+
   const mcpIdOptions = useMemo(() => {
     const fromCatalog = mcpCatalogEntries.map((entry) => ({
       value: entry.id.startsWith('mcp-') ? entry.id.slice(4) : entry.id,
@@ -1410,7 +1401,7 @@ export default function AgentsPanel({
   const cachedMcpToolsByServerId = useMemo(() => {
     const map = new Map<string, Array<{ name: string; description?: string | null }>>();
     Object.entries(discoveryCache?.mcp_tools ?? {}).forEach(([serverId, tools]) => {
-      map.set(serverId, tools);
+      map.set(serverId, (tools || []).map(t => ({ name: t.name, description: t.description })));
     });
     return map;
   }, [discoveryCache]);
@@ -1432,10 +1423,7 @@ export default function AgentsPanel({
       null
     );
   }, [skillCatalogInput, skillCatalogEntries]);
-  const inferredSkillSourceId = useMemo(
-    () => inferSkillIdFromSource(skillSourceInput),
-    [skillSourceInput]
-  );
+
   const modePresetMatches = useMemo(() => {
     return MODE_PRESETS.reduce<Record<string, { skillIds: string[]; mcpServerIds: string[] }>>((acc, preset) => {
       const matchingSkills = skills
@@ -1666,9 +1654,7 @@ export default function AgentsPanel({
     }
     if (!mcpRegistryTemplateEntry) return;
     if (MCP_STDIO_ONLY_ALPHA && (mcpRegistryTemplateEntry.transport ?? '').toLowerCase() !== 'stdio') {
-      setAgentError(
-        `Registry entry '${mcpRegistryTemplateEntry.title}' is ${mcpRegistryTemplateEntry.transport.toUpperCase()} transport. HTTP/SSE is deferred for alpha.`
-      );
+
       return;
     }
     setMcpEditDraft({
@@ -1680,9 +1666,7 @@ export default function AgentsPanel({
   const handleInstallRegistryEntry = (entry: McpRegistryEntry) => {
     const normalizedServer = mcpServerFromRegistry(entry);
     if (MCP_STDIO_ONLY_ALPHA && normalizedServer.server_type !== 'stdio') {
-      setAgentError(
-        `Registry entry '${entry.title}' uses ${entry.transport.toUpperCase()} transport. HTTP/SSE is deferred for alpha; choose a stdio MCP server.`
-      );
+
       return;
     }
     const servers = [...(activeAgentConfig.mcp_servers ?? [])];
@@ -1849,20 +1833,19 @@ export default function AgentsPanel({
 
   const handleExport = async (target: string) => {
     setExportStatus((prev) => ({ ...prev, [target]: 'loading' }));
-    setAgentError(null);
+
     try {
       const res = await commands.exportAgentConfigCmd(target);
       if (res.status === 'error') throw new Error(res.error);
       setExportStatus((prev) => ({ ...prev, [target]: 'ok' }));
     } catch (err) {
       setExportStatus((prev) => ({ ...prev, [target]: 'error' }));
-      setAgentError(String(err));
     }
   };
 
   const handleImport = async (target: string) => {
     setImportStatus((prev) => ({ ...prev, [target]: 'loading' }));
-    setAgentError(null);
+
     try {
       const res = await commands.importAgentConfigCmd(target, true);
       if (res.status === 'error') throw new Error(res.error);
@@ -1892,7 +1875,6 @@ export default function AgentsPanel({
       void mcpValidationQuery.refetch();
     } catch (err) {
       setImportStatus((prev) => ({ ...prev, [target]: 'error' }));
-      setAgentError(String(err));
     }
   };
 
@@ -2796,7 +2778,7 @@ export default function AgentsPanel({
         {initialSection === 'mcp' && (
           <div className="grid gap-4">
             {MCP_STDIO_ONLY_ALPHA && (
-              <Alert variant="outline" className="opacity-80 border-dashed">
+              <Alert variant="default" className="opacity-80 border-dashed">
                 <AlertDescription className="text-[11px] text-muted-foreground">
                   <span className="font-semibold text-amber-600 dark:text-amber-500">Alpha</span>: MCP server execution is currently stdio-only. HTTP/SSE entries can be discovered but not configured for active use yet.
                 </AlertDescription>

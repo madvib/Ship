@@ -55,7 +55,7 @@ export function useFeatureActions({
     }
 
     try {
-      const result = await createFeatureCmd(title, content, release, null, branch);
+      const result = await createFeatureCmd(title, content, release, branch);
       if (result.status === 'ok') {
         const created = result.data;
         setFeatures((prev) => [...prev, created]);

@@ -595,21 +595,21 @@ export default function AdrList({
                           <Button size="sm" onClick={() => setEditMode(true)}>
                             <Edit3 className="size-4" />
                             Edit Decision
-                          </Button>
+                      </Button>
                         ) : null}
 
                         {!creating && displayEntry && (
                           <AlertDialog>
-                            <AlertDialogTrigger asChild>
+                            <AlertDialogTrigger render={
                               <Button
                                 size="sm"
-                                variant="ghost"
-                                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                                title="Delete Decision"
+                                variant="outline"
+                                className="border-red-500/20 text-red-500 hover:bg-red-500/10 hover:text-red-600"
                               >
                                 <Trash2 className="size-4" />
+                                Delete
                               </Button>
-                            </AlertDialogTrigger>
+                            } />
                             <AlertDialogContent size="sm">
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Delete this ADR?</AlertDialogTitle>

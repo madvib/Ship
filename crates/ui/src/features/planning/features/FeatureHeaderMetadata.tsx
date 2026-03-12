@@ -141,34 +141,36 @@ export function FeatureHeaderMetadata({
 
 
             {/* Tags Popover */}
-            <MetadataPopover
-                icon={Tag}
-                label={tags.length > 0 ? `${tags.length} Tag${tags.length === 1 ? '' : 's'}` : 'No tags'}
-                title="Tags"
-                triggerClassName="shrink-0"
-                contentClassName="w-64 p-3"
-            >
-                <div className="flex flex-wrap gap-1.5">
-                    {tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="h-5 px-1.5 text-[10px] font-normal uppercase">
-                            {tag}
-                        </Badge>
-                    ))}
-                    {tags.length === 0 && (
-                        <span className="text-xs text-muted-foreground italic">No tags</span>
+            {(isEditing || tags.length > 0) && (
+                <MetadataPopover
+                    icon={Tag}
+                    label={`${tags.length} Tag${tags.length === 1 ? '' : 's'}`}
+                    title="Tags"
+                    triggerClassName="shrink-0"
+                    contentClassName="w-64 p-3"
+                >
+                    <div className="flex flex-wrap gap-1.5">
+                        {tags.map((tag) => (
+                            <Badge key={tag} variant="secondary" className="h-5 px-1.5 text-[10px] font-normal uppercase">
+                                {tag}
+                            </Badge>
+                        ))}
+                        {tags.length === 0 && (
+                            <span className="text-xs text-muted-foreground italic">No tags</span>
+                        )}
+                    </div>
+                    {isEditing && (
+                        <FacetedFilter
+                            title="Edit Tags"
+                            options={tagSuggestions.map(t => ({ value: t, label: t }))}
+                            selectedValues={tags}
+                            onSelectionChange={(next) => onUpdate({ tags: next })}
+                            allowNew
+                            onAddNew={(tag) => onUpdate({ tags: [...tags, tag] })}
+                        />
                     )}
-                </div>
-                {isEditing && (
-                    <FacetedFilter
-                        title="Edit Tags"
-                        options={tagSuggestions.map(t => ({ value: t, label: t }))}
-                        selectedValues={tags}
-                        onSelectionChange={(next) => onUpdate({ tags: next })}
-                        allowNew
-                        onAddNew={(tag) => onUpdate({ tags: [...tags, tag] })}
-                    />
-                )}
-            </MetadataPopover>
+                </MetadataPopover>
+            )}
         </BaseMetadataHeader>
     );
 }
