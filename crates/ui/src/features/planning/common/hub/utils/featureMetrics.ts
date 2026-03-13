@@ -23,6 +23,8 @@ export interface FeatureChecklistSections {
   acceptance: ChecklistItem[];
 }
 
+export type ChecklistSectionKey = 'todos' | 'acceptance';
+
 function normalizeHeading(value: string): string {
   return value
     .trim()
@@ -69,6 +71,36 @@ function findSectionBody(markdown: string, headings: string[]): string {
   }
 
   return lines.slice(start, end).join('\n');
+}
+
+function findSectionRange(lines: string[], headings: string[]): { start: number; end: number } | null {
+  const target = new Set(headings.map(normalizeHeading));
+  let start = -1;
+  let level = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const heading = headingMatch(lines[i]);
+    if (!heading) continue;
+    if (target.has(heading.text)) {
+      start = i + 1;
+      level = heading.level;
+      break;
+    }
+  }
+
+  if (start < 0) return null;
+
+  let end = lines.length;
+  for (let i = start; i < lines.length; i += 1) {
+    const heading = headingMatch(lines[i]);
+    if (!heading) continue;
+    if (heading.level <= level) {
+      end = i;
+      break;
+    }
+  }
+
+  return { start, end };
 }
 
 function summarizeChecklist(markdown: string): ChecklistSummary {
@@ -155,4 +187,33 @@ export function deriveFeatureChecklistSections(markdown: string): FeatureCheckli
     todos: parseChecklistItems(todosSection),
     acceptance: parseChecklistItems(acceptanceSection),
   };
+}
+
+export function toggleFeatureChecklistItem(
+  markdown: string,
+  section: ChecklistSectionKey,
+  itemIndex: number
+): string | null {
+  if (itemIndex < 0) return null;
+  const lines = markdown.split(/\r?\n/);
+  const headings =
+    section === 'todos'
+      ? ['delivery todos', 'todos', 'delivery']
+      : ['acceptance criteria'];
+  const range = findSectionRange(lines, headings);
+  if (!range) return null;
+
+  let seen = 0;
+  for (let i = range.start; i < range.end; i += 1) {
+    const match = lines[i].match(/^(\s*[-*]\s+\[)( |x|X)(\]\s+.+?)\s*$/);
+    if (!match) continue;
+    if (seen === itemIndex) {
+      const nextMarker = match[2].toLowerCase() === 'x' ? ' ' : 'x';
+      lines[i] = `${match[1]}${nextMarker}${match[3]}`;
+      return lines.join('\n');
+    }
+    seen += 1;
+  }
+
+  return null;
 }

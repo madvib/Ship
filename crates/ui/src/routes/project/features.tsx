@@ -16,10 +16,12 @@ function FeaturesRouteComponent() {
       <FeaturesPage
         features={ship.features}
         releases={ship.releases}
-        specs={ship.specs}
         selectedFeature={ship.selectedFeature}
         onCloseFeatureDetail={() => ship.setSelectedFeature(null)}
         onSelectFeature={ship.handleSelectFeature}
+        onStartFeature={ship.handleStartFeature}
+        onDoneFeature={ship.handleDoneFeature}
+        onSaveFeatureDocumentation={ship.handleSaveFeatureDocumentation}
         onSelectReleaseFromFeature={(name: string) => {
           const release = ship.releases.find(
             (entry) => entry.file_name === name || entry.version === name
@@ -28,12 +30,6 @@ function FeaturesRouteComponent() {
           ship.setSelectedFeature(null);
           void navigate({ to: RELEASES_ROUTE });
           void ship.handleSelectRelease(release);
-        }}
-        onSelectSpecFromFeature={(name: string) => {
-          const spec = ship.specs.find((entry) => entry.file_name === name);
-          if (!spec) return;
-          ship.setSelectedFeature(null);
-          void ship.handleSelectSpec(spec);
         }}
         onSaveFeature={ship.handleSaveFeature}
         onCreateFeature={ship.handleCreateFeature}

@@ -37,8 +37,8 @@ pub use config::{
 
 pub use events::{
     EVENTS_FILE_NAME, EventAction, EventEntity, EventRecord, append_event, ensure_event_log,
-    event_log_path, export_events_ndjson, ingest_external_events, latest_event_seq,
-    list_events_since, read_events, sync_event_snapshot,
+    export_events_ndjson, ingest_external_events, latest_event_seq, list_events_since, read_events,
+    sync_event_snapshot,
 };
 pub use hooks::{DefaultRuntimeHooks, RuntimeHooks};
 pub use log::{LogEntry, log_action, log_action_by, read_log, read_log_entries};
@@ -48,7 +48,7 @@ pub use migration::{
 };
 pub use permissions::{
     AgentLimits, CommandPermissions, FsPermissions, NetworkPermissions, NetworkPolicy, Permissions,
-    ToolPermissions, get_permissions, save_permissions,
+    ToolPermissions, get_permissions, permission_tool_ids_for_provider, save_permissions,
 };
 pub use plugin::{Plugin, PluginRegistry};
 // NOTE: ship-specific project primitives stay under `runtime::project`.
@@ -61,21 +61,25 @@ pub use skill::{
     list_effective_skills, list_skills, list_user_skills, update_skill, update_user_skill,
 };
 pub use state_db::{
-    DatabaseMigrationReport, clear_branch_doc, clear_branch_link, clear_global_migration_meta,
-    clear_project_migration_meta, ensure_global_database, ensure_project_database, get_branch_doc,
-    get_branch_link, get_managed_state_db, mark_migration_meta_complete_global,
-    mark_migration_meta_complete_project, migration_meta_complete_global,
-    migration_meta_complete_project, set_branch_doc, set_branch_link, set_managed_state_db,
-    upsert_workspace_db,
+    CapabilityDb, CapabilityMapDb, DatabaseMigrationReport, WorkspaceSessionRecordDb,
+    clear_branch_doc, clear_branch_link, clear_global_migration_meta, clear_project_migration_meta,
+    ensure_global_database, ensure_project_database, get_branch_doc, get_branch_link,
+    get_feature_primary_capability_db, get_managed_state_db, get_workspace_session_record_db,
+    list_capabilities_db, list_capability_maps_db, list_target_features_db,
+    mark_migration_meta_complete_global, mark_migration_meta_complete_project,
+    migration_meta_complete_global, migration_meta_complete_project, replace_target_features_db,
+    set_branch_doc, set_branch_link, set_feature_primary_capability_db, set_managed_state_db,
+    upsert_capability_db, upsert_capability_map_db, upsert_workspace_db,
 };
 pub use workspace::{
-    CreateWorkspaceRequest, EndWorkspaceSessionRequest, Workspace, WorkspaceProviderMatrix,
-    WorkspaceRepairReport, WorkspaceSession, WorkspaceSessionStatus, WorkspaceStatus,
-    WorkspaceType, activate_workspace, create_workspace, delete_workspace, end_workspace_session,
-    get_active_workspace_session, get_workspace, get_workspace_provider_matrix,
-    list_workspace_sessions, list_workspaces, repair_workspace, set_workspace_active_mode,
-    start_workspace_session, sync_workspace, transition_workspace_status, upsert_workspace,
-    validate_workspace_transition,
+    CreateWorkspaceRequest, EndWorkspaceSessionRequest, Environment, Process, ProcessStatus,
+    ShipWorkspaceKind, Workspace, WorkspaceProviderMatrix, WorkspaceRepairReport, WorkspaceSession,
+    WorkspaceSessionRecord, WorkspaceSessionStatus, WorkspaceStatus, activate_workspace,
+    create_workspace, delete_workspace, end_workspace_session, get_active_workspace_session,
+    get_workspace, get_workspace_provider_matrix, get_workspace_session_record,
+    list_workspace_sessions, list_workspaces, record_workspace_session_progress, repair_workspace,
+    set_workspace_active_mode, start_workspace_session, sync_workspace,
+    transition_workspace_status, upsert_workspace, validate_workspace_transition,
 };
 
 pub fn gen_nanoid() -> String {
@@ -112,12 +116,10 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_status_blocked_by_issues() -> anyhow::Result<()> {
+    fn test_remove_status_without_issue_guard() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
         add_status(Some(project_dir.clone()), "review")?;
-        // Removed create_issue call as it's no longer in runtime.
-        // In the future, we could add a similar test using the project module.
         let result = remove_status(Some(project_dir), "review");
         assert!(result.is_ok());
         Ok(())
@@ -127,11 +129,30 @@ mod tests {
     fn test_git_config_roundtrip() -> anyhow::Result<()> {
         let tmp = tempdir()?;
         let project_dir = init_project(tmp.path().to_path_buf())?;
-        set_category_committed(&project_dir, "issues", true)?;
+        set_category_committed(&project_dir, "features", true)?;
         set_category_committed(&project_dir, "notes", false)?;
         let git = get_git_config(&project_dir)?;
-        assert!(is_category_committed(&git, "issues"));
+        assert!(is_category_committed(&git, "features"));
         assert!(!is_category_committed(&git, "notes"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_legacy_agents_category_maps_to_rules_mcp_permissions() -> anyhow::Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = init_project(tmp.path().to_path_buf())?;
+
+        set_category_committed(&project_dir, "agents", false)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(gitignore.contains("agents/rules"));
+        assert!(gitignore.contains("agents/mcp.toml"));
+        assert!(gitignore.contains("agents/permissions.toml"));
+
+        set_category_committed(&project_dir, "agents", true)?;
+        let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
         Ok(())
     }
 
@@ -165,18 +186,22 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
         let gitignore = fs::read_to_string(project_dir.join(".gitignore"))?;
         // Default config keeps project docs local unless explicitly included.
-        assert!(gitignore.contains("workflow/issues"));
         assert!(gitignore.contains("generated/"));
         assert!(gitignore.contains(".tmp-global/"));
         assert!(gitignore.contains("project/releases"));
         assert!(gitignore.contains("project/features"));
-        assert!(gitignore.contains("workflow/specs"));
+        assert!(gitignore.contains("project/specs"));
         assert!(gitignore.contains("project/adrs"));
         assert!(gitignore.contains("project/notes"));
+        assert!(gitignore.contains("vision.md"));
+        assert!(gitignore.contains("agents/skills"));
+        assert!(gitignore.contains("agents/README.md"));
+        assert!(!gitignore.contains("agents/rules"));
+        assert!(!gitignore.contains("agents/mcp.toml"));
+        assert!(!gitignore.contains("agents/permissions.toml"));
         // DB is now at ~/.ship/state/<slug>/ship.db — not inside .ship/
         assert!(!gitignore.contains("ship.db"));
         assert!(!gitignore.contains("log.md"));
-        assert!(!gitignore.contains("agents"));
         Ok(())
     }
 
@@ -230,38 +255,32 @@ mod tests {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
         assert!(ship_path.exists());
-        // workflow/ namespace
-        assert!(ship_path.join("workflow/issues/backlog").is_dir());
-        assert!(ship_path.join("workflow/issues/in-progress").is_dir());
-        assert!(ship_path.join("workflow/specs").is_dir());
-        assert!(ship_path.join("project/features").is_dir());
         // project/ namespace
+        assert!(ship_path.join("project/specs").is_dir());
+        assert!(ship_path.join("project/features").is_dir());
         assert!(ship_path.join("project/releases").is_dir());
         assert!(ship_path.join("project/adrs").is_dir());
         assert!(ship_path.join("project/notes").is_dir());
-        assert!(ship_path.join("project/vision.md").is_file());
+        assert!(ship_path.join("vision.md").is_file());
         assert!(ship_path.join("generated").is_dir());
         let project_skills_dir = crate::project::skills_dir(&ship_path);
         assert!(project_skills_dir.is_dir());
         // shared
         assert!(ship_path.join("project/releases/TEMPLATE.md").is_file());
         assert!(ship_path.join("project/features/TEMPLATE.md").is_file());
-        assert!(ship_path.join("project/TEMPLATE.md").is_file());
         assert!(ship_path.join("project/notes/TEMPLATE.md").is_file());
-        assert!(ship_path.join("README.md").is_file());
-        assert!(ship_path.join("project/README.md").is_file());
-        assert!(ship_path.join("workflow/README.md").is_file());
         let cfg = crate::config::get_config(Some(ship_path.clone()))?;
-        assert!(cfg.modes.iter().any(|mode| mode.id == "planning"));
-        assert!(cfg.modes.iter().any(|mode| mode.id == "code"));
-        assert!(cfg.modes.iter().any(|mode| mode.id == "config"));
+        assert!(
+            cfg.modes.is_empty(),
+            "new projects should not seed legacy planning/code/config modes by default"
+        );
         assert!(!ship_path.join("events.ndjson").is_file());
         assert!(ship_path.join("ship.toml").is_file());
         // default skill seeded
         assert!(project_skills_dir.join("task-policy/SKILL.md").is_file());
         let skill_content = fs::read_to_string(project_skills_dir.join("task-policy/SKILL.md"))?;
         assert!(skill_content.contains("task-policy"));
-        assert!(skill_content.contains("Shipwright Workflow Policy"));
+        assert!(skill_content.contains("Ship Workflow Policy"));
         Ok(())
     }
 

@@ -14,7 +14,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MarkdownEditor from '@/components/editor';
 import { ReleaseHeaderMetadata } from './ReleaseHeaderMetadata';
-import { readFrontmatterSummary, setFrontmatterStringField, setFrontmatterStringListField } from '@ship/ui';
+import {
+  readFrontmatterBooleanField,
+  readFrontmatterStringField,
+  readFrontmatterStringListField,
+  setFrontmatterBooleanField,
+  setFrontmatterStringField,
+  setFrontmatterStringListField,
+} from '@ship/ui';
 import { Badge } from '@ship/ui';
 import { Button } from '@ship/ui';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@ship/ui';
@@ -29,7 +36,17 @@ interface ReleaseDetailProps {
   mcpEnabled?: boolean;
   onClose: () => void;
   onSelectFeature: (feature: FeatureEntry) => void;
-  onSave: (fileName: string, content: string) => Promise<void> | void;
+  onSave: (
+    fileName: string,
+    content: string,
+    metadata?: {
+      version?: string | null;
+      status?: string | null;
+      supported?: boolean | null;
+      targetDate?: string | null;
+      tags?: string[] | null;
+    }
+  ) => Promise<void> | void;
 }
 
 
@@ -83,9 +100,22 @@ export default function ReleaseDetail({
 
   const saveRelease = useCallback(async () => {
     if (!dirty || saving) return;
+    const parsed = splitFrontmatterDocument(content);
+    const version = readFrontmatterStringField(parsed.frontmatter, 'version').trim() || null;
+    const status = readFrontmatterStringField(parsed.frontmatter, 'status').trim() || null;
+    const targetDateValue = readFrontmatterStringField(parsed.frontmatter, 'target_date').trim();
+    const targetDate = targetDateValue.length > 0 ? targetDateValue : null;
+    const supported = readFrontmatterBooleanField(parsed.frontmatter, 'supported');
+    const tags = readFrontmatterStringListField(parsed.frontmatter, 'tags');
     setSaving(true);
     try {
-      await onSave(release.file_name, content);
+      await onSave(release.file_name, content, {
+        version,
+        status,
+        supported,
+        targetDate,
+        tags,
+      });
       setDirty(false);
       setEditing(false);
     } finally {
@@ -139,11 +169,16 @@ export default function ReleaseDetail({
   const hiddenLinkedFeatureCount = Math.max(linkedFeatures.length - 8, 0);
 
   const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
-  const summary = useMemo(() => readFrontmatterSummary(release.content), [release.content]);
+  const currentVersion = readFrontmatterStringField(documentModel.frontmatter, 'version') || release.version;
+  const currentStatus = readFrontmatterStringField(documentModel.frontmatter, 'status') || release.status;
+  const currentTargetDate = readFrontmatterStringField(documentModel.frontmatter, 'target_date');
+  const currentSupported = readFrontmatterBooleanField(documentModel.frontmatter, 'supported') ?? false;
+  const currentTags = readFrontmatterStringListField(documentModel.frontmatter, 'tags');
 
   const handleMetadataUpdate = useCallback((updates: {
     version?: string;
     status?: string;
+    supported?: boolean;
     target_date?: string;
     tags?: string[];
   }) => {
@@ -152,6 +187,7 @@ export default function ReleaseDetail({
 
     if (updates.version !== undefined) nextContent = setFrontmatterStringField(nextContent, 'version', updates.version, delimiter) ?? nextContent;
     if (updates.status !== undefined) nextContent = setFrontmatterStringField(nextContent, 'status', updates.status, delimiter) ?? nextContent;
+    if (updates.supported !== undefined) nextContent = setFrontmatterBooleanField(nextContent, 'supported', updates.supported, delimiter) ?? nextContent;
     if (updates.target_date !== undefined) nextContent = setFrontmatterStringField(nextContent, 'target_date', updates.target_date, delimiter) ?? nextContent;
     if (updates.tags !== undefined) nextContent = setFrontmatterStringListField(nextContent, 'tags', updates.tags, delimiter) ?? nextContent;
 
@@ -191,7 +227,7 @@ export default function ReleaseDetail({
               </div>
 
               <h2 className="px-4 text-center text-xl font-bold tracking-tight text-foreground">
-                {summary.version || release.version}
+                {currentVersion}
               </h2>
 
               <div className="flex flex-1 justify-end gap-2">
@@ -221,10 +257,11 @@ export default function ReleaseDetail({
             </div>
 
             <ReleaseHeaderMetadata
-              version={summary.version || release.version}
-              status={summary.status || release.status}
-              targetDate={summary.target_date}
-              tags={summary.tags}
+              version={currentVersion}
+              status={currentStatus}
+              supported={currentSupported}
+              targetDate={currentTargetDate}
+              tags={currentTags}
               isEditing={editing}
               onUpdate={handleMetadataUpdate}
             />
@@ -272,14 +309,13 @@ export default function ReleaseDetail({
               </div>
             </CardHeader>
             <CardContent className="min-h-0 flex-1 overflow-auto p-3">
-              <article className="ship-markdown-preview rounded-md border bg-background px-4 py-3">
-                {stripAllFrontmatter(documentModel.body).trim() ? (
+              {stripAllFrontmatter(documentModel.body).trim() ? (
+                <article className="ship-markdown-preview rounded-md border bg-background px-4 py-3">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripAllFrontmatter(documentModel.body)}</ReactMarkdown>
-                ) : (
-                  <p className="text-muted-foreground text-sm italic">No body content yet.</p>
-                )}
-              </article>
+                </article>
+              ) : null}
             </CardContent>
+
           </Card>
 
           <div className="grid min-h-0 gap-3 xl:grid-cols-[300px_minmax(0,1fr)]">
@@ -349,8 +385,15 @@ export default function ReleaseDetail({
                                 </Badge>
                                 <span className="text-muted-foreground text-[11px]">{readiness}%</span>
                               </div>
-                              <Progress value={readiness} indicatorClassName={tone.progress} />
+                              <Progress
+                                value={readiness}
+                                indicatorClassName={cn(
+                                  tone.progress,
+                                  readiness > 0 && readiness < 5 && "min-w-[4%]"
+                                )}
+                              />
                             </div>
+
                           </button>
                         );
                       })}

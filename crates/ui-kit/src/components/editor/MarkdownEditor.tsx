@@ -15,6 +15,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '../dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../tooltip';
 import CustomMilkdownEditor from './CustomMilkdownEditor';
 // import FrontmatterPanel from './FrontmatterPanel';
 import {
@@ -46,6 +47,7 @@ export interface MarkdownEditorProps {
     showStats?: boolean;
     fillHeight?: boolean;
     fullWidth?: boolean;
+    editorClassName?: string;
     showFrontmatter?: boolean;
     frontmatterPanel?:
     | ReactNode
@@ -83,6 +85,7 @@ export default function MarkdownEditor({
     showStats = true,
     fillHeight = false,
     fullWidth = true,
+    editorClassName,
     showFrontmatter = true,
     frontmatterPanel,
     showAiActions = true,
@@ -96,6 +99,7 @@ export default function MarkdownEditor({
     const [expanded, setExpanded] = useState(false);
     const [sampleUndoState, setSampleUndoState] = useState<{ before: string; after: string } | null>(null);
     const [internalMarkdown, setInternalMarkdown] = useState(value);
+    const [aiActionError, setAiActionError] = useState<string | null>(null);
 
     const minHeightPx = Math.max(rows, 8) * 24;
 
@@ -173,6 +177,7 @@ export default function MarkdownEditor({
 
     const handleAiAction = async (action: 'polish' | 'shorten' | 'expand' | 'fix_grammar') => {
         if (!model.body.trim() || !onTransformText) return;
+        setAiActionError(null);
         setSampling(true);
         try {
             const instructionMap = {
@@ -185,6 +190,7 @@ export default function MarkdownEditor({
             handleBodyChange(res);
         } catch (err) {
             console.error(`AI Action failed: ${err}`);
+            setAiActionError(String(err));
         } finally {
             setSampling(false);
         }
@@ -234,14 +240,16 @@ export default function MarkdownEditor({
                     )}
 
                     {showAiActions && mode === 'edit' && onTransformText && (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger>
-                                <Button variant="outline" size="xs" disabled={sampling}>
-                                    <Wand2 className="size-3.5" />
-                                    AI Actions
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger render={
+                                        <Button variant="outline" size="xs" disabled={sampling}>
+                                            <Wand2 className="size-3.5" />
+                                            Create with AI
+                                        </Button>
+                                    } />
+                                    <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
                                 <DropdownMenuGroup>
                                     <DropdownMenuLabel className="px-2 pb-2 opacity-50 uppercase text-[9px] tracking-[0.2em] font-black">
                                         Transform Text
@@ -269,6 +277,11 @@ export default function MarkdownEditor({
                                 </div>
                             </DropdownMenuContent>
                         </DropdownMenu>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                Refine, polish, or transform your text using AI.
+                            </TooltipContent>
+                        </Tooltip>
                     )}
 
                     {showStats && mode === 'edit' && (
@@ -289,6 +302,11 @@ export default function MarkdownEditor({
                     </Button>
                 </div>
             </div>
+            {aiActionError && (
+                <p className="text-[11px] text-destructive">
+                    AI action failed: {aiActionError}
+                </p>
+            )}
 
 
             {/* Editor / Reader */}
@@ -302,6 +320,7 @@ export default function MarkdownEditor({
                                 placeholder={placeholder}
                                 fillHeight={fillHeight}
                                 minHeightPx={minHeightPx}
+                                className={editorClassName}
                             />
                         </div>
                     </div>

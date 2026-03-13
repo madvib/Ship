@@ -6,60 +6,6 @@ use serde::Deserialize;
 // ─── Request Types ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateIssueRequest {
-    /// The title of the issue
-    pub title: String,
-    /// The detailed description of the issue
-    pub description: String,
-    /// Initial status: backlog (default), in-progress, blocked, or done
-    pub status: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GetIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Status folder to look in. If omitted, all statuses are searched.
-    pub status: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UpdateIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Current status folder
-    pub status: String,
-    /// New title (optional)
-    pub title: Option<String>,
-    /// New description (optional)
-    pub description: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DeleteIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Status folder the issue is in
-    pub status: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct MoveIssueRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub file_name: String,
-    /// Current status
-    pub from_status: String,
-    /// Target status
-    pub to_status: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SearchIssuesRequest {
-    /// Text to search for in issue titles and descriptions
-    pub query: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct LogDecisionRequest {
     /// Title of the architecture decision
     pub title: String,
@@ -79,58 +25,6 @@ pub struct TrackProjectRequest {
     pub name: String,
     /// The absolute path to the project root
     pub path: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct TimeStartRequest {
-    /// Issue filename (e.g. "my-feature.md")
-    pub issue_file: String,
-    /// Optional note for this session
-    pub note: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct TimeStopRequest {
-    /// Optional note to attach to the completed entry
-    pub note: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GenerateIssueRequest {
-    /// Title or brief description of the issue to generate content for
-    pub title: String,
-    /// Optional extra context (e.g. related issues, tech stack)
-    pub context: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GenerateAdrRequest {
-    /// The problem or decision to address
-    pub problem: String,
-    /// Optional constraints or options already under consideration
-    pub constraints: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct BrainstormRequest {
-    /// Topic or area to brainstorm issues for
-    pub topic: String,
-    /// Number of issue suggestions to generate (default 5)
-    pub count: Option<u32>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GitIncludeRequest {
-    /// Category to change: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
-    pub category: String,
-    /// true = commit to git, false = local only (gitignored)
-    pub commit: bool,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GitFeatureSyncRequest {
-    /// Optional branch name. If omitted, resolves from `git branch --show-current`.
-    pub branch: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -168,18 +62,6 @@ pub struct UpdateNoteRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateSkillRequest {
-    /// Stable skill id (e.g. "task-policy")
-    pub id: String,
-    /// Human-readable skill name
-    pub name: String,
-    /// Skill body content; supports $ARGUMENTS placeholder
-    pub content: String,
-    /// Scope: project (default) or user
-    pub scope: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct ListSkillsRequest {
     /// Scope: effective (default), project, or user
     pub scope: Option<String>,
@@ -194,61 +76,9 @@ pub struct GetSkillRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct UpdateSkillRequest {
-    /// Skill id (without .md)
-    pub id: String,
-    /// Optional new display name
-    pub name: Option<String>,
-    /// Optional replacement content
-    pub content: Option<String>,
-    /// Scope: project (default) or user
-    pub scope: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DeleteSkillRequest {
-    /// Skill id (without .md)
-    pub id: String,
-    /// Scope: project (default) or user
-    pub scope: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ManageStatusRequest {
-    /// Action: "add" or "remove"
-    pub action: String,
-    /// Status name (e.g. "review", "testing")
-    pub name: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GhostScanRequest {
-    /// Directory to scan. Defaults to the project root (parent of .ship).
-    pub dir: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GhostPromoteRequest {
-    /// Relative file path of the ghost issue
-    pub file: String,
-    /// Line number of the ghost issue
-    pub line: usize,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct StatusNameRequest {
     /// Status name (e.g. "review", "testing")
     pub name: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct TimeLogRequest {
-    /// Issue filename
-    pub issue_file: String,
-    /// Duration in minutes
-    pub minutes: u64,
-    /// Optional note
-    pub note: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -284,12 +114,6 @@ pub struct CreateReleaseRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetReleaseRequest {
-    /// Release version/id (e.g. "v0.1.0-alpha")
-    pub id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct UpdateReleaseRequest {
     /// Release version/id (e.g. "v0.1.0-alpha")
     pub id: String,
@@ -309,12 +133,6 @@ pub struct CreateFeatureRequest {
     pub spec_id: Option<String>,
     /// Linked git branch name (optional)
     pub branch: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct GetFeatureRequest {
-    /// Feature ID (e.g. "agent-mode-ui")
-    pub id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -338,63 +156,23 @@ pub struct GetAdrRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ListEventsRequest {
-    /// Only return events where seq > since
-    pub since: Option<u64>,
-    /// Maximum number of events to return (default 100)
-    pub limit: Option<usize>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ConnectProviderRequest {
-    /// Provider ID to enable (claude, gemini, codex)
-    pub provider_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct DisconnectProviderRequest {
-    /// Provider ID to disable (claude, gemini, codex)
-    pub provider_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ListModelsRequest {
-    /// Provider ID (claude, gemini, codex)
-    pub provider_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct SetModeRequest {
     /// Mode ID to activate. Omit to clear active mode.
     pub id: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct GetWorkspaceRequest {
-    /// Workspace branch/id. If omitted, resolves from current git branch.
-    pub branch: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct WorkspaceProviderMatrixRequest {
-    /// Workspace branch/id. If omitted, resolves from current git branch.
-    pub branch: Option<String>,
-    /// Optional mode override to evaluate provider policy against.
-    pub mode_id: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct CreateWorkspaceToolRequest {
     /// Workspace branch/id.
     pub branch: String,
-    /// Workspace type (feature, refactor, experiment, hotfix)
+    /// Workspace type (feature, patch, service)
     pub workspace_type: Option<String>,
+    /// Optional environment/profile preset ID used to seed this workspace.
+    pub environment_id: Option<String>,
     /// Optional linked feature ID.
     pub feature_id: Option<String>,
-    /// Optional linked spec ID.
-    pub spec_id: Option<String>,
-    /// Optional linked release ID.
-    pub release_id: Option<String>,
+    /// Optional linked target ID.
+    pub target_id: Option<String>,
     /// Optional workspace mode override.
     pub mode_id: Option<String>,
     /// Whether this workspace is a git worktree.
@@ -439,16 +217,6 @@ pub struct EndSessionRequest {
     pub summary: Option<String>,
     /// Feature IDs updated during this session.
     pub updated_feature_ids: Option<Vec<String>>,
-    /// Spec IDs updated during this session.
-    pub updated_spec_ids: Option<Vec<String>>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ListSessionsRequest {
-    /// Optional workspace branch/id filter.
-    pub branch: Option<String>,
-    /// Optional max number of sessions to return.
-    pub limit: Option<usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]

@@ -37,8 +37,362 @@ fn has_gemini_policy_overrides(permissions: &Permissions) -> bool {
         || !permissions.agent.require_confirmation.is_empty()
 }
 
-fn export_claude_settings(hooks: &[HookConfig], permissions: &Permissions) -> Result<()> {
-    let path = home()?.join(".claude").join("settings.json");
+fn managed_hooks_enabled() -> bool {
+    match std::env::var("SHIP_MANAGED_HOOKS") {
+        Ok(raw) => !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
+}
+
+fn managed_hooks_command() -> Option<String> {
+    if let Some(explicit) = std::env::var("SHIP_HOOKS_BIN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Some(explicit);
+    }
+
+    let probe = std::process::Command::new("ship")
+        .args(["hooks", "run", "--help"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match probe {
+        Ok(status) if status.success() => Some("ship hooks run".to_string()),
+        _ => None,
+    }
+}
+
+fn managed_hooks_command_for_provider(provider_id: &str) -> Option<String> {
+    let base = managed_hooks_command()?;
+    if base.contains("--provider") {
+        return Some(base);
+    }
+    if base.trim_start().starts_with("ship hooks run") {
+        return Some(format!("{base} --provider {provider_id}"));
+    }
+    Some(base)
+}
+
+fn managed_hook(
+    id: &str,
+    trigger: HookTrigger,
+    matcher: Option<&str>,
+    timeout_ms: Option<u64>,
+    description: &str,
+    command: &str,
+) -> HookConfig {
+    HookConfig {
+        id: id.to_string(),
+        trigger,
+        matcher: matcher.map(str::to_string),
+        timeout_ms,
+        description: Some(description.to_string()),
+        command: command.to_string(),
+    }
+}
+
+fn managed_hooks_for_provider(provider_id: &str) -> Vec<HookConfig> {
+    let Some(command) = managed_hooks_command_for_provider(provider_id) else {
+        return Vec::new();
+    };
+    match provider_id {
+        "claude" => vec![
+            managed_hook(
+                "ship-session-start",
+                HookTrigger::SessionStart,
+                None,
+                None,
+                "Inject Ship workspace context before first prompt.",
+                &command,
+            ),
+            managed_hook(
+                "ship-user-prompt",
+                HookTrigger::UserPromptSubmit,
+                None,
+                None,
+                "Augment prompts with current Ship workspace scope.",
+                &command,
+            ),
+            managed_hook(
+                "ship-pre-tool-guard",
+                HookTrigger::PreToolUse,
+                Some("Bash"),
+                Some(2000),
+                "Apply Ship shell-command policy envelope (decompose, validate, enforce).",
+                &command,
+            ),
+            managed_hook(
+                "ship-permission-request",
+                HookTrigger::PermissionRequest,
+                None,
+                Some(2000),
+                "Resolve approvals using Ship permission envelope hints.",
+                &command,
+            ),
+            managed_hook(
+                "ship-post-tool-log",
+                HookTrigger::PostToolUse,
+                Some("Bash"),
+                Some(1500),
+                "Log tool execution for policy hardening and conflict analysis.",
+                &command,
+            ),
+            managed_hook(
+                "ship-notification-stream",
+                HookTrigger::Notification,
+                None,
+                None,
+                "Stream agent lifecycle updates to Ship runtime telemetry.",
+                &command,
+            ),
+            managed_hook(
+                "ship-stop-close-loop",
+                HookTrigger::Stop,
+                None,
+                None,
+                "Trigger session close-loop checks and documentation updates.",
+                &command,
+            ),
+            managed_hook(
+                "ship-subagent-stop",
+                HookTrigger::SubagentStop,
+                None,
+                None,
+                "Coordinate multi-agent completion signals through Ship runtime.",
+                &command,
+            ),
+        ],
+        "gemini" => vec![
+            managed_hook(
+                "ship-session-start",
+                HookTrigger::SessionStart,
+                None,
+                None,
+                "Inject Ship workspace context at Gemini session start.",
+                &command,
+            ),
+            managed_hook(
+                "ship-before-tool-guard",
+                HookTrigger::BeforeTool,
+                Some("run_shell_command"),
+                Some(2000),
+                "Apply Ship shell-command policy envelope (decompose, validate, enforce).",
+                &command,
+            ),
+            managed_hook(
+                "ship-after-tool-log",
+                HookTrigger::AfterTool,
+                Some("run_shell_command"),
+                Some(1500),
+                "Log tool execution for policy hardening and conflict analysis.",
+                &command,
+            ),
+            managed_hook(
+                "ship-notification-stream",
+                HookTrigger::Notification,
+                None,
+                None,
+                "Stream agent lifecycle updates to Ship runtime telemetry.",
+                &command,
+            ),
+            managed_hook(
+                "ship-session-end-close-loop",
+                HookTrigger::SessionEnd,
+                None,
+                None,
+                "Trigger session close-loop checks and documentation updates.",
+                &command,
+            ),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn hooks_for_provider(provider_id: &str, hooks: &[HookConfig]) -> Vec<HookConfig> {
+    let mut merged = hooks.to_vec();
+    if !managed_hooks_enabled() {
+        return merged;
+    }
+
+    let existing_ids: HashSet<String> = merged.iter().map(|hook| hook.id.clone()).collect();
+    for managed in managed_hooks_for_provider(provider_id) {
+        if !existing_ids.contains(&managed.id) {
+            merged.push(managed);
+        }
+    }
+    merged
+}
+
+fn network_allowed(policy: &crate::permissions::NetworkPolicy) -> bool {
+    !matches!(policy, crate::permissions::NetworkPolicy::None)
+}
+
+fn command_installs_allowed(allow_patterns: &[String]) -> bool {
+    allow_patterns.iter().any(|pattern| {
+        let normalized = pattern.trim().to_ascii_lowercase();
+        normalized.starts_with("npm install")
+            || normalized.starts_with("pnpm add")
+            || normalized.starts_with("yarn add")
+            || normalized.starts_with("pip install")
+            || normalized.starts_with("uv pip install")
+            || normalized.starts_with("cargo add")
+            || normalized.starts_with("go get")
+            || normalized.starts_with("brew install")
+    })
+}
+
+fn dedupe_patterns(values: &mut Vec<String>) {
+    let mut seen = HashSet::new();
+    values.retain(|value| seen.insert(value.clone()));
+}
+
+fn write_hook_runtime_artifacts(project_root: &Path, payload: &SyncPayload) -> Result<()> {
+    let runtime_dir = project_root.join(".ship").join("generated").join("runtime");
+    fs::create_dir_all(&runtime_dir)?;
+
+    let generated_at = chrono::Utc::now().to_rfc3339();
+    let mut auto_approve_patterns = vec![
+        "find *".to_string(),
+        "grep *".to_string(),
+        "rg *".to_string(),
+        "cat *".to_string(),
+        "ls *".to_string(),
+        "git status*".to_string(),
+        "git log*".to_string(),
+        "git diff*".to_string(),
+    ];
+    auto_approve_patterns.extend(payload.permissions.commands.allow.clone());
+    dedupe_patterns(&mut auto_approve_patterns);
+
+    let mut always_block_patterns = vec![
+        "rm -rf *".to_string(),
+        "git push --force*".to_string(),
+        "npm publish*".to_string(),
+        "cargo publish*".to_string(),
+    ];
+    always_block_patterns.extend(payload.permissions.commands.deny.clone());
+    dedupe_patterns(&mut always_block_patterns);
+
+    let mut allowed_paths = payload.permissions.filesystem.allow.clone();
+    if allowed_paths.is_empty() {
+        allowed_paths.push(".".to_string());
+    }
+
+    let servers = payload
+        .servers
+        .iter()
+        .filter(|server| !server.disabled)
+        .map(|server| {
+            serde_json::json!({
+                "id": server.id,
+                "name": server.name,
+                "transport": match server.server_type {
+                    McpServerType::Stdio => "stdio",
+                    McpServerType::Sse => "sse",
+                    McpServerType::Http => "http",
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let envelope = serde_json::json!({
+        "_ship": {
+            "managed": true,
+            "version": 1,
+            "generated_at": generated_at,
+        },
+        "ship_first": true,
+        "workspace_root": project_root.to_string_lossy().to_string(),
+        "active_mode": payload.active_mode_id,
+        "allowed_paths": allowed_paths,
+        "allow_network": network_allowed(&payload.permissions.network.policy),
+        "allow_installs": command_installs_allowed(&payload.permissions.commands.allow),
+        "auto_approve_patterns": auto_approve_patterns,
+        "always_block_patterns": always_block_patterns,
+        "require_confirmation": payload.permissions.agent.require_confirmation.clone(),
+        "tools_allow": payload.permissions.tools.allow.clone(),
+        "tools_deny": payload.permissions.tools.deny.clone(),
+        "mcp_servers": servers,
+    });
+
+    crate::fs_util::write_atomic(
+        &runtime_dir.join("envelope.json"),
+        serde_json::to_string_pretty(&envelope)?,
+    )?;
+
+    let context = format!(
+        "# Ship Hook Context\n\n\
+         - Generated: `{}`\n\
+         - Active mode: `{}`\n\
+         - MCP servers: `{}`\n\
+         - Network access: `{}`\n\
+         - Package installs: `{}`\n\n\
+         ## Execution Policy\n\
+         - Use `mcp__ship__*` tools first for workspace-aware operations.\n\
+         - Prefer structured MCP actions over raw shell commands whenever possible.\n\
+         - Treat direct shell usage as fallback and stay within declared scope.\n\n\
+         ## File Scope\n\
+         {}\n\n\
+         ## Command Policy\n\
+         - Allow patterns: `{}`\n\
+         - Deny patterns: `{}`\n\
+         - Require confirmation: `{}`\n",
+        generated_at,
+        payload
+            .active_mode_id
+            .as_deref()
+            .unwrap_or("default"),
+        payload
+            .servers
+            .iter()
+            .filter(|server| !server.disabled)
+            .map(|server| server.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        if network_allowed(&payload.permissions.network.policy) {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        if command_installs_allowed(&payload.permissions.commands.allow) {
+            "allowed"
+        } else {
+            "blocked"
+        },
+        payload
+            .permissions
+            .filesystem
+            .allow
+            .iter()
+            .map(|path| format!("- `{}`", path))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        payload.permissions.commands.allow.join(", "),
+        payload.permissions.commands.deny.join(", "),
+        payload.permissions.agent.require_confirmation.join(", "),
+    );
+    crate::fs_util::write_atomic(&runtime_dir.join("hook-context.md"), context)?;
+
+    // Best-effort cleanup of legacy runtime path from older builds.
+    let legacy_runtime_dir = project_root.join(".ship").join("agents").join("runtime");
+    for name in ["envelope.json", "hook-context.md"] {
+        let _ = fs::remove_file(legacy_runtime_dir.join(name));
+    }
+    let _ = fs::remove_dir(&legacy_runtime_dir);
+    Ok(())
+}
+
+fn export_claude_settings(
+    project_root: &Path,
+    hooks: &[HookConfig],
+    permissions: &Permissions,
+) -> Result<()> {
+    let path = project_root.join(".claude").join("settings.json");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -49,7 +403,7 @@ fn export_claude_settings(hooks: &[HookConfig], permissions: &Permissions) -> Re
     };
     let obj = root
         .as_object_mut()
-        .ok_or_else(|| anyhow!("~/.claude/settings.json is not an object"))?;
+        .ok_or_else(|| anyhow!(".claude/settings.json is not an object"))?;
 
     if has_claude_permission_overrides(permissions) {
         let perms = obj.entry("permissions").or_insert(serde_json::json!({}));
@@ -60,33 +414,166 @@ fn export_claude_settings(hooks: &[HookConfig], permissions: &Permissions) -> Re
         p.insert("deny".into(), serde_json::json!(permissions.tools.deny));
     }
 
-    if !hooks.is_empty() {
+    let should_reconcile_hooks = !hooks.is_empty() || obj.get("hooks").is_some();
+    if should_reconcile_hooks {
         let hooks_val = obj.entry("hooks").or_insert(serde_json::json!({}));
         let hooks_map = hooks_val
             .as_object_mut()
             .ok_or_else(|| anyhow!("hooks not an object"))?;
         let mut by_trigger: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
         for hook in hooks {
-            let key = match hook.trigger {
-                HookTrigger::PreToolUse => "PreToolUse",
-                HookTrigger::PostToolUse => "PostToolUse",
-                HookTrigger::Notification => "Notification",
-                HookTrigger::Stop => "Stop",
-                HookTrigger::SubagentStop => "SubagentStop",
-                HookTrigger::PreCompact => "PreCompact",
+            let Some(key) = claude_trigger_name(&hook.trigger) else {
+                continue;
             };
-            let mut entry = serde_json::json!({ "type": "command", "command": hook.command });
-            if let Some(m) = &hook.matcher {
-                entry["matcher"] = serde_json::json!(m);
+            let mut command_hook = serde_json::json!({
+                "type": "command",
+                "command": hook.command,
+            });
+            if let Some(timeout) = hook.timeout_ms {
+                command_hook["timeout"] = serde_json::json!(timeout);
             }
-            by_trigger.entry(key).or_default().push(entry);
+            if let Some(description) = &hook.description {
+                command_hook["description"] = serde_json::json!(description);
+            }
+            let mut group = serde_json::json!({
+                "hooks": [command_hook]
+            });
+            if let Some(m) = &hook.matcher {
+                group["matcher"] = serde_json::json!(m);
+            }
+            by_trigger.entry(key).or_default().push(group);
         }
+
+        // Keep Claude hook triggers in sync with the active hook set to avoid stale keys.
+        for trigger in claude_managed_trigger_keys() {
+            if let Some(entries) = by_trigger.remove(trigger) {
+                hooks_map.insert((*trigger).to_string(), serde_json::json!(entries));
+            } else {
+                hooks_map.remove(*trigger);
+            }
+        }
+
         for (trigger, entries) in by_trigger {
             hooks_map.insert(trigger.to_string(), serde_json::json!(entries));
+        }
+
+        if hooks_map.is_empty() {
+            obj.remove("hooks");
         }
     }
 
     crate::fs_util::write_atomic(&path, serde_json::to_string_pretty(&root)?)
+}
+
+fn export_gemini_settings(project_root: &Path, hooks: &[HookConfig]) -> Result<()> {
+    if hooks.is_empty() {
+        return Ok(());
+    }
+
+    let path = project_root.join(".gemini").join("settings.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut root: serde_json::Value = if path.exists() {
+        serde_json::from_str(&fs::read_to_string(&path)?).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let obj = root
+        .as_object_mut()
+        .ok_or_else(|| anyhow!(".gemini/settings.json is not an object"))?;
+    let hooks_val = obj.entry("hooks").or_insert(serde_json::json!({}));
+    let hooks_map = hooks_val
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("hooks not an object"))?;
+
+    let mut by_trigger: HashMap<&str, Vec<serde_json::Value>> = HashMap::new();
+    for hook in hooks {
+        let Some(key) = gemini_trigger_name(&hook.trigger) else {
+            continue;
+        };
+        let mut command_hook = serde_json::json!({
+            "name": hook.id,
+            "type": "command",
+            "command": hook.command,
+        });
+        if let Some(timeout) = hook.timeout_ms {
+            command_hook["timeout"] = serde_json::json!(timeout);
+        }
+        if let Some(description) = &hook.description {
+            command_hook["description"] = serde_json::json!(description);
+        }
+        let mut group = serde_json::json!({
+            "hooks": [command_hook]
+        });
+        if let Some(matcher) = &hook.matcher {
+            group["matcher"] = serde_json::json!(matcher);
+        }
+        by_trigger.entry(key).or_default().push(group);
+    }
+
+    for (trigger, entries) in by_trigger {
+        hooks_map.insert(trigger.to_string(), serde_json::json!(entries));
+    }
+    crate::fs_util::write_atomic(&path, serde_json::to_string_pretty(&root)?)
+}
+
+fn claude_trigger_name(trigger: &HookTrigger) -> Option<&'static str> {
+    match trigger {
+        HookTrigger::SessionStart => Some("SessionStart"),
+        HookTrigger::UserPromptSubmit => Some("UserPromptSubmit"),
+        HookTrigger::PreToolUse | HookTrigger::BeforeTool => Some("PreToolUse"),
+        HookTrigger::PermissionRequest => Some("PermissionRequest"),
+        HookTrigger::PostToolUse | HookTrigger::AfterTool => Some("PostToolUse"),
+        HookTrigger::PostToolUseFailure => Some("PostToolUseFailure"),
+        HookTrigger::Notification => Some("Notification"),
+        HookTrigger::SubagentStart => Some("SubagentStart"),
+        HookTrigger::SubagentStop => Some("SubagentStop"),
+        HookTrigger::Stop | HookTrigger::SessionEnd => Some("Stop"),
+        HookTrigger::PreCompact => Some("PreCompact"),
+        HookTrigger::BeforeAgent
+        | HookTrigger::AfterAgent
+        | HookTrigger::BeforeModel
+        | HookTrigger::AfterModel
+        | HookTrigger::BeforeToolSelection => None,
+    }
+}
+
+fn claude_managed_trigger_keys() -> &'static [&'static str] {
+    &[
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "Notification",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+        "PreCompact",
+    ]
+}
+
+fn gemini_trigger_name(trigger: &HookTrigger) -> Option<&'static str> {
+    match trigger {
+        HookTrigger::BeforeTool | HookTrigger::PreToolUse => Some("BeforeTool"),
+        HookTrigger::AfterTool | HookTrigger::PostToolUse => Some("AfterTool"),
+        HookTrigger::BeforeAgent => Some("BeforeAgent"),
+        HookTrigger::AfterAgent => Some("AfterAgent"),
+        HookTrigger::Notification => Some("Notification"),
+        HookTrigger::SessionStart => Some("SessionStart"),
+        HookTrigger::SessionEnd | HookTrigger::Stop => Some("SessionEnd"),
+        HookTrigger::PreCompact => Some("PreCompress"),
+        HookTrigger::BeforeModel => Some("BeforeModel"),
+        HookTrigger::AfterModel => Some("AfterModel"),
+        HookTrigger::BeforeToolSelection => Some("BeforeToolSelection"),
+        HookTrigger::UserPromptSubmit
+        | HookTrigger::PermissionRequest
+        | HookTrigger::PostToolUseFailure
+        | HookTrigger::SubagentStart
+        | HookTrigger::SubagentStop => None,
+    }
 }
 
 fn export_gemini_workspace_policy(project_root: &Path, permissions: &Permissions) -> Result<()> {
@@ -170,7 +657,59 @@ fn export_gemini_workspace_policy(project_root: &Path, permissions: &Permissions
     crate::fs_util::write_atomic(&path, content)
 }
 
-fn apply_codex_permissions(root: &mut toml::value::Table, permissions: &Permissions) {
+fn codex_writable_roots(project_root: &Path, permissions: &Permissions) -> Vec<toml::Value> {
+    let mut seen = HashSet::new();
+    let mut roots: Vec<toml::Value> = Vec::new();
+    let mut push_root = |path: PathBuf| {
+        let normalized = fs::canonicalize(&path).unwrap_or(path);
+        let key = normalized.to_string_lossy().to_string();
+        if seen.insert(key.clone()) {
+            roots.push(toml::Value::String(key));
+        }
+    };
+
+    push_root(project_root.to_path_buf());
+
+    let home_dir = std::env::var("HOME").ok().map(PathBuf::from);
+    for raw in &permissions.filesystem.allow {
+        let value = raw.trim();
+        if value.is_empty()
+            || value.contains('*')
+            || value.contains('?')
+            || value.contains('[')
+            || value.contains('{')
+        {
+            continue;
+        }
+
+        let path = if value == "." || value == "./" {
+            project_root.to_path_buf()
+        } else if let Some(stripped) = value.strip_prefix("~/") {
+            if let Some(home) = &home_dir {
+                home.join(stripped)
+            } else {
+                continue;
+            }
+        } else {
+            let parsed = PathBuf::from(value);
+            if parsed.is_absolute() {
+                parsed
+            } else {
+                let rel = value.strip_prefix("./").unwrap_or(value);
+                project_root.join(rel)
+            }
+        };
+        push_root(path);
+    }
+
+    roots
+}
+
+fn apply_codex_permissions(
+    root: &mut toml::value::Table,
+    project_root: &Path,
+    permissions: &Permissions,
+) {
     let network_access = matches!(
         permissions.network.policy,
         crate::permissions::NetworkPolicy::AllowList
@@ -194,21 +733,6 @@ fn apply_codex_permissions(root: &mut toml::value::Table, permissions: &Permissi
         toml::Value::String(approval.to_string()),
     );
 
-    if !permissions.commands.allow.is_empty() {
-        root.insert(
-            "allow".to_string(),
-            toml::Value::Array(
-                permissions
-                    .commands
-                    .allow
-                    .iter()
-                    .cloned()
-                    .map(toml::Value::String)
-                    .collect(),
-            ),
-        );
-    }
-
     let sandbox_entry = root
         .entry("sandbox_workspace_write".to_string())
         .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
@@ -217,46 +741,145 @@ fn apply_codex_permissions(root: &mut toml::value::Table, permissions: &Permissi
             "network_access".to_string(),
             toml::Value::Boolean(network_access),
         );
+        table.insert(
+            "writable_roots".to_string(),
+            toml::Value::Array(codex_writable_roots(project_root, permissions)),
+        );
     }
-
-    let mut prefix_rules = read_codex_prefix_rules(root);
-    for pattern in &permissions.commands.deny {
-        if let Some(prefix) = command_prefix_from_pattern(pattern) {
-            prefix_rules.push((prefix, "forbidden".to_string()));
-        }
-    }
-    for pattern in &permissions.agent.require_confirmation {
-        if let Some(prefix) = command_prefix_from_pattern(pattern) {
-            prefix_rules.push((prefix, "prompt".to_string()));
-        }
-    }
-    dedupe_pairs(&mut prefix_rules);
-    if !prefix_rules.is_empty() {
-        let rules_entry = root
-            .entry("rules".to_string())
-            .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-        if let Some(rules_table) = rules_entry.as_table_mut() {
-            let array = prefix_rules
-                .into_iter()
-                .map(|(prefix, decision)| {
-                    let mut table = toml::value::Table::new();
-                    table.insert("prefix".to_string(), toml::Value::String(prefix));
-                    table.insert("decision".to_string(), toml::Value::String(decision));
-                    toml::Value::Table(table)
-                })
-                .collect();
-            rules_table.insert("prefix_rules".to_string(), toml::Value::Array(array));
+    // Legacy Ship exports wrote command policy into top-level `allow` and
+    // `[rules].prefix_rules`. Current Codex expects Starlark rules files under
+    // `.codex/rules/*.rules`, so clear stale legacy fields on each export.
+    root.remove("allow");
+    if let Some(rules_val) = root.get_mut("rules")
+        && let Some(rules_table) = rules_val.as_table_mut()
+    {
+        rules_table.remove("prefix_rules");
+        if rules_table.is_empty() {
+            root.remove("rules");
         }
     }
 }
 
-fn import_permissions_from_claude() -> Result<Option<Permissions>> {
-    let path = home()?.join(".claude").join("settings.json");
-    if !path.exists() {
-        return Ok(None);
+fn export_codex_execpolicy(project_root: &Path, permissions: &Permissions) -> Result<()> {
+    let rules_dir = project_root.join(".codex").join("rules");
+    let rules_path = rules_dir.join("ship.rules");
+    let rules = codex_execpolicy_rules_from_permissions(permissions);
+    if rules.is_empty() {
+        if rules_path.exists() {
+            fs::remove_file(&rules_path).ok();
+        }
+        return Ok(());
     }
 
-    let root: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    fs::create_dir_all(&rules_dir)?;
+    let mut content = String::new();
+    content.push_str(
+        "# Generated by Ship. Do not edit manually — run `ship git sync` to regenerate.\n",
+    );
+    content.push_str("# Source: .ship/agents/permissions.toml\n\n");
+    for (tokens, decision, source_pattern) in rules {
+        content.push_str("prefix_rule(\n");
+        content.push_str("    pattern = [");
+        content.push_str(
+            &tokens
+                .iter()
+                .map(|token| format!("\"{}\"", escape_starlark_string(token)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        content.push_str("],\n");
+        content.push_str(&format!("    decision = \"{}\",\n", decision));
+        content.push_str(&format!(
+            "    justification = \"Managed by Ship permissions (pattern: {})\",\n",
+            escape_starlark_string(&source_pattern)
+        ));
+        content.push_str(")\n\n");
+    }
+    crate::fs_util::write_atomic(&rules_path, content)
+}
+
+fn teardown_codex_execpolicy(project_root: &Path) -> Result<()> {
+    let rules_path = project_root.join(".codex").join("rules").join("ship.rules");
+    if rules_path.exists() {
+        fs::remove_file(&rules_path)?;
+    }
+    Ok(())
+}
+
+fn codex_execpolicy_rules_from_permissions(
+    permissions: &Permissions,
+) -> Vec<(Vec<String>, String, String)> {
+    let mut out = Vec::new();
+    for pattern in &permissions.commands.deny {
+        if let Some(tokens) = codex_pattern_tokens(pattern) {
+            out.push((tokens, "forbidden".to_string(), pattern.clone()));
+        }
+    }
+    for pattern in &permissions.agent.require_confirmation {
+        if let Some(tokens) = codex_pattern_tokens(pattern) {
+            out.push((tokens, "prompt".to_string(), pattern.clone()));
+        }
+    }
+    for pattern in &permissions.commands.allow {
+        if let Some(tokens) = codex_pattern_tokens(pattern) {
+            out.push((tokens, "allow".to_string(), pattern.clone()));
+        }
+    }
+    let mut seen = HashSet::new();
+    out.retain(|(tokens, decision, _)| seen.insert((tokens.clone(), decision.clone())));
+    out
+}
+
+fn codex_pattern_tokens(pattern: &str) -> Option<Vec<String>> {
+    let trimmed = pattern.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(regex) = trimmed.strip_prefix("regex:") {
+        if !regex.trim().is_empty() {
+            return None;
+        }
+    }
+    let base = if let Some(prefix) = command_prefix_from_pattern(trimmed) {
+        prefix
+    } else {
+        if trimmed.contains('*') {
+            return None;
+        }
+        trimmed.to_string()
+    };
+    let tokens: Vec<String> = base
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .collect();
+    if tokens.is_empty() {
+        None
+    } else {
+        Some(tokens)
+    }
+}
+
+fn escape_starlark_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn import_permissions_from_claude(project_dir: &Path) -> Result<Option<Permissions>> {
+    let Some(project_root) = project_dir.parent() else {
+        return Ok(None);
+    };
+    let project_path = project_root.join(".claude").join("settings.json");
+    let global_path = home()?.join(".claude").join("settings.json");
+    let path = if project_path.exists() {
+        project_path
+    } else if global_path.exists() {
+        global_path
+    } else {
+        return Ok(None);
+    };
+
+    let root: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path)?)?;
     let Some(perms) = root.get("permissions").and_then(|p| p.as_object()) else {
         return Ok(None);
     };
@@ -415,6 +1038,7 @@ fn import_permissions_from_codex(project_dir: &Path) -> Result<Option<Permission
     let mut imported = false;
     let mut permissions = Permissions::default();
 
+    // Legacy imports: pre-execpolicy Codex fields used by older Ship versions.
     if let Some(allow) = root.get("allow").and_then(|v| v.as_array()) {
         permissions.commands.allow = allow
             .iter()
@@ -440,10 +1064,24 @@ fn import_permissions_from_codex(project_dir: &Path) -> Result<Option<Permission
     let prefix_rules = read_codex_prefix_rules_from_value(&root);
     for (prefix, decision) in prefix_rules {
         imported = true;
-        let pattern = format!("{}*", prefix);
+        let pattern = codex_prefix_to_pattern(&prefix);
         match decision.as_str() {
             "forbidden" => permissions.commands.deny.push(pattern),
             "prompt" => permissions.agent.require_confirmation.push(pattern),
+            "allow" => permissions.commands.allow.push(pattern),
+            _ => {}
+        }
+    }
+
+    let rules_dir = project_root.join(".codex").join("rules");
+    let starlark_rules = read_codex_execpolicy_rules(&rules_dir);
+    for (tokens, decision) in starlark_rules {
+        imported = true;
+        let pattern = format!("{} *", tokens.join(" "));
+        match decision.as_str() {
+            "forbidden" => permissions.commands.deny.push(pattern),
+            "prompt" => permissions.agent.require_confirmation.push(pattern),
+            "allow" => permissions.commands.allow.push(pattern),
             _ => {}
         }
     }
@@ -502,10 +1140,6 @@ fn value_to_string_list(value: Option<&toml::Value>) -> Vec<String> {
     }
 }
 
-fn read_codex_prefix_rules(root: &toml::value::Table) -> Vec<(String, String)> {
-    read_codex_prefix_rules_from_value(&toml::Value::Table(root.clone()))
-}
-
 fn read_codex_prefix_rules_from_value(root: &toml::Value) -> Vec<(String, String)> {
     root.get("rules")
         .and_then(|v| v.as_table())
@@ -525,12 +1159,166 @@ fn read_codex_prefix_rules_from_value(root: &toml::Value) -> Vec<(String, String
         .unwrap_or_default()
 }
 
-fn dedupe_strings(values: &mut Vec<String>) {
-    let mut seen = HashSet::new();
-    values.retain(|item| seen.insert(item.clone()));
+fn codex_prefix_to_pattern(prefix: &str) -> String {
+    let trimmed = prefix.trim();
+    if trimmed.is_empty() {
+        "*".to_string()
+    } else {
+        format!("{trimmed} *")
+    }
 }
 
-fn dedupe_pairs(values: &mut Vec<(String, String)>) {
+fn read_codex_execpolicy_rules(rules_dir: &Path) -> Vec<(Vec<String>, String)> {
+    let mut out = Vec::new();
+    let Ok(entries) = fs::read_dir(rules_dir) else {
+        return out;
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            path.extension()
+                .and_then(|e| e.to_str())
+                .map(|ext| ext == "rules" || ext == "codexpolicy")
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    for path in files {
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+        out.extend(parse_codex_execpolicy_rules(&content));
+    }
+    out
+}
+
+fn parse_codex_execpolicy_rules(content: &str) -> Vec<(Vec<String>, String)> {
+    let mut out = Vec::new();
+    let mut current = Vec::new();
+    let mut in_rule = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !in_rule {
+            if trimmed.starts_with("prefix_rule(") {
+                in_rule = true;
+                current.clear();
+                current.push(line.to_string());
+                if trimmed.ends_with(')') {
+                    if let Some(parsed) = parse_codex_execpolicy_rule_block(&current.join("\n")) {
+                        out.push(parsed);
+                    }
+                    in_rule = false;
+                    current.clear();
+                }
+            }
+            continue;
+        }
+
+        current.push(line.to_string());
+        if trimmed.starts_with(')') {
+            if let Some(parsed) = parse_codex_execpolicy_rule_block(&current.join("\n")) {
+                out.push(parsed);
+            }
+            in_rule = false;
+            current.clear();
+        }
+    }
+    out
+}
+
+fn parse_codex_execpolicy_rule_block(block: &str) -> Option<(Vec<String>, String)> {
+    let pattern = extract_list_strings_for_key(block, "pattern")?;
+    if pattern.is_empty() {
+        return None;
+    }
+    let decision =
+        extract_string_for_key(block, "decision").unwrap_or_else(|| "allow".to_string());
+    if !matches!(decision.as_str(), "allow" | "prompt" | "forbidden") {
+        return None;
+    }
+    Some((pattern, decision))
+}
+
+fn extract_string_for_key(block: &str, key: &str) -> Option<String> {
+    let needle = format!("{key} =");
+    for line in block.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with(&needle) {
+            continue;
+        }
+        let first = trimmed.find('"')?;
+        let remainder = &trimmed[(first + 1)..];
+        let second = remainder.find('"')?;
+        return Some(remainder[..second].to_string());
+    }
+    None
+}
+
+fn extract_list_strings_for_key(block: &str, key: &str) -> Option<Vec<String>> {
+    let key_pos = block.find(key)?;
+    let after_key = &block[key_pos..];
+    let eq_pos = after_key.find('=')?;
+    let after_eq = &after_key[(eq_pos + 1)..];
+    let open_pos = after_eq.find('[')?;
+    let list_fragment = &after_eq[open_pos..];
+
+    let mut depth = 0usize;
+    let mut end_idx = None;
+    for (idx, ch) in list_fragment.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    end_idx = Some(idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end_idx?;
+    let array_src = &list_fragment[..=end];
+    let mut values = Vec::new();
+    let mut chars = array_src.chars().peekable();
+    let mut list_depth = 0usize;
+    while let Some(ch) = chars.next() {
+        match ch {
+            '[' => list_depth += 1,
+            ']' => {
+                if list_depth > 0 {
+                    list_depth -= 1;
+                }
+            }
+            '"' if list_depth == 1 => {
+                let mut value = String::new();
+                while let Some(next) = chars.next() {
+                    if next == '\\' {
+                        if let Some(escaped) = chars.next() {
+                            value.push(escaped);
+                        }
+                        continue;
+                    }
+                    if next == '"' {
+                        break;
+                    }
+                    value.push(next);
+                }
+                values.push(value);
+            }
+            _ => {}
+        }
+    }
+    Some(values)
+}
+
+fn dedupe_strings(values: &mut Vec<String>) {
     let mut seen = HashSet::new();
     values.retain(|item| seen.insert(item.clone()));
 }

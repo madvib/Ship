@@ -46,7 +46,7 @@ This keeps one base policy surface while still allowing mode-specific tool gatin
 Current export mappings are explicit and provider-specific:
 
 - `claude`:
-  - Output: `~/.claude/settings.json`
+  - Output: `$WORKSPACE_ROOT/.claude/settings.json`
   - Mapping: `permissions.tools.allow/deny` -> `settings.permissions.allow/deny`
 - `gemini`:
   - Output: `$WORKSPACE_ROOT/.gemini/policies/ship-permissions.toml`
@@ -55,11 +55,13 @@ Current export mappings are explicit and provider-specific:
     - `commands.allow/deny` -> `[[rule]] toolName="run_shell_command" commandPrefix|commandRegex ...`
     - `agent.require_confirmation` -> `[[rule]] ... decision="ask_user"`
 - `codex`:
-  - Output: `$WORKSPACE_ROOT/.codex/config.toml`
+  - Output:
+    - `$WORKSPACE_ROOT/.codex/config.toml`
+    - `$WORKSPACE_ROOT/.codex/rules/ship.rules`
   - Mapping:
     - `network.policy` -> `sandbox_workspace_write.network_access` (lossy)
-    - `commands.allow` -> `allow = [...]`
-    - `commands.deny` + `agent.require_confirmation` -> `rules.prefix_rules` (`forbidden` / `prompt`)
+    - `commands.allow|deny` + `agent.require_confirmation` -> `prefix_rule(...)` entries in `.codex/rules/ship.rules`
+      - decisions: `allow` / `forbidden` / `prompt`
     - global safety -> `sandbox_mode = "workspace-write"` + `approval_policy = "on-request"` (or `"on-failure"` for permissive defaults)
 
 When adding new provider mappings, keep conversion in `agent_export.rs` explicit (no implicit key mirroring), and add provider-specific tests.
@@ -68,8 +70,8 @@ When adding new provider mappings, keep conversion in `agent_export.rs` explicit
 
 `runtime::agent_export::import_permissions_from_provider(provider, ship_dir)` supports:
 
-- `claude`: reads `~/.claude/settings.json` permissions allow/deny arrays.
+- `claude`: reads workspace `.claude/settings.json` permissions allow/deny arrays (falls back to `~/.claude/settings.json` only when project-local file is missing).
 - `gemini`: reads workspace `ship-permissions.toml` policy rules.
-- `codex`: reads `.codex/config.toml` (`allow`, `sandbox_workspace_write.network_access`, `rules.prefix_rules`).
+- `codex`: reads `.codex/rules/*.rules` (`prefix_rule(...)`) plus legacy fallback fields in `.codex/config.toml`.
 
 Imports are lossy where provider models are less expressive than the canonical schema.

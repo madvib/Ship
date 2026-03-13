@@ -14,7 +14,7 @@ export function useUpdateChecker() {
         if (!update?.available) return;
 
         const yes = await ask(
-          `Shipwright ${update.version} is available.\n\nInstall now and restart?`,
+          `Ship ${update.version} is available.\n\nInstall now and restart?`,
           { title: 'Update Available', kind: 'info' },
         );
 

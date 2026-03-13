@@ -41,7 +41,6 @@ impl Feature {
                     updated: now,
                     release_id: None,
                     active_target_id: None,
-                    spec_id: None,
                     branch: None,
                     agent: None,
                     tags: Vec::new(),
@@ -86,9 +85,7 @@ fn parse_generated_feature_header(content: &str) -> (Option<String>, String) {
     let mut lines = content.lines();
     if let Some(first) = lines.next() {
         let trimmed = first.trim();
-        if trimmed.starts_with("<!-- ship:feature ")
-            && trimmed.ends_with("-->")
-        {
+        if trimmed.starts_with("<!-- ship:feature ") && trimmed.ends_with("-->") {
             let id = trimmed
                 .split_whitespace()
                 .find_map(|part| part.strip_prefix("id="))

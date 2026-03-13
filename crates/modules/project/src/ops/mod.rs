@@ -3,10 +3,8 @@ use std::path::Path;
 
 pub mod adr;
 pub mod feature;
-pub mod issue;
 pub mod note;
 pub mod release;
-pub mod spec;
 
 pub trait ShipModule: Send + Sync + 'static {
     fn module_type_id() -> &'static str
@@ -26,12 +24,6 @@ impl ShipModule for crate::Feature {
     }
 }
 
-impl ShipModule for crate::Issue {
-    fn module_type_id() -> &'static str {
-        "issue"
-    }
-}
-
 impl ShipModule for crate::Note {
     fn module_type_id() -> &'static str {
         "note"
@@ -41,12 +33,6 @@ impl ShipModule for crate::Note {
 impl ShipModule for crate::Release {
     fn module_type_id() -> &'static str {
         "release"
-    }
-}
-
-impl ShipModule for crate::Spec {
-    fn module_type_id() -> &'static str {
-        "spec"
     }
 }
 

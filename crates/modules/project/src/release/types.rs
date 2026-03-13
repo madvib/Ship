@@ -5,19 +5,19 @@ use specta::Type;
 #[serde(rename_all = "kebab-case")]
 pub enum ReleaseStatus {
     #[default]
-    Planned,
+    #[serde(alias = "planned")]
+    Upcoming,
     Active,
-    Shipped,
-    Archived,
+    #[serde(alias = "shipped", alias = "archived")]
+    Deprecated,
 }
 
 impl std::fmt::Display for ReleaseStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReleaseStatus::Planned => write!(f, "planned"),
+            ReleaseStatus::Upcoming => write!(f, "upcoming"),
             ReleaseStatus::Active => write!(f, "active"),
-            ReleaseStatus::Shipped => write!(f, "shipped"),
-            ReleaseStatus::Archived => write!(f, "archived"),
+            ReleaseStatus::Deprecated => write!(f, "deprecated"),
         }
     }
 }
@@ -26,10 +26,13 @@ impl std::str::FromStr for ReleaseStatus {
     type Err = anyhow::Error;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "planned" | "upcoming" => Ok(ReleaseStatus::Planned),
+            "upcoming" => Ok(ReleaseStatus::Upcoming),
             "active" => Ok(ReleaseStatus::Active),
-            "shipped" | "released" => Ok(ReleaseStatus::Shipped),
-            "archived" | "deprecated" => Ok(ReleaseStatus::Archived),
+            "deprecated" => Ok(ReleaseStatus::Deprecated),
+            // Legacy aliases from older release status model.
+            "planned" => Ok(ReleaseStatus::Upcoming),
+            "shipped" => Ok(ReleaseStatus::Deprecated),
+            "archived" => Ok(ReleaseStatus::Deprecated),
             _ => Err(anyhow::anyhow!("Invalid release status: {}", s)),
         }
     }

@@ -3,19 +3,22 @@ import { useNavigate } from '@tanstack/react-router';
 import { Button, Alert, AlertDescription, AlertTitle } from '@ship/ui';
 import {
   createWorkspaceCmd,
-  deleteWorkspaceCmd,
   openWorkspaceEditorCmd,
   repairWorkspaceCmd,
-  setWorkspaceModeCmd,
   startWorkspaceSessionCmd,
+  transitionWorkspaceCmd,
   endWorkspaceSessionCmd,
   syncWorkspaceCmd,
-  activateWorkspaceCmd,
-  transitionWorkspaceCmd,
   type WorkspaceRepairReport,
 } from '@/lib/platform/tauri/commands';
 import { useWorkspace, useShip } from '@/lib/hooks/workspace/WorkspaceContext';
-import { FEATURES_ROUTE, OVERVIEW_ROUTE } from '@/lib/constants/routes';
+import {
+  AGENTS_MCP_ROUTE,
+  AGENTS_PERMISSIONS_ROUTE,
+  FEATURES_ROUTE,
+  OVERVIEW_ROUTE,
+  RELEASES_ROUTE,
+} from '@/lib/constants/routes';
 
 // Subcomponents
 import { WorkspaceSidebar } from './workspace/WorkspaceSidebar';
@@ -23,6 +26,7 @@ import { WorkspaceHeader } from './workspace/WorkspaceHeader';
 import { WorkspaceDashboard } from './workspace/WorkspaceDashboard';
 import { WorkspaceTerminalTray } from './workspace/WorkspaceTerminalTray';
 import { WorkspaceHeaderActions } from './workspace/WorkspaceHeaderActions';
+import { WorkspaceAgentDialog } from './workspace/WorkspaceAgentDialog';
 
 // Hooks
 import { useWorkspaceState } from './workspace/useWorkspaceState';
@@ -32,8 +36,24 @@ import { useRuntimePerf } from './workspace/useRuntimePerf';
 import { WorkspaceGraphStatus } from './components/WorkspaceLifecycleGraph';
 import { cn } from '@/lib/utils';
 
-const NO_LINK_VALUE = '__none__';
 type SessionErrorSurface = 'alert' | 'silent';
+
+function normalizeIdList(values: string[]): string[] {
+  const normalized = values.map((value) => value.trim()).filter((value) => value.length > 0);
+  return Array.from(new Set(normalized)).sort((a, b) => a.localeCompare(b));
+}
+
+function hasListChanged(previous: string[], next: string[]): boolean {
+  const prevNormalized = normalizeIdList(previous);
+  const nextNormalized = normalizeIdList(next);
+  if (prevNormalized.length !== nextNormalized.length) return true;
+  for (let index = 0; index < prevNormalized.length; index += 1) {
+    if (prevNormalized[index] !== nextNormalized[index]) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export default function WorkspacePanel() {
   const navigate = useNavigate();
@@ -47,16 +67,26 @@ export default function WorkspacePanel() {
   const [lastRepairReport, setLastRepairReport] = useState<WorkspaceRepairReport | null>(null);
   const [sessionProvider, setSessionProvider] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [archivingWorkspace, setArchivingWorkspace] = useState(false);
-  const [updatingWorkspaceMode, setUpdatingWorkspaceMode] = useState(false);
   const [restartingSession, setRestartingSession] = useState(false);
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const [savingWorkspaceAgent, setSavingWorkspaceAgent] = useState(false);
   const terminalResizerRef = useRef(false);
 
+  const createIntentNonceRef = useRef(0);
+  const [createIntent, setCreateIntent] = useState<{ nonce: number; branch: string | null } | null>(null);
   const state = useWorkspaceState(workspaceUi, ship);
   const terminal = useWorkspaceTerminal(state.detail?.branch, workspaceUi.activeModeId, 'command');
   const runtimePerf = useRuntimePerf(import.meta.env.DEV);
-  const terminalReservedHeight = terminalMaximized ? 0 : Math.max(terminalHeight, 140);
+  const showTerminalTray = Boolean(state.detail);
+  const openCreateWorkspaceDialog = (targetBranch?: string | null) => {
+    createIntentNonceRef.current += 1;
+    setCreateIntent({
+      nonce: createIntentNonceRef.current,
+      branch: targetBranch ?? state.branch ?? null,
+    });
+  };
+  const terminalReservedHeight = showTerminalTray && !terminalMaximized ? Math.max(terminalHeight, 140) : 0;
 
   const isDarkTheme = useMemo(() => {
     if (workspaceUi.config.theme === 'dark') return true;
@@ -69,7 +99,7 @@ export default function WorkspacePanel() {
 
   const statusVariant = (status: WorkspaceGraphStatus): 'default' | 'secondary' | 'outline' => {
     if (status === 'active') return 'default';
-    if (status === 'review') return 'secondary';
+    if (status === 'archived') return 'secondary';
     return 'outline';
   };
 
@@ -141,19 +171,10 @@ export default function WorkspacePanel() {
     state.setEndingSession(true);
     try {
       const summary = state.sessionSummaryInput.trim();
-      const updatedFeatureIds =
-        state.linkFeatureId && state.linkFeatureId !== NO_LINK_VALUE
-          ? [state.linkFeatureId]
-          : [];
-      const updatedSpecIds =
-        state.linkSpecId && state.linkSpecId !== NO_LINK_VALUE
-          ? [state.linkSpecId]
-          : [];
       const res = await endWorkspaceSessionCmd(
         state.detail.branch,
         summary.length > 0 ? summary : null,
-        updatedFeatureIds,
-        updatedSpecIds
+        state.linkFeatureId ? [state.linkFeatureId] : []
       );
       if (res.status === 'ok') {
         if (terminal.terminalSession?.branch === state.detail.branch) {
@@ -195,11 +216,8 @@ export default function WorkspacePanel() {
       const endRes = await endWorkspaceSessionCmd(
         detail.branch,
         'Session restarted to apply updated workspace context.',
-        state.linkFeatureId && state.linkFeatureId !== NO_LINK_VALUE
+        state.linkFeatureId
           ? [state.linkFeatureId]
-          : [],
-        state.linkSpecId && state.linkSpecId !== NO_LINK_VALUE
-          ? [state.linkSpecId]
           : []
       );
       if (endRes.status === 'error') {
@@ -207,13 +225,6 @@ export default function WorkspacePanel() {
         return;
       }
 
-      const activateRes = await activateWorkspaceCmd(detail.branch);
-      if (activateRes.status === 'error') {
-        state.setError(
-          activateRes.error || 'Failed to activate workspace before restart.'
-        );
-        return;
-      }
 
       const startRes = await startWorkspaceSessionCmd(
         detail.branch,
@@ -239,29 +250,65 @@ export default function WorkspacePanel() {
     }
   };
 
-  const handleApplyLinks = async () => {
+  const applyWorkspaceConfig = async (
+    branch: string,
+    input: {
+      workspaceType: 'feature' | 'patch' | 'service';
+      environmentId?: string | null;
+      providers?: string[];
+      mcpServers?: string[];
+      skills?: string[];
+      featureId?: string | null;
+      releaseId?: string | null;
+      isWorktree?: boolean;
+      worktreePath?: string | null;
+    },
+    fallbackError: string,
+  ) => {
+    const result = await createWorkspaceCmd(branch, input);
+    if (result.status === 'error') {
+      state.setError(result.error || fallbackError);
+      return false;
+    }
+    return true;
+  };
+
+  const handleUpdateLinks = async (nextFeatureId: string | null, nextReleaseId: string | null) => {
     if (!state.detail) return;
+    if (nextFeatureId && nextReleaseId) {
+      state.setError('Choose either a feature anchor or a release anchor for this workspace.');
+      return;
+    }
+
+    state.setLinkFeatureId(nextFeatureId);
+    state.setLinkReleaseId(nextReleaseId);
     state.setUpdatingLinks(true);
+
     try {
-      const featureId =
-        state.linkFeatureId === NO_LINK_VALUE ? null : state.linkFeatureId;
-      const specId = state.linkSpecId === NO_LINK_VALUE ? null : state.linkSpecId;
-      const res = await createWorkspaceCmd(state.detail.branch, {
+      const releaseId = nextReleaseId
+        ? ship.releases.find(
+            (release) =>
+              release.id === nextReleaseId ||
+              release.file_name === nextReleaseId ||
+              release.version === nextReleaseId
+          )?.id ?? nextReleaseId
+        : null;
+
+      const ok = await applyWorkspaceConfig(state.detail.branch, {
         workspaceType: state.detail.workspaceType,
-        featureId,
-        specId,
-        releaseId: state.detail.releaseId ?? null,
-        modeId: state.detail.activeMode ?? null,
-      });
-      if (res.status === 'error') {
-        state.setError(res.error || 'Failed to update workspace links.');
+        environmentId: state.detail.environmentId,
+        featureId: nextFeatureId,
+        releaseId,
+      }, 'Failed to update workspace links.');
+      if (!ok) {
         return;
       }
-      state.load();
+      await state.load();
     } finally {
       state.setUpdatingLinks(false);
     }
   };
+
 
   const handleSync = async () => {
     if (!state.detail) return;
@@ -278,18 +325,22 @@ export default function WorkspacePanel() {
     }
   };
 
-  const handleActivate = async () => {
+
+  const handleArchive = async () => {
     if (!state.detail) return;
-    state.setActivating(true);
+    setArchivingWorkspace(true);
     try {
-      const result = await activateWorkspaceCmd(state.detail.branch);
+      const result = await transitionWorkspaceCmd(state.detail.branch, 'archived');
       if (result.status === 'error') {
-        state.setError(result.error || 'Failed to activate workspace.');
+        state.setError(result.error || 'Failed to archive workspace.');
         return;
+      }
+      if (terminal.terminalSession?.branch === state.detail.branch) {
+        await terminal.stopWorkspaceTerminal();
       }
       await state.load();
     } finally {
-      state.setActivating(false);
+      setArchivingWorkspace(false);
     }
   };
 
@@ -311,18 +362,26 @@ export default function WorkspacePanel() {
 
   const handleCreateWorkspace = async (input: {
     branch: string;
-    workspaceType: 'feature' | 'refactor' | 'experiment' | 'hotfix';
-    modeId: string | null;
+    workspaceType: 'feature' | 'patch' | 'service';
+    environmentId: string | null;
+    providers: string[];
+    featureId: string | null;
+    releaseId: string | null;
+    isWorktree: boolean;
+    worktreePath: string | null;
   }) => {
     setCreatingWorkspace(true);
     try {
-      const result = await createWorkspaceCmd(input.branch, {
+      const ok = await applyWorkspaceConfig(input.branch, {
         workspaceType: input.workspaceType,
-        modeId: input.modeId,
-        activate: true,
-      });
-      if (result.status === 'error') {
-        state.setError(result.error || 'Failed to create workspace.');
+        environmentId: input.environmentId,
+        providers: input.providers,
+        featureId: input.featureId,
+        releaseId: input.releaseId,
+        isWorktree: input.isWorktree,
+        worktreePath: input.worktreePath,
+      }, 'Failed to create workspace.');
+      if (!ok) {
         return;
       }
       await state.load();
@@ -332,51 +391,7 @@ export default function WorkspacePanel() {
     }
   };
 
-  const handleDeleteWorkspace = async (branch: string) => {
-    setDeletingWorkspace(true);
-    try {
-      const result = await deleteWorkspaceCmd(branch);
-      if (result.status === 'error') {
-        state.setError(result.error || 'Failed to delete workspace.');
-        return;
-      }
-      if (terminal.terminalSession?.branch === branch) {
-        await terminal.stopWorkspaceTerminal();
-      }
-      await state.load();
-    } finally {
-      setDeletingWorkspace(false);
-    }
-  };
 
-  const handleArchiveWorkspace = async (branch: string) => {
-    setArchivingWorkspace(true);
-    try {
-      const result = await transitionWorkspaceCmd(branch, 'archived');
-      if (result.status === 'error') {
-        state.setError(result.error || 'Failed to archive workspace.');
-        return;
-      }
-      await state.load();
-    } finally {
-      setArchivingWorkspace(false);
-    }
-  };
-
-  const handleUpdateWorkspaceMode = async (modeId: string | null) => {
-    if (!state.detail) return;
-    setUpdatingWorkspaceMode(true);
-    try {
-      const result = await setWorkspaceModeCmd(state.detail.branch, modeId);
-      if (result.status === 'error') {
-        state.setError(result.error || 'Failed to update workspace mode.');
-        return;
-      }
-      await state.load();
-    } finally {
-      setUpdatingWorkspaceMode(false);
-    }
-  };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -387,6 +402,8 @@ export default function WorkspacePanel() {
     const handleMouseUp = () => {
       terminalResizerRef.current = false;
       document.body.style.cursor = 'default';
+      document.body.style.userSelect = '';
+      (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = '';
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -394,6 +411,9 @@ export default function WorkspacePanel() {
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+      document.body.style.userSelect = '';
+      (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = '';
     };
   }, []);
 
@@ -419,10 +439,25 @@ export default function WorkspacePanel() {
     return ship.features.find((feature) => feature.id === state.detail?.featureId) || null;
   }, [state.detail, ship.features]);
 
-  const linkedSpec = useMemo(() => {
-    if (!state.detail) return null;
-    return ship.specs.find((s: any) => s.id === state.detail?.specId) || null;
-  }, [state.detail, ship.specs]);
+  const linkedRelease = useMemo(() => {
+    const releaseRef =
+      state.linkReleaseId ?? state.detail?.releaseId ?? null;
+    if (!releaseRef) return null;
+    return (
+      ship.releases.find(
+        (release) =>
+          release.id === releaseRef ||
+          release.file_name === releaseRef ||
+          release.version === releaseRef
+      ) || null
+    );
+  }, [state.detail?.releaseId, state.linkReleaseId, ship.releases]);
+
+  const featureLabels = useMemo(
+    () => Object.fromEntries(ship.features.map((feature) => [feature.id, feature.title ?? feature.id])),
+    [ship.features],
+  );
+
 
   useEffect(() => {
     const allowedProviders = state.providerMatrix?.allowed_providers ?? [];
@@ -438,27 +473,19 @@ export default function WorkspacePanel() {
   }, [state.providerMatrix]);
 
   const handleOpenFeature = () => {
-    if (linkedFeature) {
-      void navigate({ to: FEATURES_ROUTE });
-      void ship.handleSelectFeature(linkedFeature);
+    if (state.detail?.featureId) {
+      const feat = ship.features.find(f => f.id === state.detail?.featureId);
+      if (feat) {
+        void navigate({ to: FEATURES_ROUTE });
+        void ship.handleSelectFeature(feat);
+      }
     }
   };
 
-  const handleOpenSpec = () => {
-    if (!linkedSpec) return;
-    const relatedFeature =
-      ship.features.find(
-        (entry) =>
-          entry.spec_id === linkedSpec.id || entry.spec_id === linkedSpec.file_name
-      ) ?? null;
-    if (!relatedFeature) {
-      state.setError(
-        `Spec ${linkedSpec.id} is linked, but no feature currently references it.`
-      );
-      return;
-    }
-    void navigate({ to: FEATURES_ROUTE });
-    void ship.handleSelectFeature(relatedFeature);
+  const handleOpenRelease = () => {
+    if (!linkedRelease) return;
+    void navigate({ to: RELEASES_ROUTE });
+    void ship.handleSelectRelease(linkedRelease);
   };
 
   const handleStartTerminal = async () => {
@@ -486,6 +513,55 @@ export default function WorkspacePanel() {
     }
   };
 
+  const handleUpdateAgentConfiguration = async (input: {
+    providers: string[];
+    mcpServers: string[];
+    skills: string[];
+  }) => {
+    if (!state.detail) return;
+    const previousProviders = state.detail.providers ?? [];
+    const previousMcpServers = state.detail.mcpServers ?? [];
+    const previousSkills = state.detail.skills ?? [];
+    const providersChanged = hasListChanged(previousProviders, input.providers);
+    const mcpChanged = hasListChanged(previousMcpServers, input.mcpServers);
+    const skillsChanged = hasListChanged(previousSkills, input.skills);
+    const configChanged = providersChanged || mcpChanged || skillsChanged;
+    const hadActiveSession = state.activeSession?.status === 'active';
+    setSavingWorkspaceAgent(true);
+    try {
+      const ok = await applyWorkspaceConfig(state.detail.branch, {
+        workspaceType: state.detail.workspaceType,
+        providers: input.providers,
+        mcpServers: input.mcpServers,
+        skills: input.skills,
+        featureId: state.detail.featureId,
+        releaseId: state.detail.releaseId,
+        isWorktree: state.detail.isWorktree,
+        worktreePath: state.detail.worktreePath,
+      }, 'Failed to update workspace agent configuration.');
+      if (!ok) {
+        return;
+      }
+      const syncResult = await syncWorkspaceCmd(state.detail.branch);
+      if (syncResult.status === 'error') {
+        state.setError(syncResult.error || 'Workspace config saved but sync failed.');
+        return;
+      }
+      await state.load();
+      if (hadActiveSession && mcpChanged) {
+        state.setError(
+          'Workspace MCP configuration changed and was synced. Restart the active agent session to load updated MCP tools.',
+        );
+      } else if (hadActiveSession && configChanged) {
+        state.setError(
+          'Workspace agent configuration changed and was synced. Restart the active session to refresh context.',
+        );
+      }
+    } finally {
+      setSavingWorkspaceAgent(false);
+    }
+  };
+
   useEffect(() => {
     workspaceUi.setIsWorkspaceFocusMode(true);
     return () => workspaceUi.setIsWorkspaceFocusMode(false);
@@ -498,13 +574,16 @@ export default function WorkspacePanel() {
           'h-full shrink-0 overflow-hidden border-r border-border transition-[width,opacity] duration-200',
           workspaceSidebarCollapsed
             ? 'pointer-events-none w-0 opacity-0'
-            : 'w-[340px] opacity-100'
+            : 'w-[340px] opacity-100',
         )}
       >
         <WorkspaceSidebar
-          filteredRows={state.filteredRows}
+          rows={state.rows}
+          gitBranches={state.gitBranches}
+          activeSessionBranches={state.activeSessionBranches}
           selectedBranch={state.selectedBranch}
           onSelectBranch={state.setSelectedBranch}
+          onConfigureBranch={openCreateWorkspaceDialog}
           availableEditors={state.availableEditors}
           isDarkTheme={isDarkTheme}
           onOpenEditor={handleOpenEditor}
@@ -517,7 +596,7 @@ export default function WorkspacePanel() {
             void navigate({ to: OVERVIEW_ROUTE });
           }}
           onCollapse={() => setWorkspaceSidebarCollapsed(true)}
-          statusVariant={statusVariant}
+          featureLabels={featureLabels}
         />
       </aside>
 
@@ -532,16 +611,32 @@ export default function WorkspacePanel() {
           onExpandSidebar={() => setWorkspaceSidebarCollapsed(false)}
           actions={
             <WorkspaceHeaderActions
-              detail={state.detail}
-              modeOptions={state.modeOptions}
+              gitBranches={state.gitBranches}
+              existingWorkspaceBranches={state.rows.map((row) => row.branch)}
               creatingWorkspace={creatingWorkspace}
-              deletingWorkspace={deletingWorkspace}
-              archivingWorkspace={archivingWorkspace}
-              updatingWorkspaceMode={updatingWorkspaceMode}
+              environmentOptions={Array.from(
+                new Set(
+                  state.rows
+                    .map((row) => row.environmentId)
+                    .filter((value): value is string => Boolean(value)),
+                ),
+              ).map((id) => ({ id, label: id }))}
+              featureOptions={ship.features.map((feature) => ({
+                id: feature.id,
+                label: feature.title,
+              }))}
+              releaseOptions={ship.releases.map((release) => ({
+                id: release.id,
+                label: release.version,
+              }))}
+              providerOptions={state.providerInfos}
+              createIntent={createIntent}
+              onCreateIntentConsumed={() => setCreateIntent(null)}
               onCreateWorkspace={handleCreateWorkspace}
-              onDeleteWorkspace={handleDeleteWorkspace}
-              onArchiveWorkspace={handleArchiveWorkspace}
-              onUpdateWorkspaceMode={handleUpdateWorkspaceMode}
+              canConfigureAgent={Boolean(state.detail)}
+              onOpenAgentConfig={() => setAgentDialogOpen(true)}
+              currentTheme={workspaceUi.config.theme}
+              onThemeChange={(theme) => workspaceUi.handleSaveSettings({ ...workspaceUi.config, theme })}
             />
           }
         />
@@ -554,18 +649,19 @@ export default function WorkspacePanel() {
             detail={state.detail}
             statusVariant={statusVariant}
             linkedFeature={linkedFeature}
-            linkedSpec={linkedSpec}
+            linkedRelease={linkedRelease}
             linkFeatureId={state.linkFeatureId}
             setLinkFeatureId={state.setLinkFeatureId}
-            linkSpecId={state.linkSpecId}
-            setLinkSpecId={state.setLinkSpecId}
+            linkReleaseId={state.linkReleaseId}
+            setLinkReleaseId={state.setLinkReleaseId}
             featureLinkOptions={ship.features}
-            specLinkOptions={ship.specs}
+            releaseLinkOptions={ship.releases}
             updatingLinks={state.updatingLinks}
-            onApplyLinks={handleApplyLinks}
+            onUpdateLinks={handleUpdateLinks}
             onOpenFeature={handleOpenFeature}
-            onOpenSpec={handleOpenSpec}
+            onOpenRelease={handleOpenRelease}
             activeSession={state.activeSession}
+            recentSessions={state.recentSessions}
             startingSession={state.startingSession}
             endingSession={state.endingSession}
             onStartSession={handleStartSession}
@@ -576,20 +672,28 @@ export default function WorkspacePanel() {
             setSessionSummaryInput={state.setSessionSummaryInput}
             providerMatrix={state.providerMatrix}
             providerInfos={state.providerInfos}
+            workspaceChanges={state.workspaceChanges}
+            workspaceGitSummary={state.workspaceGitSummary}
             sessionProvider={sessionProvider}
             setSessionProvider={setSessionProvider}
             restartingSession={restartingSession}
             onRestartSession={handleRestartSession}
-            NO_LINK_VALUE={NO_LINK_VALUE}
             onSync={handleSync}
             syncing={state.syncing}
-            onActivate={handleActivate}
-            activating={state.activating}
+            onArchive={handleArchive}
+            archiving={archivingWorkspace}
             onRepair={handleRepair}
             repairing={repairingWorkspace}
             lastRepairReport={lastRepairReport}
             loading={state.loading}
             onRefreshProviders={() => void state.load()}
+            onCreateFromBranch={() => openCreateWorkspaceDialog(state.selectedBranch ?? state.branch)}
+            creatingWorkspace={creatingWorkspace}
+            branchDetail={state.branchDetail}
+            branchDiffPath={state.branchDiffPath}
+            setBranchDiffPath={state.setBranchDiffPath}
+            branchFileDiff={state.branchFileDiff}
+            loadingBranchDiff={state.loadingBranchDiff}
           />
         </div>
 
@@ -597,9 +701,9 @@ export default function WorkspacePanel() {
           <div className="fixed bottom-16 right-6 z-50 w-80 animate-in fade-in slide-in-from-bottom-4">
             <Alert variant="destructive" className="pointer-events-auto shadow-lg">
               <AlertTitle>Action Error</AlertTitle>
-              <AlertDescription className="flex items-center justify-between gap-3">
-                <span>{state.error}</span>
-                <Button size="xs" variant="ghost" className="h-6 px-2" onClick={() => state.setError(null)}>
+              <AlertDescription className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <span className="min-w-0 flex-1 break-words">{state.error}</span>
+                <Button size="xs" variant="ghost" className="h-6 w-fit shrink-0 self-end px-2 sm:self-start" onClick={() => state.setError(null)}>
                   Dismiss
                 </Button>
               </AlertDescription>
@@ -607,29 +711,56 @@ export default function WorkspacePanel() {
           </div>
         )}
 
-        <WorkspaceTerminalTray
-          terminalSession={terminal.terminalSession}
-          terminalProvider={terminal.terminalProvider}
-          onProviderChange={terminal.setTerminalProvider}
-          startingTerminal={terminal.startingTerminal}
-          stoppingTerminal={terminal.stoppingTerminal}
-          onStart={handleStartTerminal}
-          onStop={terminal.stopWorkspaceTerminal}
-          onRetry={handleStartTerminal}
-          onMaximizedChange={setTerminalMaximized}
-          maximized={terminalMaximized}
-          height={terminalHeight}
-          onResizerMouseDown={(_e) => {
-            terminalResizerRef.current = true;
-            document.body.style.cursor = 'ns-resize';
-          }}
-          terminalContainerRef={terminal.terminalContainerRef}
-          onSendSigInt={() => terminal.sendTerminalInput('\x03')}
-          activationError={terminal.terminalSession?.activation_error}
-          runtimeError={terminal.runtimeError}
-          hasActiveSession={state.activeSession?.status === 'active'}
-          runtimePerf={runtimePerf}
-        />
+        {showTerminalTray && (
+          <WorkspaceTerminalTray
+            terminalSession={terminal.terminalSession}
+            terminalProvider={terminal.terminalProvider}
+            onProviderChange={terminal.setTerminalProvider}
+            startingTerminal={terminal.startingTerminal}
+            stoppingTerminal={terminal.stoppingTerminal}
+            onStart={handleStartTerminal}
+            onStop={terminal.stopWorkspaceTerminal}
+            onRetry={handleStartTerminal}
+            onMaximizedChange={setTerminalMaximized}
+            maximized={terminalMaximized}
+            height={terminalHeight}
+            onResizerMouseDown={(_e) => {
+              _e.preventDefault();
+              _e.stopPropagation();
+              terminalResizerRef.current = true;
+              document.body.style.cursor = 'ns-resize';
+              document.body.style.userSelect = 'none';
+              (document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect = 'none';
+            }}
+            terminalContainerRef={terminal.terminalContainerRef}
+            onSendSigInt={() => terminal.sendTerminalInput('\x03')}
+            activationError={terminal.terminalSession?.activation_error}
+            runtimeError={terminal.runtimeError}
+            hasActiveSession={state.activeSession?.status === 'active'}
+            runtimePerf={runtimePerf}
+          />
+        )}
+
+        {state.detail ? (
+          <WorkspaceAgentDialog
+            open={agentDialogOpen}
+            onOpenChange={setAgentDialogOpen}
+            branch={state.detail.branch}
+            workspaceType={state.detail.workspaceType}
+            providerInfos={state.providerInfos}
+            currentProviders={state.detail.providers ?? []}
+            currentMcpServers={state.detail.mcpServers ?? []}
+            currentSkills={state.detail.skills ?? []}
+            saving={savingWorkspaceAgent}
+            onOpenMcpSettings={() => {
+              void navigate({ to: AGENTS_MCP_ROUTE });
+            }}
+            onOpenPermissionsSettings={() => {
+              void navigate({ to: AGENTS_PERMISSIONS_ROUTE });
+            }}
+            onSave={handleUpdateAgentConfiguration}
+          />
+        ) : null}
       </main>
     </div>
   );

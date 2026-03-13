@@ -1,6 +1,6 @@
 [package]
 name = "ui"
-version = "0.1.0"
+version = "0.1.2"
 description = "Ship Project UI"
 authors = ["you"]
 edition = "2021"
@@ -27,6 +27,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
 runtime = { path = "../../../core/runtime" }
 ship-module-project = { path = "../../modules/project" }
 anyhow = "1"
@@ -38,3 +40,4 @@ specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 portable-pty = "0.8.1"
 notify = "6"
+ureq = { version = "2.10.1", features = ["json"] }

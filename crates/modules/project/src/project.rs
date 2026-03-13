@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use runtime::config::{
-    ModeConfig, NamespaceConfig, ProjectConfig, add_mode as runtime_add_mode,
+    McpServerConfig, McpServerType, ModeConfig, NamespaceConfig, ProjectConfig,
+    add_mode as runtime_add_mode,
     ensure_registered_namespaces as runtime_ensure_registered_namespaces, get_config,
     remove_mode as runtime_remove_mode, save_config, set_active_mode as runtime_set_active_mode,
 };
@@ -10,16 +11,16 @@ use runtime::project::{
     SHIP_DIR_NAME, adrs_dir as runtime_adrs_dir, agents_ns as runtime_agents_ns,
     features_dir as runtime_features_dir, generated_ns as runtime_generated_ns, get_global_dir,
     get_project_dir as runtime_get_project_dir, get_project_name as runtime_get_project_name,
-    issues_dir as runtime_issues_dir, mcp_config_path as runtime_mcp_config_path,
-    modes_dir as runtime_modes_dir, notes_dir as runtime_notes_dir,
-    permissions_config_path as runtime_permissions_config_path, project_ns as runtime_project_ns,
-    register_ship_namespace as runtime_register_ship_namespace,
+    mcp_config_path as runtime_mcp_config_path, modes_dir as runtime_modes_dir,
+    notes_dir as runtime_notes_dir, permissions_config_path as runtime_permissions_config_path,
+    project_ns as runtime_project_ns, register_ship_namespace as runtime_register_ship_namespace,
     releases_dir as runtime_releases_dir,
     resolve_project_ship_dir as runtime_resolve_project_ship_dir, rules_dir as runtime_rules_dir,
     sanitize_file_name as runtime_sanitize_file_name,
     ship_dir_from_path as runtime_ship_dir_from_path, skills_dir as runtime_skills_dir,
-    specs_dir as runtime_specs_dir, upcoming_releases_dir as runtime_upcoming_releases_dir,
-    workflow_ns as runtime_workflow_ns,
+    upcoming_releases_dir as runtime_upcoming_releases_dir,
+    vision_doc_path as runtime_vision_doc_path,
+    vision_template_path as runtime_vision_template_path,
 };
 use runtime::{EventAction, EventEntity, append_event};
 use serde::{Deserialize, Serialize};
@@ -29,25 +30,11 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_STATUSES: &[&str] = &["backlog", "in-progress", "blocked", "done"];
-pub const ISSUE_STATUSES: &[&str] = DEFAULT_STATUSES;
-pub const ADR_STATUSES: &[&str] = &[
-    "proposed",
-    "accepted",
-    "rejected",
-    "superseded",
-    "deprecated",
-];
-pub const FEATURE_STATUSES: &[&str] = &["planned", "in-progress", "implemented", "deprecated"];
-pub const SPEC_STATUSES: &[&str] = &["draft", "active", "archived"];
 
 // ── Namespace path helpers ────────────────────────────────────────────────────
 
 pub fn project_ns(ship_dir: &Path) -> PathBuf {
     runtime_project_ns(ship_dir)
-}
-
-pub fn workflow_ns(ship_dir: &Path) -> PathBuf {
-    runtime_workflow_ns(ship_dir)
 }
 
 pub fn agents_ns(ship_dir: &Path) -> PathBuf {
@@ -74,16 +61,8 @@ pub fn notes_dir(ship_dir: &Path) -> PathBuf {
     runtime_notes_dir(ship_dir)
 }
 
-pub fn specs_dir(ship_dir: &Path) -> PathBuf {
-    runtime_specs_dir(ship_dir)
-}
-
 pub fn features_dir(ship_dir: &Path) -> PathBuf {
     runtime_features_dir(ship_dir)
-}
-
-pub fn issues_dir(ship_dir: &Path) -> PathBuf {
-    runtime_issues_dir(ship_dir)
 }
 
 pub fn modes_dir(ship_dir: &Path) -> PathBuf {
@@ -104,6 +83,14 @@ pub fn mcp_config_path(ship_dir: &Path) -> PathBuf {
 
 pub fn permissions_config_path(ship_dir: &Path) -> PathBuf {
     runtime_permissions_config_path(ship_dir)
+}
+
+pub fn vision_doc_path(ship_dir: &Path) -> PathBuf {
+    runtime_vision_doc_path(ship_dir)
+}
+
+pub fn vision_template_path(ship_dir: &Path) -> PathBuf {
+    runtime_vision_template_path(ship_dir)
 }
 
 pub fn ship_dir_from_path(path: &Path) -> Option<PathBuf> {
@@ -237,7 +224,8 @@ fn should_filter_transient_registry_path(path: &Path) -> bool {
         return true;
     }
 
-    path_contains_component_sequence(path, &["example", "projects-e2e"])
+    path_contains_component_sequence(path, &["examples", "e2e"])
+        || path_contains_component_sequence(path, &["examples", "projects-e2e"])
         || path_contains_component_sequence(path, &["target", "tmp"])
 }
 
@@ -424,7 +412,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
 
     let config_exists = [
         ship_path.join(runtime::config::PRIMARY_CONFIG_FILE),
-        ship_path.join(runtime::config::SECONDARY_CONFIG_FILE),
         ship_path.join(runtime::config::LEGACY_CONFIG_FILE),
     ]
     .iter()
@@ -435,6 +422,9 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     } else {
         ProjectConfig::default()
     };
+    if config.id.trim().is_empty() {
+        config.id = runtime::gen_nanoid();
+    }
     ensure_first_party_namespaces(&mut config.namespaces);
     if config_exists {
         save_config(&config, Some(ship_path.clone()))?;
@@ -444,44 +434,23 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     }
     ensure_registered_namespaces(&ship_path, &config.namespaces)?;
 
-    fs::create_dir_all(releases_dir(&ship_path))?;
-    fs::create_dir_all(upcoming_releases_dir(&ship_path))?;
-
-    let adrs = adrs_dir(&ship_path);
-    for status in ADR_STATUSES {
-        fs::create_dir_all(adrs.join(status))?;
-    }
-
-    fs::create_dir_all(notes_dir(&ship_path))?;
-
-    let features = features_dir(&ship_path);
-    for status in FEATURE_STATUSES {
-        fs::create_dir_all(features.join(status))?;
-    }
-
-    let issues = issues_dir(&ship_path);
-    for status in DEFAULT_STATUSES {
-        fs::create_dir_all(issues.join(status))?;
-    }
-
-    let specs = specs_dir(&ship_path);
-    for status in SPEC_STATUSES {
-        fs::create_dir_all(specs.join(status))?;
-    }
-
     fs::create_dir_all(skills_dir(&ship_path))?;
     fs::create_dir_all(rules_dir(&ship_path))?;
 
     runtime::events::ensure_event_log(&ship_path)?;
 
-    write_default_templates(&ship_path)?;
-    write_directory_readmes(&ship_path)?;
-    write_default_agent_mode_files(&ship_path)?;
+    // Seed only the canonical project vision doc at init. Other planning artifacts
+    // are DB-first and can be exported on demand.
+    write_if_missing(
+        &vision_doc_path(&ship_path),
+        include_str!("../../../../core/runtime/src/templates/VISION.md"),
+    )?;
     write_default_skills(&ship_path)?;
     write_if_missing(
         &mcp_config_path(&ship_path),
         include_str!("../../../../core/runtime/src/templates/MCP.toml"),
     )?;
+    ensure_ship_mcp_server(&ship_path)?;
     write_if_missing(
         &permissions_config_path(&ship_path),
         include_str!("../../../../core/runtime/src/templates/PERMISSIONS.toml"),
@@ -491,7 +460,6 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
         &principles_path,
         include_str!("../../../../core/runtime/src/templates/RULE.md"),
     )?;
-
     let gitignore_path = ship_path.join(".gitignore");
     if !gitignore_path.exists() {
         let default_git = runtime::config::GitConfig::default();
@@ -499,7 +467,7 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     }
 
     // Seed the project-manager workspace ("ship") so it's ready on first use.
-    if let Err(e) = runtime::workspace::seed_project_workspace(&ship_path) {
+    if let Err(e) = runtime::workspace::seed_service_workspace(&ship_path) {
         eprintln!("[ship] warning: could not seed project workspace: {}", e);
     }
 
@@ -515,112 +483,11 @@ pub fn init_project(base_dir: PathBuf) -> Result<PathBuf> {
     Ok(ship_path)
 }
 
-fn write_default_templates(ship_path: &Path) -> Result<()> {
-    write_if_missing(
-        &issues_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/ISSUE.md"),
-    )?;
-    write_if_missing(
-        &specs_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/SPEC.md"),
-    )?;
-    write_if_missing(
-        &features_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/FEATURE.md"),
-    )?;
-    write_if_missing(
-        &releases_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/RELEASE.md"),
-    )?;
-    write_if_missing(
-        &adrs_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/ADR.md"),
-    )?;
-    write_if_missing(
-        &notes_dir(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/NOTE.md"),
-    )?;
-    write_if_missing(
-        &project_ns(ship_path).join("TEMPLATE.md"),
-        include_str!("../../../../core/runtime/src/templates/VISION.md"),
-    )?;
-
-    let vision_doc = project_ns(ship_path).join("vision.md");
-    write_if_missing(
-        &vision_doc,
-        include_str!("../../../../core/runtime/src/templates/VISION.md"),
-    )?;
-    Ok(())
-}
-
-fn write_directory_readmes(ship_path: &Path) -> Result<()> {
-    let readmes = [
-        (
-            ship_path.to_path_buf(),
-            "# .ship\n\nShip runtime data for this project. Files here are created and updated by Ship tools.\n".to_string(),
-        ),
-        (
-            project_ns(ship_path),
-            "# project/\n\nProject-level docs and long-lived context.\n- `vision.md`\n- `releases/`\n- `adrs/`\n- `notes/`\n".to_string(),
-        ),
-        (
-            releases_dir(ship_path),
-            "# project/releases/\n\nRelease plans and release state. Workflow items can reference these files.\n".to_string(),
-        ),
-        (
-            upcoming_releases_dir(ship_path),
-            "# project/releases/upcoming/\n\nPlanned or active releases that have not shipped yet.\n".to_string(),
-        ),
-        (
-            adrs_dir(ship_path),
-            format!("# project/adrs/\n\nArchitecture Decision Records, organized by status:\n- {}\n", ADR_STATUSES.join("\n- ")),
-        ),
-        (
-            notes_dir(ship_path),
-            "# project/notes/\n\nProject-scoped notes.\n".to_string(),
-        ),
-        (
-            workflow_ns(ship_path),
-            "# workflow/\n\nExecution artifacts for ongoing work.\n- `issues/`\n- `specs/`\n- `features/`\n".to_string(),
-        ),
-        (
-            issues_dir(ship_path),
-            format!("# workflow/issues/\n\nGranular implementation tasks, organized by status:\n- {}\n", DEFAULT_STATUSES.join("\n- ")),
-        ),
-        (
-            specs_dir(ship_path),
-            format!("# workflow/specs/\n\nProduct/technical specifications, organized by status:\n- {}\n", SPEC_STATUSES.join("\n- ")),
-        ),
-        (
-            features_dir(ship_path),
-            format!("# project/features/\n\nHigh-level project features, organized by status:\n- {}\n", FEATURE_STATUSES.join("\n- ")),
-        ),
-        (
-            agents_ns(ship_path),
-            "# agents/\n\nAgent runtime config and policy.\n- `mcp.toml`: Model Context Protocol server configuration.\n- `permissions.toml`: Agent capability and access controls.\n- `rules/`: Development and project principles.\n- Skills are stored outside repo state (`~/.ship/skills` and `~/.ship/projects/<project>/skills`).\n- Modes: persisted in SQLite runtime state.\n".to_string(),
-        ),
-        (
-            rules_dir(ship_path),
-            "# agents/rules/\n\nProject-scoped development rules and principles. Agents should consult these for every task.\n".to_string(),
-        ),
-        (
-            generated_ns(ship_path),
-            "# generated/\n\nRuntime-generated transient artifacts.\n".to_string(),
-        ),
-    ];
-
-    for (dir, content) in readmes {
-        write_if_missing(&dir.join("README.md"), &content)?;
-    }
-
-    Ok(())
-}
-
 fn write_initial_config_with_comments(ship_path: &Path, config: &ProjectConfig) -> Result<()> {
     let config_path = ship_path.join(runtime::config::PRIMARY_CONFIG_FILE);
     let mut content = String::from(
         "# Ship project configuration\n\
-         # - Edit with care; prefer `ship config`, `ship mode`, and `ship git` commands where possible.\n\
+         # - Edit with care; prefer `ship config` and `ship git` commands where possible.\n\
          # - `namespaces` controls top-level directories under `.ship/`.\n\
          # - Plugin namespaces are dynamically registered when plugins are used.\n\n",
     );
@@ -646,10 +513,7 @@ fn cleanup_legacy_config_files(ship_path: &Path) -> Result<()> {
         return Ok(());
     }
 
-    for legacy_name in [
-        runtime::config::SECONDARY_CONFIG_FILE,
-        runtime::config::LEGACY_CONFIG_FILE,
-    ] {
+    for legacy_name in [runtime::config::LEGACY_CONFIG_FILE] {
         let legacy = ship_path.join(legacy_name);
         if legacy.exists() {
             fs::remove_file(legacy)?;
@@ -659,113 +523,101 @@ fn cleanup_legacy_config_files(ship_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn default_agent_modes() -> Vec<ModeConfig> {
-    vec![
-        ModeConfig {
-            id: "planning".to_string(),
-            name: "Planning".to_string(),
-            description: Some(
-                "High-context planning for specs, issues, and ADR prep before coding.".to_string(),
-            ),
-            active_tools: vec![
-                "ship_list_notes".to_string(),
-                "ship_create_note".to_string(),
-                "ship_list_specs".to_string(),
-                "ship_get_spec".to_string(),
-                "ship_create_spec".to_string(),
-                "ship_update_spec".to_string(),
-                "ship_list_issues".to_string(),
-                "ship_create_issue".to_string(),
-                "ship_draft_adr".to_string(),
-                "ship_get_project_info".to_string(),
-            ],
-            ..Default::default()
-        },
-        ModeConfig {
-            id: "code".to_string(),
-            name: "Code".to_string(),
-            description: Some(
-                "Execution-focused mode for implementing and moving work through issue status."
-                    .to_string(),
-            ),
-            active_tools: vec![
-                "ship_list_issues".to_string(),
-                "ship_get_issue".to_string(),
-                "ship_update_issue".to_string(),
-                "ship_move_issue".to_string(),
-                "ship_list_specs".to_string(),
-                "ship_get_spec".to_string(),
-                "ship_update_spec".to_string(),
-                "ship_list_notes".to_string(),
-                "ship_create_note".to_string(),
-                "ship_git_feature_sync".to_string(),
-            ],
-            ..Default::default()
-        },
-        ModeConfig {
-            id: "config".to_string(),
-            name: "Config".to_string(),
-            description: Some(
-                "Configuration and environment mode for skills, providers, hooks, and project policy."
-                    .to_string(),
-            ),
-            active_tools: vec![
-                "ship_get_project_info".to_string(),
-                "ship_create_skill".to_string(),
-                "ship_update_skill".to_string(),
-                "ship_delete_skill".to_string(),
-                "ship_git_config_set".to_string(),
-                "ship_git_hooks_install".to_string(),
-                "ship_detect_providers".to_string(),
-                "ship_connect_provider".to_string(),
-                "ship_disconnect_provider".to_string(),
-            ],
-            ..Default::default()
-        },
-    ]
-}
-
-fn write_default_agent_mode_files(ship_path: &Path) -> Result<()> {
-    let project_dir = Some(ship_path.to_path_buf());
-    let config = get_config(project_dir.clone())?;
-    for mode in default_agent_modes() {
-        if !config.modes.iter().any(|existing| existing.id == mode.id) {
-            runtime_add_mode(project_dir.clone(), mode)?;
-        }
-    }
-    Ok(())
-}
-
 fn write_default_skills(ship_path: &Path) -> Result<()> {
-    let skill_root = skills_dir(ship_path).join("task-policy");
-    fs::create_dir_all(&skill_root)?;
+    let project_skills_root = skills_dir(ship_path);
+    fs::create_dir_all(&project_skills_root)?;
+    migrate_legacy_project_skills_dir(ship_path, &project_skills_root)?;
 
     write_if_missing(
-        &skill_root.join("SKILL.md"),
+        &project_skills_root.join("task-policy").join("SKILL.md"),
         r#"---
 name: task-policy
 description: Ship workflow policy and execution guardrails for daily delivery.
 metadata:
-  display_name: Shipwright Workflow Policy
+  display_name: Ship Workflow Policy
   source: builtin
 ---
 
-# Shipwright Workflow Policy
+# Ship Workflow Policy
 
 Use Ship as the system of record for workflow state changes.
 
 ## Canonical Flow
 
-Vision -> Release -> Feature -> Spec -> Issues -> Close Feature -> Ship Release
+Vision -> Release -> Feature -> Spec -> Close Feature -> Ship Release
 "#,
     )?;
 
-    let mut config = get_config(Some(ship_path.to_path_buf()))?;
-    if !config.agent.skills.contains(&"task-policy".to_string()) {
-        config.agent.skills.push("task-policy".to_string());
-        save_config(&config, Some(ship_path.to_path_buf()))?;
+    const PROJECT_BUILTINS: &[(&str, &str)] = &[
+        (
+            "ship-workflow",
+            include_str!("../../../../core/runtime/src/templates/skills/ship-workflow.SKILL.md"),
+        ),
+        (
+            "start-session",
+            include_str!("../../../../core/runtime/src/templates/skills/start-session/SKILL.md"),
+        ),
+        (
+            "create-document",
+            include_str!("../../../../core/runtime/src/templates/skills/create-document/SKILL.md"),
+        ),
+        (
+            "workspace-session-lifecycle",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/workspace-session-lifecycle/SKILL.md"
+            ),
+        ),
+    ];
+    for (id, content) in PROJECT_BUILTINS {
+        write_if_missing(&project_skills_root.join(id).join("SKILL.md"), content)?;
     }
+
     seed_builtin_user_skills(&runtime::project::user_skills_dir())?;
+    Ok(())
+}
+
+fn migrate_legacy_project_skills_dir(ship_path: &Path, target_root: &Path) -> Result<()> {
+    let legacy_root = ship_path.join("skills");
+    if legacy_root == target_root || !legacy_root.is_dir() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(&legacy_root)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        if !source_path.is_dir() || !source_path.join("SKILL.md").is_file() {
+            continue;
+        }
+
+        let destination_path = target_root.join(entry.file_name());
+        if destination_path.exists() {
+            continue;
+        }
+
+        match fs::rename(&source_path, &destination_path) {
+            Ok(_) => {}
+            Err(_) => {
+                copy_dir_recursive(&source_path, &destination_path)?;
+                fs::remove_dir_all(&source_path)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = dst.join(entry.file_name());
+        if source_path.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else {
+            fs::copy(&source_path, &target_path)?;
+        }
+    }
     Ok(())
 }
 
@@ -773,12 +625,43 @@ fn seed_builtin_user_skills(user_skills_root: &Path) -> Result<()> {
     fs::create_dir_all(user_skills_root)?;
 
     // Builtins always overwrite — they're owned by Ship and update with each release.
-    let ship_workflow_dir = user_skills_root.join("ship-workflow");
-    fs::create_dir_all(&ship_workflow_dir)?;
-    fs::write(
-        ship_workflow_dir.join("SKILL.md"),
-        include_str!("../../../../core/runtime/src/templates/skills/ship-workflow.SKILL.md"),
-    )?;
+    const SINGLE_FILE_BUILTINS: &[(&str, &str)] = &[
+        (
+            "ship-workflow",
+            include_str!("../../../../core/runtime/src/templates/skills/ship-workflow.SKILL.md"),
+        ),
+        (
+            "create-document",
+            include_str!("../../../../core/runtime/src/templates/skills/create-document/SKILL.md"),
+        ),
+        (
+            "workspace-session-lifecycle",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/workspace-session-lifecycle/SKILL.md"
+            ),
+        ),
+        (
+            "release-orchestration",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/release-orchestration/SKILL.md"
+            ),
+        ),
+        (
+            "workspace-profile-onboarding",
+            include_str!(
+                "../../../../core/runtime/src/templates/skills/workspace-profile-onboarding/SKILL.md"
+            ),
+        ),
+        (
+            "start-session",
+            include_str!("../../../../core/runtime/src/templates/skills/start-session/SKILL.md"),
+        ),
+    ];
+    for (id, content) in SINGLE_FILE_BUILTINS {
+        let skill_dir = user_skills_root.join(id);
+        fs::create_dir_all(&skill_dir)?;
+        fs::write(skill_dir.join("SKILL.md"), content)?;
+    }
 
     // skill-creator is a multi-file skill; only seed if missing.
     let skill_creator_root = user_skills_root.join("skill-creator");
@@ -905,11 +788,14 @@ fn seed_skill_creator_template(skill_root: &Path) -> Result<()> {
 }
 
 fn ensure_first_party_namespaces(namespaces: &mut Vec<NamespaceConfig>) {
-    namespaces.retain(|ns| !(ns.id == "plugins" && ns.path == "plugins"));
+    namespaces.retain(|ns| {
+        !(ns.id == "project" && ns.path == "project")
+            && !(ns.id == "project" && ns.path == "project/")
+            && !(ns.id == "plugins" && ns.path == "plugins")
+            && !(ns.id == "workflow" && ns.path == "workflow")
+    });
 
     let required = [
-        ("project", "project", "project"),
-        ("workflow", "workflow", "workflow"),
         ("agents", "agents", "agents"),
         ("generated", "generated", "runtime"),
     ];
@@ -925,26 +811,49 @@ fn ensure_first_party_namespaces(namespaces: &mut Vec<NamespaceConfig>) {
     }
 }
 
+fn ship_runtime_mcp_server() -> McpServerConfig {
+    McpServerConfig {
+        id: "ship".to_string(),
+        name: "Ship Runtime".to_string(),
+        command: "ship".to_string(),
+        args: vec!["mcp".to_string(), "serve".to_string()],
+        env: HashMap::new(),
+        scope: "project".to_string(),
+        server_type: McpServerType::Stdio,
+        url: None,
+        disabled: false,
+        timeout_secs: None,
+    }
+}
+
+fn ensure_ship_mcp_server(ship_path: &Path) -> Result<()> {
+    let mut config = get_config(Some(ship_path.to_path_buf()))?;
+    let has_ship_server = config.mcp_servers.iter().any(|server| server.id == "ship");
+    if has_ship_server {
+        return Ok(());
+    }
+    config.mcp_servers.push(ship_runtime_mcp_server());
+    save_config(&config, Some(ship_path.to_path_buf()))
+}
+
 fn ensure_registered_namespaces(ship_path: &Path, namespaces: &[NamespaceConfig]) -> Result<()> {
     runtime_ensure_registered_namespaces(ship_path, namespaces)
 }
 
 fn template_rel_path(kind: &str) -> Result<&'static str> {
     match kind {
-        "issue" | "issues" => Ok("workflow/issues/TEMPLATE.md"),
         "adr" | "adrs" => Ok("project/adrs/TEMPLATE.md"),
         "note" | "notes" => Ok("project/notes/TEMPLATE.md"),
-        "spec" | "specs" => Ok("workflow/specs/TEMPLATE.md"),
+        "spec" | "specs" => Ok("project/specs/TEMPLATE.md"),
         "release" | "releases" => Ok("project/releases/TEMPLATE.md"),
         "feature" | "features" => Ok("project/features/TEMPLATE.md"),
-        "vision" => Ok("project/TEMPLATE.md"),
+        "vision" => Ok("TEMPLATE.md"),
         _ => Err(anyhow!("Unknown template kind: {}", kind)),
     }
 }
 
 fn legacy_template_file_name(kind: &str) -> Option<&'static str> {
     match kind {
-        "issue" | "issues" => Some("ISSUE.md"),
         "adr" | "adrs" => Some("ADR.md"),
         "note" | "notes" => Some("NOTE.md"),
         "spec" | "specs" => Some("SPEC.md"),
@@ -957,9 +866,6 @@ fn legacy_template_file_name(kind: &str) -> Option<&'static str> {
 
 fn template_fallback(kind: &str) -> Result<&'static str> {
     match kind {
-        "issue" | "issues" => Ok(include_str!(
-            "../../../../core/runtime/src/templates/ISSUE.md"
-        )),
         "adr" | "adrs" => Ok(include_str!(
             "../../../../core/runtime/src/templates/ADR.md"
         )),
@@ -988,6 +894,17 @@ pub fn read_template(ship_path: &Path, kind: &str) -> Result<String> {
     if template_path.exists() {
         return fs::read_to_string(&template_path)
             .with_context(|| format!("Failed to read template: {}", template_path.display()));
+    }
+    if normalized == "vision" {
+        let legacy_project_template = project_ns(ship_path).join("TEMPLATE.md");
+        if legacy_project_template.exists() {
+            return fs::read_to_string(&legacy_project_template).with_context(|| {
+                format!(
+                    "Failed to read template: {}",
+                    legacy_project_template.display()
+                )
+            });
+        }
     }
 
     if let Some(file_name) = legacy_template_file_name(&normalized) {
@@ -1048,8 +965,6 @@ pub struct ProjectDiscovery {
     pub name: String,
     #[specta(type = String)]
     pub path: PathBuf,
-    #[serde(default)]
-    pub issue_count: usize,
 }
 
 pub fn discover_projects(root: PathBuf) -> Result<Vec<ProjectDiscovery>> {
@@ -1082,7 +997,6 @@ pub fn discover_projects(root: PathBuf) -> Result<Vec<ProjectDiscovery>> {
                 projects.push(ProjectDiscovery {
                     name: name.into_owned(),
                     path: ship_dir,
-                    issue_count: 0,
                 });
             }
         }
@@ -1168,7 +1082,7 @@ mod tests {
                     path: worktree_root.clone(),
                 },
                 ProjectEntry {
-                    name: "Shipwright Runtime".to_string(),
+                    name: "Ship Runtime".to_string(),
                     path: main_root.clone(),
                 },
             ],
@@ -1177,7 +1091,7 @@ mod tests {
         let (normalized, changed) = normalize_registry(registry, false);
         assert!(changed);
         assert_eq!(normalized.projects.len(), 1);
-        assert_eq!(normalized.projects[0].name, "Shipwright Runtime");
+        assert_eq!(normalized.projects[0].name, "Ship Runtime");
         assert_eq!(normalized.projects[0].path, fs::canonicalize(main_ship)?);
         Ok(())
     }
@@ -1210,7 +1124,7 @@ mod tests {
             projects: vec![
                 ProjectEntry {
                     name: "Main".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/.ship"),
                 },
                 ProjectEntry {
                     name: "Tmp".to_string(),
@@ -1218,11 +1132,11 @@ mod tests {
                 },
                 ProjectEntry {
                     name: "E2E".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/example/projects-e2e/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/examples/e2e/.ship"),
                 },
                 ProjectEntry {
                     name: "TargetTmp".to_string(),
-                    path: PathBuf::from("/Users/micah/dev/shipwright/target/tmp/ship-e2e/.ship"),
+                    path: PathBuf::from("/Users/micah/dev/ship/target/tmp/ship-e2e/.ship"),
                 },
             ],
         };
@@ -1242,13 +1156,13 @@ mod tests {
             "/private/var/folders/x/T/tmp.123/.ship"
         )));
         assert!(should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/example/projects-e2e/.ship"
+            "/Users/me/dev/ship/examples/e2e/.ship"
         )));
         assert!(should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/target/tmp/ship-e2e/.ship"
+            "/Users/me/dev/ship/target/tmp/ship-e2e/.ship"
         )));
         assert!(!should_filter_transient_registry_path(Path::new(
-            "/Users/me/dev/shipwright/.ship"
+            "/Users/me/dev/ship/.ship"
         )));
     }
 
@@ -1264,24 +1178,38 @@ mod tests {
     }
 
     #[test]
-    fn seed_builtin_user_skills_writes_ship_workflow_and_skill_creator() -> Result<()> {
+    fn seed_builtin_user_skills_writes_workflow_library_and_skill_creator() -> Result<()> {
         let tmp = tempdir()?;
         let user_skills = tmp.path().join("skills");
         seed_builtin_user_skills(&user_skills)?;
 
         let ship_workflow = user_skills.join("ship-workflow").join("SKILL.md");
+        let create_document = user_skills.join("create-document").join("SKILL.md");
+        let start_session = user_skills.join("start-session").join("SKILL.md");
         let skill_creator = user_skills.join("skill-creator").join("SKILL.md");
         assert!(ship_workflow.is_file());
+        assert!(create_document.is_file());
+        assert!(start_session.is_file());
         assert!(skill_creator.is_file());
         let ship_workflow_content = fs::read_to_string(&ship_workflow)?;
+        let create_document_content = fs::read_to_string(&create_document)?;
+        let start_session_content = fs::read_to_string(&start_session)?;
         let skill_creator_content = fs::read_to_string(&skill_creator)?;
         assert!(
             ship_workflow_content.contains("name: ship-workflow"),
             "ship-workflow template should be seeded"
         );
         assert!(
-            ship_workflow_content.contains("## System Of Record Contract"),
+            ship_workflow_content.contains("## System of Record"),
             "ship-workflow template should include execution contract guidance"
+        );
+        assert!(
+            create_document_content.contains("name: create-document"),
+            "create-document template should be seeded"
+        );
+        assert!(
+            start_session_content.contains("name: start-session"),
+            "start-session template should be seeded"
         );
         assert!(
             skill_creator_content.contains("name: skill-creator"),
@@ -1303,32 +1231,67 @@ mod tests {
     }
 
     #[test]
-    fn init_project_seeds_default_planning_code_and_config_modes() -> Result<()> {
+    fn init_project_does_not_seed_modes() -> Result<()> {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
         let config = get_config(Some(ship_path))?;
 
-        assert!(config.modes.iter().any(|mode| mode.id == "planning"));
-        assert!(config.modes.iter().any(|mode| mode.id == "code"));
-        assert!(config.modes.iter().any(|mode| mode.id == "config"));
         assert!(
-            !config.modes.iter().any(|mode| mode.id == "execution"),
-            "new init should not seed legacy execution mode"
+            config.modes.is_empty(),
+            "ship init should not scaffold any default modes"
         );
         Ok(())
     }
 
     #[test]
-    fn write_default_agent_mode_files_is_idempotent() -> Result<()> {
+    fn init_project_does_not_create_project_namespace_dir() -> Result<()> {
         let tmp = tempdir()?;
         let ship_path = init_project(tmp.path().to_path_buf())?;
-        write_default_agent_mode_files(&ship_path)?;
-        let config = get_config(Some(ship_path))?;
+        let config = get_config(Some(ship_path.clone()))?;
 
-        for id in ["planning", "code", "config"] {
-            let count = config.modes.iter().filter(|mode| mode.id == id).count();
-            assert_eq!(count, 1, "mode '{}' should be present exactly once", id);
-        }
+        assert!(
+            !ship_path.join("project").exists(),
+            "ship init should not scaffold .ship/project/"
+        );
+        assert!(
+            config.namespaces.iter().all(|ns| ns.id != "project"),
+            "project namespace should not be first-party at init"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn init_project_ensures_ship_mcp_server_when_mcp_toml_exists_without_it() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_path = tmp.path().join(".ship");
+        fs::create_dir_all(ship_path.join("agents"))?;
+
+        fs::write(
+            ship_path.join("agents/mcp.toml"),
+            r#"[mcp]
+[mcp.servers.github]
+name = "GitHub"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+"#,
+        )?;
+
+        let _ = init_project(tmp.path().to_path_buf())?;
+        let config = get_config(Some(ship_path.clone()))?;
+
+        assert!(
+            config.mcp_servers.iter().any(|server| server.id == "ship"
+                && server.command == "ship"
+                && server.args == vec!["mcp".to_string(), "serve".to_string()]),
+            "ship MCP server should always be present after init"
+        );
+        assert!(
+            config
+                .mcp_servers
+                .iter()
+                .any(|server| server.id == "github"),
+            "existing MCP servers should be preserved"
+        );
         Ok(())
     }
 }

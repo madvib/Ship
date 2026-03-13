@@ -42,7 +42,12 @@ pub fn write_context(project_root: &Path, provider_id: &str, content: &str) -> R
 
 /// Export the active mode (or global config) to the specified provider.
 pub fn export_to(project_dir: PathBuf, target: &str) -> Result<()> {
-    export_to_inner(project_dir, target, None, None)
+    export_to_inner(project_dir, target, None, None, None, None)
+}
+
+/// Export using an explicit project root for generated provider files.
+pub fn export_to_at_root(project_dir: PathBuf, target: &str, project_root: &Path) -> Result<()> {
+    export_to_inner(project_dir, target, None, None, None, Some(project_root))
 }
 
 /// Like `export_to` but restricts project MCP servers to those whose IDs appear in
@@ -52,7 +57,79 @@ pub fn export_to_filtered(
     target: &str,
     server_filter: Option<&[String]>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter, None)
+    export_to_inner(project_dir, target, server_filter, None, None, None)
+}
+
+/// Like `export_to_filtered` but writes generated files under `project_root`.
+pub fn export_to_filtered_at_root(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+    project_root: &Path,
+) -> Result<()> {
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        None,
+        None,
+        Some(project_root),
+    )
+}
+
+/// Like `export_to_with_mode_override` but writes generated files under `project_root`.
+pub fn export_to_with_mode_override_at_root(
+    project_dir: PathBuf,
+    target: &str,
+    active_mode_override: Option<&str>,
+    project_root: &Path,
+) -> Result<()> {
+    export_to_inner(
+        project_dir,
+        target,
+        None,
+        None,
+        active_mode_override,
+        Some(project_root),
+    )
+}
+
+/// Like `export_to_filtered_with_mode_override` but writes generated files under `project_root`.
+pub fn export_to_filtered_with_mode_override_at_root(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+    active_mode_override: Option<&str>,
+    project_root: &Path,
+) -> Result<()> {
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        None,
+        active_mode_override,
+        Some(project_root),
+    )
+}
+
+/// Like `export_to_filtered_with_mode_override_at_root` but also restricts exported
+/// skills to `skill_filter` IDs.
+pub fn export_to_filtered_with_mode_override_and_skills_at_root(
+    project_dir: PathBuf,
+    target: &str,
+    server_filter: Option<&[String]>,
+    skill_filter: Option<&[String]>,
+    active_mode_override: Option<&str>,
+    project_root: &Path,
+) -> Result<()> {
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        skill_filter,
+        active_mode_override,
+        Some(project_root),
+    )
 }
 
 /// Like `export_to` but applies a mode override when building payload.
@@ -61,7 +138,7 @@ pub fn export_to_with_mode_override(
     target: &str,
     active_mode_override: Option<&str>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, None, active_mode_override)
+    export_to_inner(project_dir, target, None, None, active_mode_override, None)
 }
 
 /// Like `export_to_filtered` but applies a mode override when building payload.
@@ -71,22 +148,31 @@ pub fn export_to_filtered_with_mode_override(
     server_filter: Option<&[String]>,
     active_mode_override: Option<&str>,
 ) -> Result<()> {
-    export_to_inner(project_dir, target, server_filter, active_mode_override)
+    export_to_inner(
+        project_dir,
+        target,
+        server_filter,
+        None,
+        active_mode_override,
+        None,
+    )
 }
 
 fn export_to_inner(
     project_dir: PathBuf,
     target: &str,
     server_filter: Option<&[String]>,
+    skill_filter: Option<&[String]>,
     active_mode_override: Option<&str>,
+    project_root_override: Option<&Path>,
 ) -> Result<()> {
     let desc = require_provider(target)?;
     let mut payload = build_payload_with_mode_override(&project_dir, active_mode_override)?;
     if let Some(ids) = server_filter {
         payload.servers.retain(|s| ids.contains(&s.id));
     }
-    let project_root = project_dir
-        .parent()
+    let project_root = project_root_override
+        .or_else(|| project_dir.parent())
         .ok_or_else(|| anyhow!("Cannot determine project root from {:?}", project_dir))?;
     let mut state = load_managed_state(&project_dir);
 
@@ -97,24 +183,37 @@ fn export_to_inner(
 
     // Skills output (provider-specific)
     match desc.skills_output {
-        SkillsOutput::ClaudeSkills => export_skills_to_claude(&project_dir, project_root)?,
-        SkillsOutput::AgentSkills => {
-            export_skills_to_dir(&project_dir, &project_root.join(".gemini").join("skills"))?
+        SkillsOutput::ClaudeSkills => {
+            export_skills_to_claude(&project_dir, project_root, skill_filter)?
         }
-        SkillsOutput::CodexSkills => {
-            export_skills_to_dir(&project_dir, &project_root.join(".agents").join("skills"))?
-        }
+        SkillsOutput::AgentSkills => export_skills_to_dir(
+            &project_dir,
+            &project_root.join(".gemini").join("skills"),
+            skill_filter,
+        )?,
+        SkillsOutput::CodexSkills => export_skills_to_dir(
+            &project_dir,
+            &project_root.join(".agents").join("skills"),
+            skill_filter,
+        )?,
         SkillsOutput::None => {}
     }
 
     // Provider-native hooks + permissions.
     match target {
         "claude" => {
-            if !payload.hooks.is_empty() || has_claude_permission_overrides(&payload.permissions) {
-                export_claude_settings(&payload.hooks, &payload.permissions)?;
+            write_hook_runtime_artifacts(project_root, &payload)?;
+            let provider_hooks = hooks_for_provider("claude", &payload.hooks);
+            if !provider_hooks.is_empty() || has_claude_permission_overrides(&payload.permissions) {
+                export_claude_settings(project_root, &provider_hooks, &payload.permissions)?;
             }
         }
-        "gemini" => export_gemini_workspace_policy(project_root, &payload.permissions)?,
+        "gemini" => {
+            write_hook_runtime_artifacts(project_root, &payload)?;
+            let provider_hooks = hooks_for_provider("gemini", &payload.hooks);
+            export_gemini_settings(project_root, &provider_hooks)?;
+            export_gemini_workspace_policy(project_root, &payload.permissions)?;
+        }
         _ => {}
     }
 
@@ -148,6 +247,9 @@ pub fn teardown(project_dir: PathBuf, target: &str) -> Result<()> {
         ConfigFormat::Toml => {
             let config_path = project_root.join(desc.project_config);
             teardown_toml(&config_path, desc.mcp_key, &tool_state)?;
+            if desc.id == "codex" {
+                teardown_codex_execpolicy(project_root)?;
+            }
         }
     }
 
@@ -208,9 +310,8 @@ pub fn sync_active_mode_with_override(
     active_mode_override: Option<&str>,
 ) -> Result<Vec<String>> {
     let config = get_effective_config(Some(project_dir.to_path_buf()))?;
-    let (resolved_mode, _) = resolve_active_mode(&config, active_mode_override);
-    let mode_targets = resolved_mode
-        .map(|m| m.target_agents.clone())
+    let mode_targets = resolve_mode_for_export(&config, active_mode_override)
+        .map(|mode| mode.target_agents.clone())
         .unwrap_or_default();
     let targets: Vec<String> = if !mode_targets.is_empty() {
         mode_targets
@@ -231,11 +332,7 @@ pub fn sync_active_mode_with_override(
             eprintln!("[ship] warning: skipping unknown target agent '{}'", target);
             continue;
         }
-        export_to_with_mode_override(
-            project_dir.to_path_buf(),
-            &normalized,
-            active_mode_override,
-        )?;
+        export_to_with_mode_override(project_dir.to_path_buf(), &normalized, active_mode_override)?;
         synced.push(normalized);
     }
     Ok(synced)
@@ -289,6 +386,68 @@ pub fn import_from_provider(provider_id: &str, project_dir: PathBuf) -> Result<u
     if added > 0 {
         crate::config::save_config(&config, Some(project_dir))?;
     }
+    Ok(added)
+}
+
+/// Non-destructive import of skills from a provider's native skills directory.
+/// Returns count of newly-added project skills.
+pub fn import_skills_from_provider(provider_id: &str, project_dir: PathBuf) -> Result<usize> {
+    let desc = require_provider(provider_id)?;
+    let import_paths = provider_skill_import_paths(desc, &project_dir)?;
+    if import_paths.is_empty() {
+        return Ok(0);
+    }
+
+    let mut existing_ids: HashSet<String> = crate::skill::list_skills(&project_dir)?
+        .into_iter()
+        .map(|skill| skill.id)
+        .collect();
+    let mut added = 0usize;
+
+    for skills_dir in import_paths {
+        if !skills_dir.exists() {
+            continue;
+        }
+        let Ok(entries) = fs::read_dir(&skills_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let skill_dir = entry.path();
+            if !skill_dir.is_dir() {
+                continue;
+            }
+            let fallback_id = entry.file_name().to_string_lossy().to_string();
+            let skill_md = skill_dir.join("SKILL.md");
+            if !skill_md.exists() {
+                continue;
+            }
+
+            let draft = match parse_imported_skill_file(&skill_md, &fallback_id) {
+                Ok(Some(draft)) => draft,
+                Ok(None) => continue,
+                Err(error) => {
+                    eprintln!(
+                        "[ship] warning: skipped invalid skill import '{}': {}",
+                        skill_md.display(),
+                        error
+                    );
+                    continue;
+                }
+            };
+
+            if existing_ids.contains(&draft.id) {
+                continue;
+            }
+
+            if crate::skill::create_skill(&project_dir, &draft.id, &draft.name, &draft.content)
+                .is_ok()
+            {
+                existing_ids.insert(draft.id);
+                added += 1;
+            }
+        }
+    }
+
     Ok(added)
 }
 
@@ -349,7 +508,7 @@ fn normalize_imported_server(mut server: McpServerConfig) -> Option<McpServerCon
 /// importable permissions were found for the provider.
 pub fn import_permissions_from_provider(provider_id: &str, project_dir: PathBuf) -> Result<bool> {
     let imported = match provider_id {
-        "claude" => import_permissions_from_claude()?,
+        "claude" => import_permissions_from_claude(&project_dir)?,
         "gemini" => import_permissions_from_gemini(&project_dir)?,
         "codex" => import_permissions_from_codex(&project_dir)?,
         _ => return Err(anyhow!("Unsupported provider '{}'", provider_id)),
@@ -368,7 +527,40 @@ fn provider_import_paths(desc: &ProviderDescriptor, project_dir: &Path) -> Resul
         .parent()
         .map(|project_root| project_root.join(desc.project_config));
     let global_path = home()?.join(desc.global_config);
+    if let Some(project_path) = project_path_opt.as_ref()
+        && project_path.exists()
+    {
+        // Prefer project config when present. Ship users typically commit to project-scoped
+        // config ownership, so mixing in global provider state here is surprising.
+        return Ok(vec![project_path.clone()]);
+    }
 
+    if global_path.exists() {
+        return Ok(vec![global_path.clone()]);
+    }
+
+    // No files found yet; return candidate paths (project first, then global) for
+    // callers that want to surface diagnostics or future file creation guidance.
+    let mut candidates = Vec::new();
+    if let Some(project_path) = project_path_opt {
+        candidates.push(project_path);
+    }
+    if !candidates.iter().any(|path| path == &global_path) {
+        candidates.push(global_path);
+    }
+    Ok(candidates)
+}
+
+fn provider_skill_import_paths(
+    desc: &ProviderDescriptor,
+    project_dir: &Path,
+) -> Result<Vec<PathBuf>> {
+    let Some(relative_path) = provider_skills_relative_path(desc) else {
+        return Ok(Vec::new());
+    };
+
+    let project_path_opt = project_dir.parent().map(|root| root.join(relative_path));
+    let global_path = home()?.join(relative_path);
     if let Some(project_path) = project_path_opt.as_ref()
         && project_path.exists()
     {
@@ -376,18 +568,115 @@ fn provider_import_paths(desc: &ProviderDescriptor, project_dir: &Path) -> Resul
     }
 
     if global_path.exists() {
-        if let Some(project_path) = project_path_opt
-            && project_path == global_path
-        {
-            return Ok(vec![project_path]);
-        }
         return Ok(vec![global_path]);
     }
 
-    if let Some(project_path) = project_path_opt {
-        return Ok(vec![project_path, global_path]);
+    Ok(project_path_opt.into_iter().collect())
+}
+
+fn provider_skills_relative_path(desc: &ProviderDescriptor) -> Option<&'static str> {
+    match desc.skills_output {
+        SkillsOutput::ClaudeSkills => Some(".claude/skills"),
+        SkillsOutput::AgentSkills => Some(".gemini/skills"),
+        SkillsOutput::CodexSkills => Some(".agents/skills"),
+        SkillsOutput::None => None,
     }
-    Ok(vec![global_path])
+}
+
+#[derive(Debug)]
+struct ImportedSkillDraft {
+    id: String,
+    name: String,
+    content: String,
+}
+
+#[derive(Deserialize, Default)]
+struct ImportedSkillMetadata {
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct ImportedSkillFrontmatter {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    metadata: Option<ImportedSkillMetadata>,
+}
+
+fn parse_imported_skill_file(path: &Path, fallback_id: &str) -> Result<Option<ImportedSkillDraft>> {
+    let raw = fs::read_to_string(path)?;
+    let normalized = raw.replace("\r\n", "\n");
+    let (frontmatter, body) = split_optional_frontmatter(&normalized);
+
+    let id_seed = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.name.as_deref())
+        .unwrap_or(fallback_id);
+    let Some(id) = normalize_skill_id(id_seed) else {
+        return Ok(None);
+    };
+
+    let name = frontmatter
+        .and_then(|fm| fm.metadata.and_then(|meta| meta.display_name))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| id.clone());
+
+    let content = strip_managed_skill_header(body).trim().to_string();
+    if content.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(ImportedSkillDraft { id, name, content }))
+}
+
+fn split_optional_frontmatter(content: &str) -> (Option<ImportedSkillFrontmatter>, &str) {
+    if !content.starts_with("---\n") {
+        return (None, content);
+    }
+    let rest = &content[4..];
+    let Some(end) = rest.find("\n---") else {
+        return (None, content);
+    };
+    let frontmatter_raw = &rest[..end];
+    let body = rest[end + 4..].trim_start_matches('\n');
+    let parsed = serde_yaml::from_str::<ImportedSkillFrontmatter>(frontmatter_raw).ok();
+    (parsed, body)
+}
+
+fn strip_managed_skill_header(content: &str) -> &str {
+    let trimmed = content.trim_start();
+    if !trimmed.starts_with("<!--") {
+        return content;
+    }
+    let Some(end_idx) = trimmed.find("-->") else {
+        return content;
+    };
+    let tail = &trimmed[end_idx + 3..];
+    tail.trim_start_matches('\n')
+}
+
+fn normalize_skill_id(raw: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in raw.trim().to_ascii_lowercase().chars() {
+        if ch.is_ascii_lowercase() || ch.is_ascii_digit() {
+            out.push(ch);
+            prev_dash = false;
+            continue;
+        }
+        if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+
+    let normalized = out.trim_matches('-').to_string();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 fn import_mcp_servers_from_json(
@@ -540,24 +829,6 @@ fn import_mcp_servers_from_toml(
 
 // ─── Payload builder ──────────────────────────────────────────────────────────
 
-fn resolve_active_mode<'a>(
-    config: &'a ProjectConfig,
-    active_mode_override: Option<&str>,
-) -> (Option<&'a ModeConfig>, Option<String>) {
-    let override_mode = active_mode_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .and_then(|mode_id| config.modes.iter().find(|mode| mode.id == mode_id))
-        .map(|mode| mode.id.clone());
-
-    let selected_mode_id = override_mode.or_else(|| config.active_mode.clone());
-    let selected_mode = selected_mode_id
-        .as_ref()
-        .and_then(|mode_id| config.modes.iter().find(|mode| mode.id == *mode_id));
-
-    (selected_mode, selected_mode_id)
-}
-
 #[cfg(test)]
 fn build_payload(project_dir: &Path) -> Result<SyncPayload> {
     build_payload_with_mode_override(project_dir, None)
@@ -568,50 +839,63 @@ fn build_payload_with_mode_override(
     active_mode_override: Option<&str>,
 ) -> Result<SyncPayload> {
     let config = get_effective_config(Some(project_dir.to_path_buf()))?;
-    let mut effective_permissions = get_permissions(project_dir.to_path_buf())?;
-    let (mode, mode_id) = resolve_active_mode(&config, active_mode_override);
+    let mode = resolve_mode_for_export(&config, active_mode_override).cloned();
+    let mode_id = mode.as_ref().map(|mode| mode.id.clone());
+    let mut servers = config.mcp_servers;
+    if let Some(mode) = mode.as_ref()
+        && !mode.mcp_servers.is_empty()
+    {
+        servers.retain(|server| mode.mcp_servers.iter().any(|id| id == &server.id));
+    }
 
-    if let Some(mode) = mode {
-        if !mode.permissions.allow.is_empty() {
-            effective_permissions.tools.allow = mode.permissions.allow.clone();
-        }
-        if !mode.permissions.deny.is_empty() {
-            effective_permissions.tools.deny = mode.permissions.deny.clone();
-        }
-        let servers = if mode.mcp_servers.is_empty() {
-            config.mcp_servers.clone()
-        } else {
-            config
-                .mcp_servers
-                .iter()
-                .filter(|s| mode.mcp_servers.contains(&s.id))
-                .cloned()
-                .collect()
-        };
-        let instruction_skill = mode
-            .prompt_id
-            .as_ref()
-            .and_then(|id| get_effective_skill(project_dir, id).ok());
-        let mut hooks = config.hooks.clone();
+    let mut hooks = config.hooks;
+    if let Some(mode) = mode.as_ref() {
         hooks.extend(mode.hooks.clone());
-        return Ok(SyncPayload {
-            servers,
-            instruction_skill_id: instruction_skill.as_ref().map(|skill| skill.id.clone()),
-            instructions: instruction_skill.map(|skill| skill.content),
-            hooks,
-            permissions: effective_permissions,
-            active_mode_id: mode_id,
-        });
+    }
+
+    let mut effective_permissions = get_permissions(project_dir.to_path_buf())?;
+    if let Some(mode) = mode.as_ref() {
+        overlay_tool_permissions(
+            &mut effective_permissions.tools.allow,
+            &mode.permissions.allow,
+        );
+        overlay_tool_permissions(
+            &mut effective_permissions.tools.deny,
+            &mode.permissions.deny,
+        );
     }
 
     Ok(SyncPayload {
-        servers: config.mcp_servers,
+        servers,
         instruction_skill_id: None,
         instructions: None,
-        hooks: config.hooks,
+        hooks,
         permissions: effective_permissions,
         active_mode_id: mode_id,
     })
+}
+
+fn resolve_mode_for_export<'a>(
+    config: &'a crate::config::ProjectConfig,
+    active_mode_override: Option<&str>,
+) -> Option<&'a crate::config::ModeConfig> {
+    let mode_id = active_mode_override
+        .map(str::trim)
+        .filter(|id| !id.is_empty())?;
+    config.modes.iter().find(|mode| mode.id == mode_id)
+}
+
+fn overlay_tool_permissions(base: &mut Vec<String>, overlay: &[String]) {
+    let mut seen: HashSet<String> = base.iter().cloned().collect();
+    for entry in overlay {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if seen.insert(trimmed.to_string()) {
+            base.push(trimmed.to_string());
+        }
+    }
 }
 
 // ─── Generic export ───────────────────────────────────────────────────────────
@@ -678,6 +962,10 @@ fn export_json(
     if !root.is_object() {
         root = serde_json::json!({});
     }
+    root["_ship"] = serde_json::json!({
+        "managed": true,
+        "note": "Generated by Ship. Do not edit manually — run `ship git sync` to regenerate."
+    });
     root[desc.mcp_key] = serde_json::Value::Object(mcp_servers);
     crate::fs_util::write_atomic(&config_path, serde_json::to_string_pretty(&root)?)?;
 
@@ -777,10 +1065,16 @@ fn export_toml(
 
     root.insert(desc.mcp_key.to_string(), toml::Value::Table(new_mcp));
     if desc.id == "codex" {
-        apply_codex_permissions(root, &payload.permissions);
+        apply_codex_permissions(root, project_root, &payload.permissions);
     }
 
-    crate::fs_util::write_atomic(&config_path, toml::to_string_pretty(&doc)?)?;
+    let header =
+        "# Generated by Ship. Do not edit manually — run `ship git sync` to regenerate.\n\n";
+    let content = format!("{}{}", header, toml::to_string_pretty(&doc)?);
+    crate::fs_util::write_atomic(&config_path, content)?;
+    if desc.id == "codex" {
+        export_codex_execpolicy(project_root, &payload.permissions)?;
+    }
 
     // System instructions output (from mode `prompt_id`, which now points to a skill ID).
     if let Some(instructions) = &payload.instructions {
@@ -884,7 +1178,7 @@ fn teardown_toml(config_path: &Path, mcp_key: &str, tool_state: &ToolState) -> R
 fn ship_server_entry() -> (&'static str, serde_json::Value) {
     let entry = serde_json::json!({
         "command": "ship",
-        "args": ["mcp"],
+        "args": ["mcp", "serve"],
         "type": "stdio",
         "_ship": { "managed": true }
     });
@@ -979,27 +1273,120 @@ fn toml_mcp_entry(desc: &ProviderDescriptor, s: &McpServerConfig) -> toml::Value
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
 
-fn export_skills_to_claude(project_dir: &Path, project_root: &Path) -> Result<()> {
-    export_skills_to_dir(project_dir, &project_root.join(".claude").join("skills"))
+fn export_skills_to_claude(
+    project_dir: &Path,
+    project_root: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<()> {
+    export_skills_to_dir(
+        project_dir,
+        &project_root.join(".claude").join("skills"),
+        skill_filter,
+    )
 }
 
-fn resolve_skills_for_export(project_dir: &Path) -> Result<Vec<crate::skill::Skill>> {
-    let config = get_effective_config(Some(project_dir.to_path_buf()))?;
+fn resolve_skills_for_export(
+    project_dir: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<Vec<crate::skill::Skill>> {
     let mut skills = list_effective_skills(project_dir)?;
-
-    if let Some(active_mode_id) = config.active_mode.as_deref()
-        && let Some(mode) = config.modes.iter().find(|m| m.id == active_mode_id)
-        && !mode.skills.is_empty()
-    {
-        skills.retain(|skill| mode.skills.contains(&skill.id));
+    if let Some(allowed) = skill_filter {
+        let allowed = allowed
+            .iter()
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty())
+            .collect::<HashSet<_>>();
+        skills.retain(|skill| allowed.contains(skill.id.as_str()));
     }
-
     Ok(skills)
 }
 
+#[derive(Serialize)]
+struct ExportSkillMetadata<'a> {
+    #[serde(rename = "display_name")]
+    display_name: &'a str,
+    source: &'a str,
+}
+
+#[derive(Serialize)]
+struct ExportSkillFrontmatter<'a> {
+    name: &'a str,
+    description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<ExportSkillMetadata<'a>>,
+}
+
+fn skill_source_label(source: &crate::skill::SkillSource) -> &'static str {
+    match source {
+        crate::skill::SkillSource::Builtin => "builtin",
+        crate::skill::SkillSource::AiGenerated => "ai-generated",
+        crate::skill::SkillSource::Community => "community",
+        crate::skill::SkillSource::Imported => "imported",
+        crate::skill::SkillSource::Custom => "custom",
+    }
+}
+
+fn render_managed_skill_markdown(skill: &crate::skill::Skill) -> Result<String> {
+    let description = skill
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| format!("Project skill '{}'", skill.id));
+    let display_name = if skill.name.trim().is_empty() {
+        skill.id.as_str()
+    } else {
+        skill.name.as_str()
+    };
+    let frontmatter = ExportSkillFrontmatter {
+        name: &skill.id,
+        description,
+        metadata: Some(ExportSkillMetadata {
+            display_name,
+            source: skill_source_label(&skill.source),
+        }),
+    };
+    let frontmatter_yaml = serde_yaml::to_string(&frontmatter)?;
+    Ok(format!(
+        "---\n{}---\n\n<!-- managed by ship — skill: {} -->\n\n{}\n",
+        frontmatter_yaml,
+        skill.id,
+        skill.content.trim()
+    ))
+}
+
+fn is_ship_managed_skill_markdown(content: &str) -> bool {
+    if content.starts_with("<!-- managed by ship") {
+        return true;
+    }
+    if !content.starts_with("---\n") {
+        return false;
+    }
+    let rest = &content[4..];
+    let Some(end) = rest.find("\n---") else {
+        return false;
+    };
+    let body = rest[end + 4..].trim_start_matches('\n');
+    body.starts_with("<!-- managed by ship")
+}
+
 /// Write skills using the agentskills.io layout: `<skills_dir>/<skill-id>/SKILL.md`
-fn export_skills_to_dir(project_dir: &Path, skills_dir: &Path) -> Result<()> {
-    let skills = resolve_skills_for_export(project_dir)?;
+fn export_skills_to_dir(
+    project_dir: &Path,
+    skills_dir: &Path,
+    skill_filter: Option<&[String]>,
+) -> Result<()> {
+    let project_root = project_dir.parent().unwrap_or(project_dir);
+    let legacy_agents_skills_dir = project_root.join("agents").join("skills");
+    if skills_dir == legacy_agents_skills_dir {
+        return Err(anyhow!(
+            "Refusing to export skills to legacy path '{}'; use '.agents/skills' instead",
+            legacy_agents_skills_dir.display()
+        ));
+    }
+
+    let skills = resolve_skills_for_export(project_dir, skill_filter)?;
     let retain_ids: HashSet<String> = skills.iter().map(|skill| skill.id.clone()).collect();
     prune_stale_managed_skill_dirs(skills_dir, &retain_ids);
     if skills.is_empty() {
@@ -1011,10 +1398,7 @@ fn export_skills_to_dir(project_dir: &Path, skills_dir: &Path) -> Result<()> {
         let skill_dir = skills_dir.join(&skill.id);
         fs::create_dir_all(&skill_dir)?;
         let path = skill_dir.join("SKILL.md");
-        let content = format!(
-            "<!-- managed by ship — skill: {} -->\n\n{}\n",
-            skill.id, skill.content
-        );
+        let content = render_managed_skill_markdown(skill)?;
         crate::fs_util::write_atomic(&path, content)?;
     }
     Ok(())
@@ -1040,7 +1424,7 @@ fn prune_stale_managed_skill_dirs(skills_dir: &Path, retain_ids: &HashSet<String
             let skill_md = skill_dir.join("SKILL.md");
             if skill_md.exists()
                 && let Ok(content) = fs::read_to_string(&skill_md)
-                && content.starts_with("<!-- managed by ship")
+                && is_ship_managed_skill_markdown(&content)
             {
                 fs::remove_dir_all(&skill_dir).ok();
             }
@@ -1063,7 +1447,7 @@ fn remove_ship_managed_skill_dirs(skills_dir: &Path) {
             let skill_md = skill_dir.join("SKILL.md");
             if skill_md.exists()
                 && let Ok(c) = fs::read_to_string(&skill_md)
-                && c.starts_with("<!-- managed by ship")
+                && is_ship_managed_skill_markdown(&c)
             {
                 fs::remove_dir_all(&skill_dir).ok();
             }

@@ -17,15 +17,10 @@ import {
   ReleaseDocument as Release,
   ReleaseInfo,
   ProviderInfo,
-  SpecEntry as RawSpecInfo,
   Workspace,
   Result,
   commands as spectaCommands,
 } from '@/bindings';
-import {
-  SpecInfo,
-  toSpecInfo,
-} from '@/lib/types/spec';
 
 export interface CreateProjectPayload {
   directory: string;
@@ -39,10 +34,50 @@ export interface WorkspaceEditorInfo {
   name: string;
   binary: string;
 }
+export interface GitBranchInfo {
+  name: string;
+  current: boolean;
+  base_branch: string;
+  ahead: number;
+  behind: number;
+  touched_files: number;
+  insertions: number;
+  deletions: number;
+}
+
 
 export interface WorkspaceFileChange {
   status: string;
   path: string;
+}
+
+export interface WorkspaceGitStatusSummary {
+  branch: string;
+  touched_files: number;
+  insertions: number;
+  deletions: number;
+  ahead: number;
+  behind: number;
+  upstream?: string | null;
+}
+
+export interface BranchFileChange {
+  status: string;
+  path: string;
+  insertions: number;
+  deletions: number;
+}
+
+export interface BranchDetailSummary {
+  branch: string;
+  base_branch: string;
+  ahead: number;
+  behind: number;
+  touched_files: number;
+  insertions: number;
+  deletions: number;
+  has_workspace: boolean;
+  changes: BranchFileChange[];
 }
 
 export interface WorkspaceSessionInfo {
@@ -57,7 +92,6 @@ export interface WorkspaceSessionInfo {
   goal?: string | null;
   summary?: string | null;
   updated_feature_ids: string[];
-  updated_spec_ids: string[];
   compiled_at?: string | null;
   compile_error?: string | null;
   config_generation_at_start?: number | null;
@@ -122,7 +156,7 @@ export interface RuntimePerfSnapshot {
   watcher_last_ingest_micros: number;
 }
 
-export type TemplateKind = 'issue' | 'adr' | 'spec' | 'release' | 'feature' | 'vision';
+export type TemplateKind = 'adr' | 'release' | 'feature' | 'vision';
 export type NotesScope = 'project' | 'global';
 
 const unwrapResult = async <T>(promise: Promise<Result<T, string>>): Promise<T> => {
@@ -134,8 +168,6 @@ const unwrapResult = async <T>(promise: Promise<Result<T, string>>): Promise<T> 
 };
 
 export const listAdrs = (): Promise<AdrEntry[]> => invoke('list_adrs_cmd');
-export const listSpecs = (): Promise<SpecInfo[]> =>
-  invoke<RawSpecInfo[]>('list_specs_cmd').then((entries) => entries.map(toSpecInfo));
 export const listReleases = (): Promise<ReleaseInfo[]> => invoke<ReleaseInfo[]>('list_releases_cmd');
 export const listFeatures = (): Promise<FeatureEntry[]> => invoke('list_features_cmd');
 export const listNotes = (scope: NotesScope = 'project'): Promise<NoteEntry[]> =>
@@ -154,6 +186,11 @@ export const getWorkspaceCmd = (branch: string): Promise<Result<Workspace | null
   invoke('get_workspace_cmd', { branch }).then(data => ({ status: 'ok', data } as Result<Workspace | null, string>)).catch(error => ({ status: 'error', error }));
 export const listWorkspaceEditorsCmd = (): Promise<Result<WorkspaceEditorInfo[], string>> =>
   invoke('list_workspace_editors_cmd').then(data => ({ status: 'ok', data } as Result<WorkspaceEditorInfo[], string>)).catch(error => ({ status: 'error', error }));
+export const listGitBranchesCmd = (): Promise<Result<GitBranchInfo[], string>> =>
+  invoke('list_git_branches_cmd')
+    .then(data => ({ status: 'ok', data } as Result<GitBranchInfo[], string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
+
 export const listWorkspacesCmd = (): Promise<Result<Workspace[], string>> =>
   invoke('list_workspaces_cmd').then(data => ({ status: 'ok', data } as Result<Workspace[], string>)).catch(error => ({ status: 'error', error }));
 export const listProvidersCmd = (): Promise<Result<ProviderInfo[], string>> =>
@@ -164,22 +201,36 @@ export const createWorkspaceCmd = (
   branch: string,
   options?: {
     workspaceType?: string | null;
+    environmentId?: string | null;
+    providers?: string[] | null;
+    mcpServers?: string[] | null;
+    skills?: string[] | null;
     featureId?: string | null;
-    specId?: string | null;
     releaseId?: string | null;
-    modeId?: string | null;
-    activate?: boolean;
+    isWorktree?: boolean | null;
+    worktreePath?: string | null;
   }
 ): Promise<Result<Workspace, string>> =>
-  invoke('create_workspace_cmd', {
+  {
+  const hasAgentOverride =
+    options?.providers !== undefined || options?.mcpServers !== undefined || options?.skills !== undefined;
+  return invoke('create_workspace_cmd', {
     branch,
     workspaceType: options?.workspaceType ?? null,
+    environmentId: options?.environmentId ?? null,
+    agent: hasAgentOverride
+      ? {
+          providers: options?.providers ?? null,
+          mcpServers: options?.mcpServers ?? null,
+          skills: options?.skills ?? null,
+        }
+      : null,
+    isWorktree: options?.isWorktree ?? null,
+    worktreePath: options?.worktreePath ?? null,
     featureId: options?.featureId ?? null,
-    specId: options?.specId ?? null,
     releaseId: options?.releaseId ?? null,
-    modeId: options?.modeId ?? null,
-    activate: options?.activate ?? null,
   }).then(data => ({ status: 'ok', data } as Result<Workspace, string>)).catch(error => ({ status: 'error', error }));
+  };
 export const activateWorkspaceCmd = (branch: string): Promise<Result<Workspace, string>> =>
   invoke('activate_workspace_cmd', { branch }).then(data => ({ status: 'ok', data } as Result<Workspace, string>)).catch(error => ({ status: 'error', error }));
 export const setWorkspaceModeCmd = (
@@ -244,13 +295,11 @@ export const endWorkspaceSessionCmd = (
   branch: string,
   summary?: string | null,
   updatedFeatureIds?: string[] | null,
-  updatedSpecIds?: string[] | null,
 ): Promise<Result<WorkspaceSessionInfo, string>> =>
   invoke('end_workspace_session_cmd', {
     branch,
     summary: summary ?? null,
     updatedFeatureIds: updatedFeatureIds ?? null,
-    updatedSpecIds: updatedSpecIds ?? null,
   })
     .then(data => ({ status: 'ok', data } as Result<WorkspaceSessionInfo, string>))
     .catch(error => ({ status: 'error', error: String(error) }));
@@ -259,6 +308,31 @@ export const listWorkspaceChangesCmd = (
 ): Promise<Result<WorkspaceFileChange[], string>> =>
   invoke('list_workspace_changes_cmd', { branch })
     .then(data => ({ status: 'ok', data } as Result<WorkspaceFileChange[], string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
+export const getWorkspaceGitStatusCmd = (
+  branch: string
+): Promise<Result<WorkspaceGitStatusSummary, string>> =>
+  invoke('get_workspace_git_status_cmd', { branch })
+    .then(data => ({ status: 'ok', data } as Result<WorkspaceGitStatusSummary, string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
+export const getGitStatusForPathCmd = (
+  path: string
+): Promise<Result<WorkspaceGitStatusSummary, string>> =>
+  invoke('get_git_status_for_path_cmd', { path })
+    .then(data => ({ status: 'ok', data } as Result<WorkspaceGitStatusSummary, string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
+export const getBranchDetailCmd = (
+  branch: string,
+): Promise<Result<BranchDetailSummary, string>> =>
+  invoke('get_branch_detail_cmd', { branch })
+    .then(data => ({ status: 'ok', data } as Result<BranchDetailSummary, string>))
+    .catch(error => ({ status: 'error', error: String(error) }));
+export const getBranchFileDiffCmd = (
+  branch: string,
+  path: string,
+): Promise<Result<string, string>> =>
+  invoke('get_branch_file_diff_cmd', { branch, path })
+    .then(data => ({ status: 'ok', data } as Result<string, string>))
     .catch(error => ({ status: 'error', error: String(error) }));
 export const openWorkspaceEditorCmd = (
   branch: string,
@@ -356,45 +430,45 @@ export const moveAdrCmd = (id: string, newStatus: AdrStatus): Promise<AdrEntry> 
 export const deleteAdrCmd = (id: string): Promise<void> =>
   unwrapResult(spectaCommands.deleteAdrCmd(id)).then(() => undefined);
 
-export const getSpecCmd = (id: string): Promise<Result<SpecInfo, string>> =>
-  spectaCommands.getSpecCmd(id)
-    .then((result) => {
-      if (result.status === 'ok') {
-        return { status: 'ok', data: toSpecInfo(result.data) } as Result<SpecInfo, string>;
-      }
-      return result as unknown as Result<SpecInfo, string>;
-    });
-
-export const createSpecCmd = (title: string, content: string): Promise<Result<SpecInfo, string>> =>
-  invoke<RawSpecInfo>('create_spec_cmd', { title, content })
-    .then((data) => ({ status: 'ok', data: toSpecInfo(data) } as Result<SpecInfo, string>))
-    .catch((error) => ({ status: 'error', error: String(error) }));
-
-export const updateSpecCmd = async (id: string, content: string): Promise<Result<SpecInfo, string>> => {
-  const existing = await spectaCommands.getSpecCmd(id);
-  if (existing.status === 'error') {
-    return existing as unknown as Result<SpecInfo, string>;
-  }
-  return spectaCommands.updateSpecCmd(id, { ...existing.data.spec, body: content })
-    .then((result) => {
-      if (result.status === 'ok') {
-        return { status: 'ok', data: toSpecInfo(result.data) } as Result<SpecInfo, string>;
-      }
-      return result as unknown as Result<SpecInfo, string>;
-    });
-};
-
-export const deleteSpecCmd = (id: string): Promise<Result<null, string>> =>
-  spectaCommands.deleteSpecCmd(id);
-
 export const getReleaseCmd = (fileName: string): Promise<Result<Release, string>> =>
   invoke('get_release_cmd', { fileName }).then(data => ({ status: 'ok', data } as Result<Release, string>)).catch(error => ({ status: 'error', error: String(error) }));
 
-export const createReleaseCmd = (version: string, content: string): Promise<Result<Release, string>> =>
-  invoke('create_release_cmd', { version, content }).then(data => ({ status: 'ok', data } as Result<Release, string>)).catch(error => ({ status: 'error', error: String(error) }));
+export interface ReleaseMetadataUpdate {
+  version?: string | null;
+  status?: string | null;
+  supported?: boolean | null;
+  targetDate?: string | null;
+  tags?: string[] | null;
+}
 
-export const updateReleaseCmd = (fileName: string, content: string): Promise<Result<Release, string>> =>
-  invoke('update_release_cmd', { fileName, content }).then(data => ({ status: 'ok', data } as Result<Release, string>)).catch(error => ({ status: 'error', error: String(error) }));
+export const createReleaseCmd = (
+  version: string,
+  content: string,
+  metadata: ReleaseMetadataUpdate = {},
+): Promise<Result<Release, string>> =>
+  invoke('create_release_cmd', {
+    version,
+    content,
+    status: metadata.status ?? null,
+    targetDate: metadata.targetDate ?? null,
+    supported: metadata.supported ?? null,
+    tags: metadata.tags ?? null,
+  }).then(data => ({ status: 'ok', data } as Result<Release, string>)).catch(error => ({ status: 'error', error: String(error) }));
+
+export const updateReleaseCmd = (
+  fileName: string,
+  content: string,
+  metadata: ReleaseMetadataUpdate = {},
+): Promise<Result<Release, string>> =>
+  invoke('update_release_cmd', {
+    fileName,
+    content,
+    version: metadata.version ?? null,
+    status: metadata.status ?? null,
+    targetDate: metadata.targetDate ?? null,
+    supported: metadata.supported ?? null,
+    tags: metadata.tags ?? null,
+  }).then(data => ({ status: 'ok', data } as Result<Release, string>)).catch(error => ({ status: 'error', error: String(error) }));
 
 export const getFeatureCmd = (fileName: string): Promise<Result<Feature, string>> =>
   invoke('get_feature_cmd', { fileName }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
@@ -403,11 +477,30 @@ export const createFeatureCmd = (
   title: string,
   content: string,
   release?: string | null,
-  spec?: string | null
-): Promise<Result<Feature, string>> => invoke('create_feature_cmd', { title, content, release, spec }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
+  branch?: string | null,
+): Promise<Result<Feature, string>> => invoke('create_feature_cmd', { title, content, release, branch }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
 
 export const updateFeatureCmd = (fileName: string, content: string): Promise<Result<Feature, string>> =>
   invoke('update_feature_cmd', { fileName, content }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
+
+export const featureStartCmd = (fileName: string): Promise<Result<Feature, string>> =>
+  invoke('feature_start_cmd', { fileName }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
+
+export const featureDoneCmd = (fileName: string): Promise<Result<Feature, string>> =>
+  invoke('feature_done_cmd', { fileName }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
+
+export const updateFeatureDocumentationCmd = (
+  fileName: string,
+  content: string,
+  status?: string | null,
+  verifyNow?: boolean
+): Promise<Result<Feature, string>> =>
+  invoke('update_feature_documentation_cmd', {
+    fileName,
+    content,
+    status: status ?? null,
+    verifyNow: verifyNow ?? null,
+  }).then(data => ({ status: 'ok', data } as Result<Feature, string>)).catch(error => ({ status: 'error', error: String(error) }));
 
 export const getNoteCmd = (id: string, scope: NotesScope = 'project'): Promise<NoteDocument> =>
   invoke('get_note_cmd', { id, scope });

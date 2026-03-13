@@ -25,6 +25,7 @@ import {
 
 interface UseWorkspaceLifecycleParams {
   activeProject: Project | null;
+  setActiveProject: Dispatch<SetStateAction<Project | null>>;
   sidebarCollapsed: boolean;
   setEventEntries: Dispatch<SetStateAction<EventRecord[]>>;
   setProjectConfig: Dispatch<SetStateAction<ProjectConfig | null>>;
@@ -40,6 +41,7 @@ interface UseWorkspaceLifecycleParams {
 
 export function useWorkspaceLifecycle({
   activeProject,
+  setActiveProject,
   sidebarCollapsed,
   setEventEntries,
   setProjectConfig,
@@ -80,6 +82,19 @@ export function useWorkspaceLifecycle({
     });
     setProjectConfig(cfg);
   }, [setProjectConfig]);
+
+  const refreshRecentProjects = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setRecentProjects([]);
+      return;
+    }
+
+    const projects = await listProjects().catch((error) => {
+      console.error('Failed to load projects:', error);
+      return [];
+    });
+    setRecentProjects(dedupeProjects(projects));
+  }, [setRecentProjects]);
 
   const refreshDetectedProject = useCallback(async (): Promise<Project | null> => {
     if (!isTauriRuntime()) {
@@ -169,12 +184,6 @@ export function useWorkspaceLifecycle({
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     void subscribeProjectEvents({
-      onIssuesChanged: () => {
-        scheduleProjectDataReload();
-      },
-      onSpecsChanged: () => {
-        scheduleProjectDataReload();
-      },
       onAdrsChanged: () => {
         scheduleProjectDataReload();
       },
@@ -252,13 +261,16 @@ export function useWorkspaceLifecycle({
           return;
         }
 
-        const projects = await listProjects().catch((error) => {
-          console.error('Failed to load projects:', error);
-          return [];
-        });
-        setRecentProjects(dedupeProjects(projects));
+        await refreshRecentProjects();
 
-        await refreshDetectedProject();
+        const detected = await refreshDetectedProject();
+        if (detected) {
+          setActiveProject(detected);
+          await loadProjectConfig();
+          await loadProjectData();
+        } else {
+          setProjectConfig(null);
+        }
 
         const globalSettings = await getAppSettingsCmd().catch((error) => {
           console.error('Failed to load global settings:', error);
@@ -277,11 +289,15 @@ export function useWorkspaceLifecycle({
       }
     })();
   }, [
+    loadProjectConfig,
+    loadProjectData,
     refreshDetectedProject,
+    setActiveProject,
     setConfig,
     setError,
     setGlobalAgentConfig,
     setLoading,
+    setProjectConfig,
     setRecentProjects,
   ]);
 
@@ -289,5 +305,6 @@ export function useWorkspaceLifecycle({
     loadProjectData,
     loadProjectConfig,
     refreshDetectedProject,
-  }), [loadProjectData, loadProjectConfig, refreshDetectedProject]);
+    refreshRecentProjects,
+  }), [loadProjectData, loadProjectConfig, refreshDetectedProject, refreshRecentProjects]);
 }

@@ -24,7 +24,7 @@ pub enum SkillSource {
 /// They can be invoked explicitly by the user with `/skill-name [args]`
 /// and can use `$ARGUMENTS`.
 /// Stored as:
-/// - project scope: `~/.ship/projects/<project-slug>/skills/<id>/SKILL.md`
+/// - project scope: `.ship/agents/skills/<id>/SKILL.md`
 /// - user scope: `~/.ship/skills/<id>/SKILL.md`
 /// using Agent Skills spec format.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -113,71 +113,15 @@ fn user_skills_dir() -> PathBuf {
     crate::project::user_skills_dir()
 }
 
-fn legacy_project_skills_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join("agents").join("skills")
-}
-
-fn legacy_user_skills_dir() -> Result<PathBuf> {
-    Ok(crate::project::get_global_dir()?
-        .join("agents")
-        .join("skills"))
-}
-
-fn migrate_legacy_skill_dirs(legacy_dir: &Path, target_dir: &Path) -> Result<()> {
-    if !legacy_dir.exists() || !legacy_dir.is_dir() {
-        return Ok(());
-    }
-
-    fs::create_dir_all(target_dir)?;
-
-    for entry in fs::read_dir(legacy_dir)? {
-        let entry = entry?;
-        let source = entry.path();
-        if !source.is_dir() {
-            continue;
-        }
-        let Some(name) = source.file_name() else {
-            continue;
-        };
-        let target = target_dir.join(name);
-        if target.exists() {
-            continue;
-        }
-        if fs::rename(&source, &target).is_err() {
-            fs::create_dir_all(&target)?;
-            for child in fs::read_dir(&source)? {
-                let child = child?;
-                let child_source = child.path();
-                let child_target = target.join(child.file_name());
-                if child_source.is_dir() {
-                    fs::create_dir_all(&child_target)?;
-                } else {
-                    fs::copy(&child_source, &child_target)?;
-                }
-            }
-            let _ = fs::remove_dir_all(&source);
-        }
-    }
-
-    if fs::read_dir(legacy_dir)?.next().is_none() {
-        let _ = fs::remove_dir_all(legacy_dir);
-    }
-
-    Ok(())
-}
-
 fn ensure_project_skills_storage(project_dir: &Path) -> Result<PathBuf> {
     let target = skills_dir(project_dir);
-    migrate_legacy_skill_dirs(&legacy_project_skills_dir(project_dir), &target)?;
     fs::create_dir_all(&target)?;
+    migrate_legacy_project_skills(project_dir, &target)?;
     Ok(target)
 }
 
 fn ensure_user_skills_storage() -> Result<PathBuf> {
     let target = user_skills_dir();
-    if let Ok(legacy) = legacy_user_skills_dir() {
-        migrate_legacy_skill_dirs(&legacy, &target)?;
-    }
     fs::create_dir_all(&target)?;
     Ok(target)
 }
@@ -306,36 +250,215 @@ pub enum SkillInstallScope {
     User,
 }
 
-fn resolve_repo_source(source: &str) -> String {
+fn looks_like_skills_cli_command(raw: &str) -> bool {
+    let tokens = raw
+        .split_whitespace()
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return false;
+    }
+    let starts_like_command = matches!(
+        tokens.first().map(String::as_str),
+        Some("skills") | Some("skills.sh") | Some("npx")
+    );
+    if !starts_like_command {
+        return false;
+    }
+    let has_add = tokens.iter().any(|token| token == "add");
+    let has_skills = tokens.iter().any(|token| {
+        token == "skills"
+            || token == "skills.sh"
+            || token == "@skills/cli"
+            || token.ends_with("/skills")
+    });
+    has_add && has_skills
+}
+
+fn validate_skill_install_request(source: &str, skill_id: &str) -> Result<()> {
+    let source = source.trim();
+    let skill_id = skill_id.trim();
+    if source.is_empty() {
+        return Err(anyhow!("source cannot be empty"));
+    }
+    if source.contains('\n') || source.contains('\r') {
+        return Err(anyhow!("source must be a single-line value"));
+    }
+    let is_skills_command = source.contains(char::is_whitespace) && looks_like_skills_cli_command(source);
+    if skill_id.is_empty() {
+        if !is_skills_command {
+            return Err(anyhow!(
+                "Skill ID is required when source is not a skills.sh command."
+            ));
+        }
+    } else if !is_valid_skill_name(skill_id) {
+        return Err(anyhow!(
+            "Invalid skill id '{}'. Skill IDs must be kebab-case and <= 64 chars.",
+            skill_id
+        ));
+    }
+    if source.contains(char::is_whitespace) && !looks_like_skills_cli_command(source) {
+        return Err(anyhow!(
+            "Unsupported source '{}'. Provide either a skills.sh command (`npx skills add ...`) or a skill ID.",
+            source
+        ));
+    }
+    if !source.contains(char::is_whitespace)
+        && (source.contains("://")
+            || source.contains("github.com")
+            || source.starts_with("git@")
+            || source.ends_with(".git"))
+    {
+        return Err(anyhow!(
+            "Git URL sources are not supported. Use a skills.sh command or a skill ID."
+        ));
+    }
+    Ok(())
+}
+
+fn format_command_failure(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return stdout;
+    }
+    "command exited with no diagnostic output".to_string()
+}
+
+fn parse_skills_install_source(source: &str) -> Result<(String, Option<String>)> {
     let trimmed = source.trim();
-    if let Some(suffix) = trimmed.strip_prefix("~/")
-        && let Some(home) = std::env::var_os("HOME")
+    if trimmed.is_empty() {
+        return Err(anyhow!("source cannot be empty"));
+    }
+
+    // Shorthand: owner/repo@skill-id
+    if !trimmed.contains(char::is_whitespace)
+        && let Some((repo, skill)) = trimmed.split_once('@')
     {
-        return PathBuf::from(home)
-            .join(suffix)
-            .to_string_lossy()
-            .to_string();
+        let repo = repo.trim();
+        let skill = skill.trim();
+        if repo.contains('/') && !skill.is_empty() {
+            return Ok((repo.to_string(), Some(skill.to_string())));
+        }
     }
 
-    let source_path = Path::new(trimmed);
-    if source_path.is_absolute()
-        || source_path.exists()
-        || trimmed.starts_with("./")
-        || trimmed.starts_with("../")
+    if !looks_like_skills_cli_command(trimmed) {
+        return Ok((trimmed.to_string(), None));
+    }
+
+    let tokens = trimmed.split_whitespace().collect::<Vec<_>>();
+    let add_index = tokens
+        .iter()
+        .position(|token| token.eq_ignore_ascii_case("add"))
+        .ok_or_else(|| anyhow!("skills.sh command is missing `add`"))?;
+
+    let mut package: Option<String> = None;
+    let mut parsed_skill: Option<String> = None;
+    let mut index = add_index + 1;
+    while index < tokens.len() {
+        let token = tokens[index];
+        let lower = token.to_ascii_lowercase();
+
+        if lower == "--skill" || lower == "-s" {
+            if let Some(next) = tokens.get(index + 1)
+                && !next.starts_with('-')
+            {
+                parsed_skill = Some((*next).to_string());
+            }
+            index += 2;
+            continue;
+        }
+
+        if let Some(value) = lower.strip_prefix("--skill=")
+            && !value.is_empty()
+        {
+            parsed_skill = Some(value.to_string());
+            index += 1;
+            continue;
+        }
+
+        if token.starts_with('-') {
+            // Known flags that take a value.
+            let consumes_value = matches!(lower.as_str(), "--agent" | "-a");
+            if consumes_value
+                && let Some(next) = tokens.get(index + 1)
+                && !next.starts_with('-')
+            {
+                index += 2;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+
+        if package.is_none() {
+            package = Some(token.to_string());
+        }
+        index += 1;
+    }
+
+    let package = package.ok_or_else(|| anyhow!("skills.sh command is missing package source"))?;
+    Ok((package, parsed_skill))
+}
+
+fn run_skills_install_command(
+    source: &str,
+    skill_id: &str,
+    workspace_dir: &Path,
+    home_dir: &Path,
+) -> Result<()> {
+    let (package_source, parsed_skill) = parse_skills_install_source(source)?;
+
+    // Normalize to a deterministic, non-interactive install:
+    // - `--yes`: no prompts
+    // - `--copy`: avoid symlink installs
+    // - `--agent codex`: install only the codex/.agents surface
+    let mut command = ProcessCommand::new("npx");
+    command
+        .arg("-y")
+        .arg("skills")
+        .arg("add")
+        .arg(&package_source)
+        .arg("--yes")
+        .arg("--copy")
+        .arg("--agent")
+        .arg("codex");
+    let requested_skill = if !skill_id.trim().is_empty() {
+        Some(skill_id.trim().to_string())
+    } else {
+        parsed_skill
+    };
+    if let Some(skill) = requested_skill
+        && !skill.trim().is_empty()
     {
-        return trimmed.to_string();
+        command.arg("--skill").arg(skill.trim());
     }
 
-    if trimmed.contains("://") || trimmed.starts_with("git@") || trimmed.ends_with(".git") {
-        return trimmed.to_string();
-    }
+    command.current_dir(workspace_dir);
+    command.env("HOME", home_dir);
+    command.env("USERPROFILE", home_dir);
+    command.env("XDG_CONFIG_HOME", home_dir.join(".config"));
+    command.env("XDG_CACHE_HOME", home_dir.join(".cache"));
 
-    let parts: Vec<&str> = trimmed.split('/').collect();
-    if parts.len() == 2 && parts.iter().all(|part| !part.trim().is_empty()) {
-        return format!("https://github.com/{}.git", trimmed);
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(anyhow!(
+                "skills.sh install requires Node.js (`npx`) on PATH."
+            ));
+        }
+        Err(err) => return Err(err).with_context(|| "Failed to run `skills.sh` installer command"),
+    };
+    if !output.status.success() {
+        return Err(anyhow!(
+            "Failed to install skill via skills.sh CLI: {}",
+            format_command_failure(&output)
+        ));
     }
-
-    trimmed.to_string()
+    Ok(())
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
@@ -353,15 +476,61 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+fn migrate_legacy_project_skills(project_dir: &Path, target_root: &Path) -> Result<()> {
+    let mut legacy_roots = vec![crate::project::legacy_repo_project_skills_dir(project_dir)];
+    legacy_roots.extend(crate::project::legacy_project_skills_dir_candidates(
+        project_dir,
+    ));
+
+    for legacy_root in legacy_roots {
+        if legacy_root == target_root || !legacy_root.exists() || !legacy_root.is_dir() {
+            continue;
+        }
+
+        for entry in fs::read_dir(&legacy_root)? {
+            let entry = entry?;
+            let source_path = entry.path();
+            if !source_path.is_dir() {
+                continue;
+            }
+            if !source_path.join("SKILL.md").is_file() {
+                continue;
+            }
+
+            let destination_path = target_root.join(entry.file_name());
+            if destination_path.exists() {
+                continue;
+            }
+
+            match fs::rename(&source_path, &destination_path) {
+                Ok(_) => {}
+                Err(_) => {
+                    copy_dir_recursive(&source_path, &destination_path)?;
+                    fs::remove_dir_all(&source_path)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
 fn find_skill_source_dir(search_root: &Path, skill_id: &str) -> Result<PathBuf> {
-    let mut candidates = Vec::new();
-    let mut available = Vec::new();
+    let mut discovered = Vec::<(String, PathBuf)>::new();
 
     for entry in walkdir::WalkDir::new(search_root)
         .into_iter()
         .filter_map(|entry| entry.ok())
     {
-        if !entry.file_type().is_file() || entry.file_name() != "SKILL.md" {
+        if entry.file_name() != "SKILL.md" {
+            continue;
+        }
+        let file_type = entry.file_type();
+        if !file_type.is_file() && !file_type.is_symlink() {
+            continue;
+        }
+        // skills.sh may install SKILL.md as symlinks under agent directories.
+        // Accept symlinked files as long as they resolve to a readable file path.
+        if file_type.is_symlink() && !entry.path().is_file() {
             continue;
         }
         let Some(parent) = entry.path().parent() else {
@@ -370,15 +539,20 @@ fn find_skill_source_dir(search_root: &Path, skill_id: &str) -> Result<PathBuf> 
         let Some(dir_name) = parent.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        available.push(dir_name.to_string());
-        if dir_name == skill_id {
-            candidates.push(parent.to_path_buf());
-        }
+        discovered.push((dir_name.to_string(), parent.to_path_buf()));
     }
 
-    if candidates.is_empty() {
-        available.sort();
-        available.dedup();
+    discovered.sort_by(|left, right| left.0.cmp(&right.0));
+    discovered.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
+
+    let mut available = discovered
+        .iter()
+        .map(|(id, _)| id.clone())
+        .collect::<Vec<_>>();
+    available.sort();
+    available.dedup();
+
+    if discovered.is_empty() {
         let list = if available.is_empty() {
             "(no skills found)".to_string()
         } else {
@@ -392,18 +566,39 @@ fn find_skill_source_dir(search_root: &Path, skill_id: &str) -> Result<PathBuf> 
         ));
     }
 
-    candidates.sort();
-    Ok(candidates.remove(0))
+    let requested = skill_id.trim();
+    if !requested.is_empty() {
+        if let Some((_, path)) = discovered.iter().find(|(id, _)| id == requested) {
+            return Ok(path.clone());
+        }
+        if discovered.len() == 1 {
+            return Ok(discovered[0].1.clone());
+        }
+        return Err(anyhow!(
+            "Skill '{}' was not found in installer output. Available IDs: {}",
+            requested,
+            available.join(", ")
+        ));
+    }
+
+    if discovered.len() == 1 {
+        return Ok(discovered[0].1.clone());
+    }
+
+    Err(anyhow!(
+        "Multiple skills were produced. Provide a skill ID. Available IDs: {}",
+        available.join(", ")
+    ))
 }
 
 fn install_skill_from_source_into_dir(
     dest_root: &Path,
     source: &str,
     skill_id: &str,
-    git_ref: &str,
-    repo_path: &str,
     force: bool,
 ) -> Result<Skill> {
+    validate_skill_install_request(source, skill_id)?;
+
     let tmp_root = std::env::temp_dir().join(format!("ship-skill-install-{}", crate::gen_nanoid()));
     fs::create_dir_all(&tmp_root)?;
     struct CleanupGuard(PathBuf);
@@ -414,39 +609,14 @@ fn install_skill_from_source_into_dir(
     }
     let _cleanup = CleanupGuard(tmp_root.clone());
 
-    let cloned_repo = tmp_root.join("repo");
-    let resolved_source = resolve_repo_source(source);
-    let mut clone_cmd = ProcessCommand::new("git");
-    clone_cmd
-        .arg("clone")
-        .arg("--depth")
-        .arg("1")
-        .arg("--branch")
-        .arg(git_ref)
-        .arg(&resolved_source)
-        .arg(&cloned_repo);
-    let clone_output = clone_cmd
-        .output()
-        .with_context(|| "Failed to run `git clone` while installing skill")?;
+    let install_workspace = tmp_root.join("workspace");
+    let install_home = tmp_root.join("home");
+    fs::create_dir_all(&install_workspace)?;
+    fs::create_dir_all(&install_home)?;
 
-    if !clone_output.status.success() {
-        return Err(anyhow!(
-            "Failed to clone '{}' (ref '{}'): {}",
-            resolved_source,
-            git_ref,
-            String::from_utf8_lossy(&clone_output.stderr).trim()
-        ));
-    }
+    run_skills_install_command(source, skill_id, &install_workspace, &install_home)?;
 
-    let search_root = cloned_repo.join(repo_path);
-    if !search_root.exists() || !search_root.is_dir() {
-        return Err(anyhow!(
-            "repo-path '{}' does not exist in cloned repository",
-            repo_path
-        ));
-    }
-
-    let source_dir = find_skill_source_dir(&search_root, skill_id)?;
+    let source_dir = find_skill_source_dir(&tmp_root, skill_id)?;
     let source_skill = parse_skill(&source_dir)?;
 
     fs::create_dir_all(dest_root)?;
@@ -470,28 +640,21 @@ pub fn install_skill_from_source(
     project_dir: Option<&Path>,
     source: &str,
     skill_id: &str,
-    git_ref: Option<&str>,
-    repo_path: Option<&str>,
+    _git_ref: Option<&str>,
+    _repo_path: Option<&str>,
     scope: SkillInstallScope,
     force: bool,
 ) -> Result<Skill> {
-    let git_ref = git_ref.unwrap_or("main");
-    let repo_path = repo_path.unwrap_or(".");
-
     match scope {
         SkillInstallScope::User => {
             let dest_root = ensure_user_skills_storage()?;
-            install_skill_from_source_into_dir(
-                &dest_root, source, skill_id, git_ref, repo_path, force,
-            )
+            install_skill_from_source_into_dir(&dest_root, source, skill_id, force)
         }
         SkillInstallScope::Project => {
             let project_dir =
                 project_dir.ok_or_else(|| anyhow!("Project scope requires project_dir"))?;
             let dest_root = ensure_project_skills_storage(project_dir)?;
-            let installed = install_skill_from_source_into_dir(
-                &dest_root, source, skill_id, git_ref, repo_path, force,
-            )?;
+            let installed = install_skill_from_source_into_dir(&dest_root, source, skill_id, force)?;
 
             let mut config = crate::config::get_config(Some(project_dir.to_path_buf()))?;
             if !config.agent.skills.contains(&installed.id) {
@@ -686,74 +849,14 @@ pub fn delete_user_skill(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink as symlink_file;
     use tempfile::tempdir;
-
-    fn init_git_repo(path: &Path) -> Result<()> {
-        let init = Command::new("git")
-            .args(["init", "-b", "main"])
-            .current_dir(path)
-            .output()?;
-        if !init.status.success() {
-            return Err(anyhow!(
-                "git init failed: {}",
-                String::from_utf8_lossy(&init.stderr).trim()
-            ));
-        }
-
-        let email = Command::new("git")
-            .args(["config", "user.email", "test@ship.dev"])
-            .current_dir(path)
-            .output()?;
-        if !email.status.success() {
-            return Err(anyhow!(
-                "git config user.email failed: {}",
-                String::from_utf8_lossy(&email.stderr).trim()
-            ));
-        }
-        let name = Command::new("git")
-            .args(["config", "user.name", "Ship Test"])
-            .current_dir(path)
-            .output()?;
-        if !name.status.success() {
-            return Err(anyhow!(
-                "git config user.name failed: {}",
-                String::from_utf8_lossy(&name.stderr).trim()
-            ));
-        }
-        Ok(())
-    }
-
-    fn commit_all(path: &Path, message: &str) -> Result<()> {
-        let add = Command::new("git")
-            .args(["add", "."])
-            .current_dir(path)
-            .output()?;
-        if !add.status.success() {
-            return Err(anyhow!(
-                "git add failed: {}",
-                String::from_utf8_lossy(&add.stderr).trim()
-            ));
-        }
-
-        let commit = Command::new("git")
-            .args(["commit", "-m", message])
-            .current_dir(path)
-            .output()?;
-        if !commit.status.success() {
-            return Err(anyhow!(
-                "git commit failed: {}",
-                String::from_utf8_lossy(&commit.stderr).trim()
-            ));
-        }
-        Ok(())
-    }
 
     #[test]
     fn create_and_get_round_trip() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         let s = create_skill(
             &project_dir,
             "review",
@@ -775,51 +878,40 @@ mod tests {
     }
 
     #[test]
-    fn rejects_legacy_skill_format_without_skill_md() -> Result<()> {
+    fn rejects_invalid_skill_dir_without_skill_md() -> Result<()> {
         let tmp = tempdir()?;
-        let legacy_dir = skill_dir(tmp.path(), "legacy-skill");
-        fs::create_dir_all(&legacy_dir)?;
+        let invalid_dir = skill_dir(tmp.path(), "broken-skill");
+        fs::create_dir_all(&invalid_dir)?;
         write_atomic(
-            &legacy_dir.join("skill.toml"),
-            "id = \"legacy-skill\"\nname = \"Legacy Skill\"\n".to_string(),
+            &invalid_dir.join("skill.toml"),
+            "id = \"broken-skill\"\nname = \"Broken Skill\"\n".to_string(),
         )?;
-        write_atomic(&legacy_dir.join("index.md"), "legacy body".to_string())?;
-        let err = get_skill(tmp.path(), "legacy-skill").expect_err("expected parse failure");
+        write_atomic(&invalid_dir.join("index.md"), "broken body".to_string())?;
+        let err = get_skill(tmp.path(), "broken-skill").expect_err("expected parse failure");
         assert!(err.to_string().contains("Missing SKILL.md"));
         Ok(())
     }
 
+    #[cfg(unix)]
     #[test]
-    fn migrates_legacy_repo_local_skill_storage_to_global_project_storage() -> Result<()> {
+    fn find_skill_source_dir_accepts_symlinked_skill_md() -> Result<()> {
         let tmp = tempdir()?;
-        let legacy_skill_dir = tmp
-            .path()
-            .join("agents")
-            .join("skills")
-            .join("legacy-migrated");
-        fs::create_dir_all(&legacy_skill_dir)?;
+        let source_file = tmp.path().join("source-file.md");
         write_atomic(
-            &legacy_skill_dir.join("SKILL.md"),
+            &source_file,
             r#"---
-name: legacy-migrated
-description: Legacy repo-local skill that should be migrated.
-metadata:
-  display_name: Legacy Migrated
+name: linked-skill
+description: Linked skill
 ---
-
-Legacy body.
 "#,
         )?;
 
-        let skills = list_skills(tmp.path())?;
-        assert_eq!(skills.len(), 1);
-        assert_eq!(skills[0].id, "legacy-migrated");
-        assert_eq!(skills[0].name, "Legacy Migrated");
-        assert!(
-            !legacy_skill_dir.exists(),
-            "legacy skill dir should be moved"
-        );
-        assert!(skill_dir(tmp.path(), "legacy-migrated").exists());
+        let symlink_parent = tmp.path().join("workspace/.claude/skills/linked-skill");
+        fs::create_dir_all(&symlink_parent)?;
+        symlink_file(&source_file, symlink_parent.join("SKILL.md"))?;
+
+        let discovered = find_skill_source_dir(tmp.path(), "linked-skill")?;
+        assert_eq!(discovered, symlink_parent);
         Ok(())
     }
 
@@ -925,11 +1017,12 @@ Body.
     #[test]
     fn list_returns_all_skills() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "a", "A", "content a")?;
         create_skill(&project_dir, "b", "B", "content b")?;
-        assert_eq!(list_skills(&project_dir)?.len(), 2);
+        let skills = list_skills(&project_dir)?;
+        assert!(skills.iter().any(|s| s.id == "a"));
+        assert!(skills.iter().any(|s| s.id == "b"));
         Ok(())
     }
 
@@ -943,8 +1036,7 @@ Body.
     #[test]
     fn update_skill_persists() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "s", "Old", "old")?;
         update_skill(&project_dir, "s", Some("New"), Some("new $ARGUMENTS"))?;
         let reloaded = get_skill(&project_dir, "s")?;
@@ -956,8 +1048,7 @@ Body.
     #[test]
     fn delete_removes_skill() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "gone", "Gone", "x")?;
         delete_skill(&project_dir, "gone")?;
         assert!(get_skill(&project_dir, "gone").is_err());
@@ -967,106 +1058,134 @@ Body.
     #[test]
     fn duplicate_rejected() -> Result<()> {
         let tmp = tempdir()?;
-        let project_dir = tmp.path().join(".ship");
-        fs::create_dir_all(&project_dir)?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
         create_skill(&project_dir, "dup", "Dup", "x")?;
         assert!(create_skill(&project_dir, "dup", "Dup2", "y").is_err());
         Ok(())
     }
 
     #[test]
-    fn install_skill_from_local_repo_into_user_scope() -> Result<()> {
-        let repo = tempdir()?;
-        init_git_repo(repo.path())?;
+    fn migrates_legacy_global_project_skills_into_repo_local_storage() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_dir = crate::project::init_project(tmp.path().to_path_buf())?;
 
-        let source_skill = repo
-            .path()
-            .join("skills")
-            .join("vercel-react-best-practices");
-        fs::create_dir_all(&source_skill)?;
+        let legacy_skill_dir =
+            crate::project::legacy_project_skills_dir(&project_dir).join("legacy-skill");
+        fs::create_dir_all(&legacy_skill_dir)?;
         write_atomic(
-            &source_skill.join("SKILL.md"),
+            &legacy_skill_dir.join("SKILL.md"),
             r#"---
-name: vercel-react-best-practices
-description: React guidance from Vercel best practices.
+name: legacy-skill
+description: Legacy skill migrated into repo-local project storage.
 metadata:
-  display_name: Vercel React Best Practices
+  display_name: Legacy Skill
   source: imported
 ---
 
-Prefer composition and server-first rendering defaults.
+Legacy body.
 "#,
         )?;
-        commit_all(repo.path(), "seed skill")?;
 
-        let dest = tempdir()?;
-        let installed = install_skill_from_source_into_dir(
-            dest.path(),
-            repo.path()
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid repo path"))?,
-            "vercel-react-best-practices",
-            "main",
-            "skills",
-            false,
-        )?;
-        assert_eq!(installed.id, "vercel-react-best-practices");
-        assert_eq!(installed.name, "Vercel React Best Practices");
+        let skills = list_skills(&project_dir)?;
+        assert!(skills.iter().any(|skill| skill.id == "legacy-skill"));
         assert!(
-            dest.path()
-                .join("vercel-react-best-practices")
+            crate::project::skills_dir(&project_dir)
+                .join("legacy-skill")
                 .join("SKILL.md")
                 .is_file()
+        );
+        assert!(
+            !crate::project::legacy_project_skills_dir(&project_dir)
+                .join("legacy-skill")
+                .exists()
         );
         Ok(())
     }
 
     #[test]
-    fn install_skill_requires_force_when_destination_exists() -> Result<()> {
-        let repo = tempdir()?;
-        init_git_repo(repo.path())?;
-
-        let source_skill = repo.path().join("skills").join("skill-creator");
-        fs::create_dir_all(&source_skill)?;
-        write_atomic(
-            &source_skill.join("SKILL.md"),
-            r#"---
-name: skill-creator
-description: Create robust Agent Skills.
-metadata:
-  display_name: Skill Creator
-  source: imported
----
-
-Create and validate skills.
-"#,
+    fn install_skill_accepts_skills_command_source() -> Result<()> {
+        validate_skill_install_request(
+            "npx -y skills add vercel-labs/agent-skills@vercel-react-best-practices",
+            "vercel-react-best-practices",
         )?;
-        commit_all(repo.path(), "seed skill")?;
-
-        let dest = tempdir()?;
-        install_skill_from_source_into_dir(
-            dest.path(),
-            repo.path()
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid repo path"))?,
-            "skill-creator",
-            "main",
-            "skills",
-            false,
-        )?;
-
-        let err = install_skill_from_source_into_dir(
-            dest.path(),
-            repo.path()
-                .to_str()
-                .ok_or_else(|| anyhow!("invalid repo path"))?,
-            "skill-creator",
-            "main",
-            "skills",
-            false,
-        )
-        .expect_err("install should fail without force");
-        assert!(err.to_string().contains("already exists"));
         Ok(())
+    }
+
+    #[test]
+    fn install_skill_accepts_skills_command_without_explicit_id() -> Result<()> {
+        validate_skill_install_request(
+            "npx -y skills add vercel-labs/agent-skills@vercel-react-best-practices",
+            "",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn install_skill_accepts_skill_id_source() -> Result<()> {
+        validate_skill_install_request(
+            "vercel-labs/agent-skills@vercel-react-best-practices",
+            "vercel-react-best-practices",
+        )?;
+        Ok(())
+    }
+
+    #[test]
+    fn parse_skills_install_source_extracts_package_and_skill_from_command() -> Result<()> {
+        let (package, skill) = parse_skills_install_source(
+            "npx -y skills add vercel-labs/agent-skills --skill web-design-guidelines --yes",
+        )?;
+        assert_eq!(package, "vercel-labs/agent-skills");
+        assert_eq!(skill.as_deref(), Some("web-design-guidelines"));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_skills_install_source_extracts_shorthand_skill() -> Result<()> {
+        let (package, skill) =
+            parse_skills_install_source("vercel-labs/agent-skills@web-design-guidelines")?;
+        assert_eq!(package, "vercel-labs/agent-skills");
+        assert_eq!(skill.as_deref(), Some("web-design-guidelines"));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_skills_install_source_keeps_plain_source() -> Result<()> {
+        let (package, skill) = parse_skills_install_source("vercel-labs/agent-skills")?;
+        assert_eq!(package, "vercel-labs/agent-skills");
+        assert_eq!(skill, None);
+        Ok(())
+    }
+
+    #[test]
+    fn install_skill_rejects_non_skills_command_source() {
+        let err = validate_skill_install_request("curl https://example.com/skill.sh", "skill-creator")
+            .expect_err("non-skills command should be rejected");
+        assert!(err.to_string().contains("Unsupported source"));
+    }
+
+    #[test]
+    fn install_skill_rejects_shorthand_source_without_id() {
+        let err = validate_skill_install_request("vercel-react-best-practices", "")
+            .expect_err("shorthand source without id should be rejected");
+        assert!(err.to_string().contains("Skill ID is required"));
+    }
+
+    #[test]
+    fn install_skill_rejects_git_url_source() {
+        let err = validate_skill_install_request(
+            "https://github.com/example/skills.git",
+            "skill-creator",
+        )
+        .expect_err("git URL sources should be rejected");
+        assert!(err.to_string().contains("Git URL sources are not supported"));
+    }
+
+    #[test]
+    fn skills_command_detector_requires_add_and_skills_tokens() {
+        assert!(looks_like_skills_cli_command(
+            "npx -y skills add vercel-labs/agent-skills@vercel-react-best-practices"
+        ));
+        assert!(!looks_like_skills_cli_command("npx -y skills list"));
+        assert!(!looks_like_skills_cli_command("echo skills add"));
     }
 }

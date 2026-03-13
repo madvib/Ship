@@ -12,6 +12,7 @@ import {
     Badge,
     DatePicker,
     FacetedFilter,
+    Input,
     Tooltip,
     TooltipTrigger,
     TooltipContent,
@@ -25,12 +26,14 @@ import { MetadataPopover } from '../common/MetadataPopover';
 interface ReleaseHeaderMetadataProps {
     version: string;
     status: string;
+    supported?: boolean;
     targetDate?: string;
     tags?: string[];
     isEditing: boolean;
     onUpdate: (updates: {
         version?: string;
         status?: string;
+        supported?: boolean;
         target_date?: string;
         tags?: string[];
     }) => void;
@@ -47,6 +50,7 @@ const STATUS_OPTIONS = [
 export function ReleaseHeaderMetadata({
     version,
     status,
+    supported = false,
     targetDate,
     tags = [],
     isEditing,
@@ -59,10 +63,19 @@ export function ReleaseHeaderMetadata({
 
     return (
         <BaseMetadataHeader>
-            {/* Version Badge */}
+            {/* Version */}
             <div className="flex items-center gap-1.5 shrink-0">
                 <Package className="size-3.5" />
-                <span className="font-bold text-foreground">{version}</span>
+                {isEditing ? (
+                    <Input
+                        value={version}
+                        onChange={(event) => onUpdate({ version: event.target.value })}
+                        className="h-7 w-[11rem] border-border/40 bg-transparent px-2 text-xs font-semibold"
+                        placeholder="v0.1.1-alpha"
+                    />
+                ) : (
+                    <span className="font-bold text-foreground">{version}</span>
+                )}
             </div>
 
             {/* Status Popover */}
@@ -102,6 +115,55 @@ export function ReleaseHeaderMetadata({
                     </div>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">View and manage release status.</TooltipContent>
+            </Tooltip>
+
+            {/* Support Status */}
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <div>
+                        <MetadataPopover
+                            icon={supported ? CheckCircle2 : Circle}
+                            label={supported ? 'Supported' : 'Unsupported'}
+                            title="Support Status"
+                            triggerClassName={cn(
+                                supported
+                                    ? "[&_svg]:text-emerald-500"
+                                    : "[&_svg]:text-muted-foreground"
+                            )}
+                            contentClassName="w-48 p-2"
+                        >
+                            <div className="space-y-1">
+                                <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    className={cn(
+                                        "w-full justify-start gap-2 h-8 font-normal",
+                                        supported && "bg-accent text-accent-foreground"
+                                    )}
+                                    onClick={() => isEditing && onUpdate({ supported: true })}
+                                    disabled={!isEditing}
+                                >
+                                    <CheckCircle2 className="size-3.5" />
+                                    Supported
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="xs"
+                                    className={cn(
+                                        "w-full justify-start gap-2 h-8 font-normal",
+                                        !supported && "bg-accent text-accent-foreground"
+                                    )}
+                                    onClick={() => isEditing && onUpdate({ supported: false })}
+                                    disabled={!isEditing}
+                                >
+                                    <Circle className="size-3.5" />
+                                    Unsupported
+                                </Button>
+                            </div>
+                        </MetadataPopover>
+                    </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Set maintenance/support intent for this release.</TooltipContent>
             </Tooltip>
 
             {/* Date Picker */}

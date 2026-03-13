@@ -1,24 +1,22 @@
 use anyhow::Result;
-use runtime::project::{get_global_dir, get_project_dir};
+use runtime::project::{get_global_dir, get_project_dir, resolve_project_ship_dir};
 use runtime::workspace::set_workspace_active_mode;
 use runtime::{
-    CreateWorkspaceRequest, EndWorkspaceSessionRequest, WorkspaceStatus, WorkspaceType,
+    CreateWorkspaceRequest, EndWorkspaceSessionRequest, ShipWorkspaceKind, WorkspaceStatus,
     activate_workspace, add_status, autodetect_providers, create_workspace, end_workspace_session,
     get_active_workspace_session, get_config, get_git_config, get_project_statuses, get_workspace,
-    is_category_committed, list_mcp_servers, list_providers, list_workspace_sessions,
-    list_workspaces, log_action, log_action_by, migrate_global_state, migrate_json_config_file,
-    migrate_project_state, remove_status, repair_workspace, set_category_committed,
-    start_workspace_session, sync_workspace, transition_workspace_status,
+    get_workspace_provider_matrix, is_category_committed, list_mcp_servers, list_providers,
+    list_workspace_sessions, list_workspaces, log_action, migrate_global_state,
+    migrate_json_config_file, migrate_project_state, record_workspace_session_progress,
+    remove_status, repair_workspace, set_category_committed, start_workspace_session,
+    sync_workspace, transition_workspace_status,
 };
 use ship_module_git::{install_hooks, on_post_checkout, write_root_gitignore};
-use ship_module_project::ops::adr::{create_adr, find_adr_path, list_adrs, move_adr};
+use ship_module_project::ops::adr::{create_adr, get_adr_by_id, list_adrs, move_adr};
 use ship_module_project::ops::feature::{
     create_feature, delete_feature, ensure_feature_documentation, feature_done, feature_start,
     get_feature_by_id, get_feature_documentation, list_features, sync_feature_docs_after_session,
-    update_feature, update_feature_documentation,
-};
-use ship_module_project::ops::issue::{
-    create_issue, get_issue_by_id, list_issues, move_issue_with_from,
+    update_feature, update_feature_content, update_feature_documentation,
 };
 use ship_module_project::ops::note::{
     create_note, get_note_by_id, list_notes, update_note_content,
@@ -26,22 +24,26 @@ use ship_module_project::ops::note::{
 use ship_module_project::ops::release::{
     create_release, get_release_by_id, list_releases, update_release,
 };
-use ship_module_project::ops::spec::{create_spec, get_spec_by_id, list_specs, update_spec};
+
 use ship_module_project::{
-    ADR, AdrStatus, FeatureDocStatus, FeatureStatus, ISSUE_STATUSES, IssueStatus, NoteScope,
-    import_adrs_from_files, import_features_from_files, import_issues_from_files,
-    import_notes_from_files, import_releases_from_files, import_specs_from_files,
+    AdrStatus, FeatureDocStatus, FeatureStatus, NoteScope, import_adrs_from_files,
+    import_features_from_files, import_notes_from_files, import_releases_from_files,
     init_demo_project, init_project, list_registered_projects, register_project, rename_project,
     unregister_project,
 };
-use std::collections::HashMap;
 use std::env;
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 
 use crate::surface::*;
 
 pub fn handle_init_command(target: cli_framework::InitTarget) -> Result<()> {
+    let mut project_name = target.project_name.clone();
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        project_name = prompt_with_default("Project name", &project_name)?;
+    }
+
     let ship_path = init_project(target.path.clone())?;
     if let Err(err) = install_hooks(&target.path.join(".git")) {
         eprintln!(
@@ -54,7 +56,7 @@ pub fn handle_init_command(target: cli_framework::InitTarget) -> Result<()> {
         eprintln!("[ship] warning: failed to update root .gitignore: {}", err);
     }
 
-    let tracked = match register_project(target.project_name.clone(), target.path.clone()) {
+    let tracked = match register_project(project_name.clone(), target.path.clone()) {
         Ok(()) => true,
         Err(err) => {
             eprintln!(
@@ -63,7 +65,7 @@ pub fn handle_init_command(target: cli_framework::InitTarget) -> Result<()> {
             );
             eprintln!(
                 "[ship] run `ship projects track {} {}` later to add it to the global registry",
-                target.project_name,
+                project_name,
                 target.path.display()
             );
             false
@@ -156,10 +158,20 @@ pub fn append_doctor_checks(report: &mut cli_framework::DoctorReport) -> Result<
             match ship_mcp {
                 Some(server)
                     if server.command == "ship"
-                        && server.args.len() >= 1
+                        && server.args.len() >= 2
                         && server.args[0] == "mcp" =>
                 {
-                    report.ok("MCP server ship", "registered with `ship mcp` command");
+                    if server.args[1] == "serve" {
+                        report.ok("MCP server ship", "registered with `ship mcp serve` command");
+                    } else {
+                        report.warn(
+                            "MCP server ship",
+                            format!(
+                                "registration looks outdated; expected `ship mcp serve`, got: {} {:?}",
+                                server.command, server.args
+                            ),
+                        );
+                    }
                 }
                 Some(server) => report.warn(
                     "MCP server ship",
@@ -177,53 +189,31 @@ pub fn append_doctor_checks(report: &mut cli_framework::DoctorReport) -> Result<
 }
 
 pub fn handle_cli(cli: Cli) -> Result<()> {
-    let _ = ensure_user_notes_imported_once(false, false);
-    if let Ok(project_dir) = get_project_dir(None) {
-        let _ = ensure_project_imported_once(&project_dir, false, false);
+    // Keep file import off hot paths where project data isn't needed.
+    let skip_auto_import = matches!(
+        &cli.command,
+        None | Some(
+            Commands::Init { .. }
+                | Commands::Doctor
+                | Commands::Version
+                | Commands::Ui { .. }
+                | Commands::Projects { .. }
+                | Commands::Providers { .. }
+                | Commands::Mcp { .. }
+                | Commands::Hooks { .. }
+        )
+    );
+    if !skip_auto_import {
+        let _ = ensure_user_notes_imported_once(false, false);
+        if let Ok(project_dir) = get_project_dir(None) {
+            let _ = ensure_project_imported_once(&project_dir, false, false);
+        }
     }
 
     match cli.command {
         Some(Commands::Init { .. } | Commands::Doctor | Commands::Version) => anyhow::bail!(
             "core command should be handled by cli-framework before app command dispatch"
         ),
-        Some(Commands::Issue { action }) => {
-            let project_dir = get_project_dir_cli()?;
-            match action {
-                IssueCommands::Create { title, description } => {
-                    let issue = create_issue(
-                        &project_dir,
-                        &title,
-                        &description,
-                        IssueStatus::Backlog,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )?;
-                    println!("Issue created: {} ({})", issue.file_name, issue.id);
-                }
-                IssueCommands::List => {
-                    let issues = list_issues(&project_dir)?;
-                    for issue in issues {
-                        println!("[{}] {}", issue.status, issue.file_name);
-                    }
-                }
-                IssueCommands::Move {
-                    file_name,
-                    from,
-                    to,
-                } => {
-                    let from_status = from
-                        .parse::<IssueStatus>()
-                        .map_err(|_| anyhow::anyhow!("Invalid issue status: {}", from))?;
-                    let to_status = to
-                        .parse::<IssueStatus>()
-                        .map_err(|_| anyhow::anyhow!("Invalid issue status: {}", to))?;
-                    move_issue_with_from(&project_dir, &file_name, from_status, to_status)?;
-                    println!("Moved {} from {} to {}", file_name, from, to);
-                }
-            }
-        }
         Some(Commands::Adr { action }) => {
             let project_dir = get_project_dir_cli()?;
             match action {
@@ -246,20 +236,40 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     }
                 }
                 AdrCommands::Get { file_name } => {
-                    let path = find_adr_path(&project_dir, &file_name)?;
-                    let content = std::fs::read_to_string(path)?;
-                    println!("{}", content);
+                    let reference = file_name.trim();
+                    let mut resolved =
+                        get_adr_by_id(&project_dir, reference.trim_end_matches(".md"))
+                            .ok()
+                            .map(|entry| entry.id);
+                    if resolved.is_none() {
+                        resolved = list_adrs(&project_dir)?
+                            .into_iter()
+                            .find(|entry| entry.file_name.eq_ignore_ascii_case(reference))
+                            .map(|entry| entry.id);
+                    }
+                    let id =
+                        resolved.ok_or_else(|| anyhow::anyhow!("ADR not found: {}", file_name))?;
+                    let entry = get_adr_by_id(&project_dir, &id)?;
+                    println!("{}", entry.adr.to_markdown()?);
                 }
                 AdrCommands::Move { file_name, status } => {
                     let new_status = status
                         .parse::<AdrStatus>()
                         .map_err(|_| anyhow::anyhow!("Invalid ADR status: {}", status))?;
-                    // Find the ADR by reading the file and extracting its id.
-                    let path = find_adr_path(&project_dir, &file_name)?;
-                    let content = std::fs::read_to_string(&path)?;
-                    let adr = ADR::from_markdown(&content)
-                        .map_err(|_| anyhow::anyhow!("Could not parse ADR file: {}", file_name))?;
-                    let entry = move_adr(&project_dir, &adr.metadata.id, new_status.clone())?;
+                    let reference = file_name.trim();
+                    let mut resolved =
+                        get_adr_by_id(&project_dir, reference.trim_end_matches(".md"))
+                            .ok()
+                            .map(|entry| entry.id);
+                    if resolved.is_none() {
+                        resolved = list_adrs(&project_dir)?
+                            .into_iter()
+                            .find(|entry| entry.file_name.eq_ignore_ascii_case(reference))
+                            .map(|entry| entry.id);
+                    }
+                    let id =
+                        resolved.ok_or_else(|| anyhow::anyhow!("ADR not found: {}", file_name))?;
+                    let entry = move_adr(&project_dir, &id, new_status.clone())?;
                     println!("Moved {} to {} (id: {})", file_name, new_status, entry.id);
                 }
             }
@@ -324,15 +334,11 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 SkillCommands::Install {
                     source,
                     id,
-                    git_ref,
-                    repo_path,
                     scope,
                     force,
                 } => cli_framework::SkillAction::Install {
                     source,
                     id,
-                    git_ref,
-                    repo_path,
                     scope: cli_framework::parse_skill_write_scope(&scope)?,
                     force,
                 },
@@ -372,38 +378,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             };
             cli_framework::handle_skill_action(action, project_dir.as_deref())?;
         }
-        Some(Commands::Spec { action }) => {
-            let project_dir = get_project_dir_cli()?;
-            match action {
-                SpecCommands::Create {
-                    title,
-                    content,
-                    workspace,
-                } => {
-                    let body = content.unwrap_or_default();
-                    let spec = create_spec(&project_dir, &title, &body, workspace.as_deref())?;
-                    println!("Spec created: {} ({})", spec.file_name, spec.id);
-                }
-                SpecCommands::List => {
-                    let mut specs = list_specs(&project_dir)?;
-                    specs.sort_by(|a, b| b.spec.metadata.updated.cmp(&a.spec.metadata.updated));
-                    if specs.is_empty() {
-                        println!("No specs found.");
-                    } else {
-                        for spec in specs {
-                            println!(
-                                "[{}] {} ({})",
-                                spec.status, spec.spec.metadata.title, spec.file_name
-                            );
-                        }
-                    }
-                }
-                SpecCommands::Get { file_name } => {
-                    let spec = get_spec_by_id(&project_dir, &file_name)?;
-                    println!("{}", spec.spec.to_markdown()?);
-                }
-            }
-        }
+
         Some(Commands::Release { action }) => {
             let project_dir = get_project_dir_cli()?;
             match action {
@@ -429,23 +404,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     let version = file_name.trim_end_matches(".md");
                     let entry = get_release_by_id(&project_dir, version)
                         .map_err(|_| anyhow::anyhow!("Release not found: {}", file_name))?;
-                    let release_path = {
-                        let primary =
-                            runtime::project::releases_dir(&project_dir).join(&entry.file_name);
-                        if primary.exists() {
-                            primary
-                        } else {
-                            let legacy = runtime::project::upcoming_releases_dir(&project_dir)
-                                .join(&entry.file_name);
-                            if legacy.exists() {
-                                legacy
-                            } else {
-                                anyhow::bail!("Release file not found: {}", entry.file_name);
-                            }
-                        }
-                    };
-                    let content = std::fs::read_to_string(release_path)?;
-                    println!("{}", content);
+                    println!("{}", entry.release.to_markdown()?);
                 }
                 ReleaseCommands::Update { file_name, content } => {
                     let version = file_name.trim_end_matches(".md");
@@ -463,7 +422,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     title,
                     content,
                     release_id,
-                    spec_id,
                     branch,
                 } => {
                     let body = content.unwrap_or_default();
@@ -472,7 +430,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         &title,
                         &body,
                         release_id.as_deref(),
-                        spec_id.as_deref(),
                         branch.as_deref(),
                     )?;
                     println!("Feature created: {}", entry.path);
@@ -505,12 +462,24 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 }
                 FeatureCommands::Get { id } => {
                     let entry = get_feature_by_id(&project_dir, &id)?;
-                    println!("{}", entry.feature.to_markdown()?);
+                    let m = &entry.feature.metadata;
+                    println!("id = \"{}\"", m.id);
+                    println!("title = \"{}\"", m.title);
+                    println!("status = \"{}\"", entry.status);
+                    if let Some(ref branch) = m.branch {
+                        println!("branch = \"{}\"", branch);
+                    }
+                    if let Some(ref release_id) = m.release_id {
+                        println!("release_id = \"{}\"", release_id);
+                    }
+
+                    println!("updated = \"{}\"", m.updated);
+                    if !entry.feature.body.trim().is_empty() {
+                        println!("\n---\n\n{}", entry.feature.body.trim());
+                    }
                 }
                 FeatureCommands::Update { id, content } => {
-                    let mut entry = get_feature_by_id(&project_dir, &id)?;
-                    entry.feature.body = content;
-                    update_feature(&project_dir, &id, entry.feature)?;
+                    update_feature_content(&project_dir, &id, &content)?;
                     println!("Updated feature: {}", id);
                 }
                 FeatureCommands::Start { id, branch } => {
@@ -686,13 +655,18 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     workspace_type,
                     feature,
                     feature_title,
-                    spec,
-                    release,
+                    environment_id,
+                    target,
                     mode,
                     activate,
                     checkout,
                     worktree,
                     worktree_path,
+                    start_session,
+                    goal,
+                    provider,
+                    session_mode,
+                    no_input,
                 } => {
                     if worktree && checkout {
                         anyhow::bail!("--worktree and --checkout cannot be used together");
@@ -703,26 +677,92 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
 
                     let parsed_workspace_type = workspace_type
                         .as_deref()
-                        .map(str::parse::<WorkspaceType>)
+                        .map(str::parse::<ShipWorkspaceKind>)
                         .transpose()?;
                     let is_feature_workspace = parsed_workspace_type
-                        == Some(WorkspaceType::Feature)
+                        == Some(ShipWorkspaceKind::Feature)
                         || (parsed_workspace_type.is_none() && branch.starts_with("feature/"));
                     let resolved_worktree_path = if worktree {
                         Some(worktree_path.unwrap_or_else(|| {
                             let b = branch
                                 .trim_start_matches("feature/")
-                                .trim_start_matches("hotfix/");
+                                .trim_start_matches("patch/");
                             format!("../{}", b)
                         }))
                     } else {
                         None
                     };
+                    let mut target = target;
+                    let mut start_session = start_session;
+                    let mut goal = goal;
+                    let mut provider = provider;
+                    let mut session_mode = session_mode;
+
+                    let interactive =
+                        !no_input && io::stdin().is_terminal() && io::stdout().is_terminal();
+                    if interactive {
+                        if target.is_none() {
+                            let releases = list_releases(&project_dir)?;
+                            if !releases.is_empty() {
+                                println!("Available targets (from releases):");
+                                for entry in releases.iter().take(8) {
+                                    println!(
+                                        "  - {} ({})",
+                                        entry.release.metadata.version, entry.id
+                                    );
+                                }
+                                if releases.len() > 8 {
+                                    println!("  ... and {} more", releases.len() - 8);
+                                }
+                                target = prompt_optional("Attach target id (Enter to skip): ")?;
+                            }
+                        }
+
+                        if !start_session
+                            && goal.is_none()
+                            && provider.is_none()
+                            && session_mode.is_none()
+                        {
+                            start_session = prompt_yes_no("Start a session now? [Y/n]: ", true)?;
+                        }
+
+                        if start_session
+                            || goal.is_some()
+                            || provider.is_some()
+                            || session_mode.is_some()
+                        {
+                            if goal.is_none() {
+                                goal = prompt_optional("Session goal (optional): ")?;
+                            }
+                            if provider.is_none() {
+                                let connected: Vec<String> = list_providers(&project_dir)?
+                                    .into_iter()
+                                    .filter(|entry| entry.enabled)
+                                    .map(|entry| entry.id)
+                                    .collect();
+                                if !connected.is_empty() {
+                                    println!("Connected providers: {}", connected.join(", "));
+                                }
+                                provider = prompt_optional("Session provider (Enter for auto): ")?;
+                            }
+                            if session_mode.is_none() {
+                                session_mode =
+                                    prompt_optional("Session mode id (Enter to skip): ")?;
+                            }
+                        }
+                    }
 
                     if worktree {
                         let path = resolved_worktree_path
                             .as_deref()
                             .ok_or_else(|| anyhow::anyhow!("Worktree path resolution failed"))?;
+                        let hooks_disabled_dir = project_dir
+                            .join("generated")
+                            .join("runtime")
+                            .join("hooks-disabled");
+                        std::fs::create_dir_all(&hooks_disabled_dir)?;
+                        let hooks_disabled_cfg =
+                            format!("core.hooksPath={}", hooks_disabled_dir.display());
                         let exists = ProcessCommand::new("git")
                             .args(["rev-parse", "--verify", &branch])
                             .current_dir(&project_root)
@@ -730,7 +770,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                             .map(|output| output.status.success())
                             .unwrap_or(false);
 
-                        let mut args = vec!["worktree", "add"];
+                        let mut args = vec!["-c", hooks_disabled_cfg.as_str(), "worktree", "add"];
                         if !exists {
                             args.push("-b");
                             args.push(&branch);
@@ -795,9 +835,9 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                             branch: branch.clone(),
                             workspace_type: parsed_workspace_type,
                             status: desired_status,
+                            environment_id,
                             feature_id: resolved_feature_id,
-                            spec_id: spec,
-                            release_id: release,
+                            target_id: target,
                             active_mode: mode,
                             is_worktree: Some(worktree),
                             worktree_path: resolved_worktree_path,
@@ -805,9 +845,18 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         },
                     )?;
 
+                    let should_start_session = start_session
+                        || goal.as_ref().is_some()
+                        || provider.as_ref().is_some()
+                        || session_mode.as_ref().is_some();
+
                     if worktree || checkout {
                         workspace = sync_workspace(&project_dir, &branch)?;
                     } else if activate {
+                        workspace = activate_workspace(&project_dir, &branch)?;
+                    }
+
+                    if should_start_session && workspace.status != WorkspaceStatus::Active {
                         workspace = activate_workspace(&project_dir, &branch)?;
                     }
 
@@ -827,6 +876,42 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         workspace.branch,
                         workspace.status
                     );
+
+                    if should_start_session {
+                        let session = start_workspace_session(
+                            &project_dir,
+                            &workspace.branch,
+                            goal,
+                            session_mode,
+                            provider,
+                        )?;
+                        println!(
+                            "Session started: {} [{}] branch={}{}{}{}",
+                            session.id,
+                            session.status,
+                            session.workspace_branch,
+                            session
+                                .mode_id
+                                .as_ref()
+                                .map(|mode| format!(" mode={}", mode))
+                                .unwrap_or_default(),
+                            session
+                                .primary_provider
+                                .as_ref()
+                                .map(|provider| format!(" provider={}", provider))
+                                .unwrap_or_default(),
+                            session
+                                .goal
+                                .as_ref()
+                                .map(|goal| format!(" goal=\"{}\"", goal))
+                                .unwrap_or_default(),
+                        );
+                    } else {
+                        println!(
+                            "Next: ship workspace session start --branch {} --goal \"<goal>\" --provider <id>",
+                            workspace.branch
+                        );
+                    }
                 }
                 WorkspaceCommands::Archive { branch } => {
                     let workspace = transition_workspace_status(
@@ -846,16 +931,11 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         if apply { "applied" } else { "dry-run" }
                     );
                     println!("  workspace updates: {}", report.workspace_updates);
-                    println!("  spec metadata updates: {}", report.spec_updates);
                     println!(
                         "  ambiguous feature links: {}",
                         report.ambiguous_feature_links
                     );
                     for detail in &report.ambiguous_feature_details {
-                        println!("    - {}", detail);
-                    }
-                    println!("  ambiguous spec links: {}", report.ambiguous_spec_links);
-                    for detail in &report.ambiguous_spec_details {
                         println!("    - {}", detail);
                     }
                 }
@@ -900,6 +980,33 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         }
                     }
                 }
+                WorkspaceCommands::Providers { branch, mode } => {
+                    let branch = branch.unwrap_or(current_branch(&project_root)?);
+                    let matrix =
+                        get_workspace_provider_matrix(&project_dir, &branch, mode.as_deref())?;
+                    println!("Workspace provider matrix for {}", matrix.workspace_branch);
+                    println!("  source: {}", matrix.source);
+                    println!("  mode: {}", matrix.mode_id.as_deref().unwrap_or("<none>"));
+                    println!(
+                        "  allowed: {}",
+                        if matrix.allowed_providers.is_empty() {
+                            "none".to_string()
+                        } else {
+                            matrix.allowed_providers.join(",")
+                        }
+                    );
+                    println!(
+                        "  supported: {}",
+                        if matrix.supported_providers.is_empty() {
+                            "none".to_string()
+                        } else {
+                            matrix.supported_providers.join(",")
+                        }
+                    );
+                    if let Some(error) = matrix.resolution_error.as_deref() {
+                        println!("  resolution_error: {}", error);
+                    }
+                }
                 WorkspaceCommands::Session { action } => match action {
                     WorkspaceSessionCommands::Start {
                         branch,
@@ -936,7 +1043,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         branch,
                         summary,
                         updated_feature,
-                        updated_spec,
                     } => {
                         let branch = branch.unwrap_or(current_branch(&project_root)?);
                         let summary_for_docs = summary.clone();
@@ -946,7 +1052,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                             EndWorkspaceSessionRequest {
                                 summary,
                                 updated_feature_ids: updated_feature,
-                                updated_spec_ids: updated_spec,
                             },
                         )?;
                         if !session.updated_feature_ids.is_empty() {
@@ -989,6 +1094,19 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                         } else {
                             for session in sessions {
                                 println!("{}", format_workspace_session(&session));
+                            }
+                        }
+                    }
+                    WorkspaceSessionCommands::Note { note, branch } => {
+                        let branch = branch.unwrap_or(current_branch(&project_root)?);
+                        match get_active_workspace_session(&project_dir, &branch)? {
+                            None => anyhow::bail!(
+                                "No active session for '{}'. Run `ship workspace session start` first.",
+                                branch
+                            ),
+                            Some(_) => {
+                                record_workspace_session_progress(&project_dir, &branch, &note)?;
+                                println!("Logged session note: {}", note);
                             }
                         }
                     }
@@ -1056,7 +1174,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             let project_dir = init_demo_project(abs.clone())?;
             println!("Demo project ready at {}", project_dir.display());
             println!(
-                "Point Ship at it with: SHIP_DIR={} ship issue list",
+                "Point Ship at it with: SHIP_DIR={} ship feature list",
                 project_dir.display()
             );
         }
@@ -1066,12 +1184,12 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 GitCommands::Status => {
                     let git = get_git_config(&project_dir)?;
                     let cats = [
-                        "issues",
                         "releases",
                         "features",
                         "adrs",
                         "specs",
                         "notes",
+                        "vision",
                         "agents",
                         "ship.toml",
                         "templates",
@@ -1179,34 +1297,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                     let found = ghost_issues::mark_promoted(&project_dir, &file, line)?;
                     if found {
                         println!("Marked {}:{} as promoted.", file, line);
-                        // Optionally create an issue
-                        if let Ok(Some(scan)) = ghost_issues::load_last_scan(&project_dir) {
-                            if let Some(g) = scan
-                                .issues
-                                .iter()
-                                .find(|g| g.file == file && g.line == line)
-                            {
-                                let title = g.suggested_title();
-                                let desc = format!(
-                                    "Promoted from `{}:{}` ({}).\n\nOriginal comment: {}",
-                                    g.file,
-                                    g.line,
-                                    g.kind.as_str(),
-                                    g.text.trim()
-                                );
-                                let path = create_issue(
-                                    &project_dir,
-                                    &title,
-                                    &desc,
-                                    IssueStatus::Backlog,
-                                    None,
-                                    None,
-                                    None,
-                                    None,
-                                )?;
-                                println!("Created issue: {}", path.file_name);
-                            }
-                        }
                     } else {
                         println!(
                             "Ghost issue not found at {}:{}. Run `ship ghost scan` first.",
@@ -1222,7 +1312,7 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 ConfigCommands::Status { action } => match action {
                     StatusCommands::List => {
                         let statuses = get_project_statuses(project_dir)?;
-                        println!("Issue statuses:");
+                        println!("Workflow statuses:");
                         for s in statuses {
                             println!("  - {}", s);
                         }
@@ -1275,72 +1365,88 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
             ensure_builtin_plugin_namespaces(&project_dir)?;
             handle_time_command(action, &project_dir)?;
         }
-        Some(Commands::Mcp { action }) => {
-            match action {
-                None | Some(McpCommands::Serve) => {
-                    // Handled by the main unitary binary as it requires async
+        Some(Commands::Mcp { action }) => match action {
+            None | Some(McpCommands::Serve) => {
+                let mut cmd = std::env::current_exe()?;
+                cmd.set_file_name("ship-mcp");
+                if !cmd.exists() {
+                    cmd = PathBuf::from("ship-mcp");
                 }
-                Some(McpCommands::List) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(cli_framework::McpAction::List, &project_dir)?;
-                }
-                Some(McpCommands::Export { target }) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(
-                        cli_framework::McpAction::Export { target },
-                        &project_dir,
-                    )?;
-                }
-                Some(McpCommands::Import { provider }) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(
-                        cli_framework::McpAction::Import { provider },
-                        &project_dir,
-                    )?;
-                }
-                Some(McpCommands::Add {
-                    id,
-                    name,
-                    url,
-                    disabled,
-                }) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(
-                        cli_framework::McpAction::Add {
-                            id,
-                            name,
-                            url,
-                            disabled,
-                        },
-                        &project_dir,
-                    )?;
-                }
-                Some(McpCommands::AddStdio {
-                    id,
-                    name,
-                    command,
-                    args,
-                }) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(
-                        cli_framework::McpAction::AddStdio {
-                            id,
-                            name,
-                            command,
-                            args,
-                        },
-                        &project_dir,
-                    )?;
-                }
-                Some(McpCommands::Remove { id }) => {
-                    let project_dir = get_project_dir_cli()?;
-                    cli_framework::handle_mcp_action(
-                        cli_framework::McpAction::Remove { id },
-                        &project_dir,
-                    )?;
+
+                let mut child = ProcessCommand::new(cmd).spawn().map_err(|e| {
+                    anyhow::anyhow!("Failed to launch ship-mcp server binary: {}", e)
+                })?;
+
+                let status = child.wait()?;
+                if !status.success() {
+                    std::process::exit(status.code().unwrap_or(1));
                 }
             }
-        }
+            Some(McpCommands::List) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(cli_framework::McpAction::List, &project_dir)?;
+            }
+            Some(McpCommands::Export { target }) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(
+                    cli_framework::McpAction::Export { target },
+                    &project_dir,
+                )?;
+            }
+            Some(McpCommands::Import { provider }) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(
+                    cli_framework::McpAction::Import { provider },
+                    &project_dir,
+                )?;
+            }
+            Some(McpCommands::Add {
+                id,
+                name,
+                url,
+                disabled,
+            }) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(
+                    cli_framework::McpAction::Add {
+                        id,
+                        name,
+                        url,
+                        disabled,
+                    },
+                    &project_dir,
+                )?;
+            }
+            Some(McpCommands::AddStdio {
+                id,
+                name,
+                command,
+                args,
+            }) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(
+                    cli_framework::McpAction::AddStdio {
+                        id,
+                        name,
+                        command,
+                        args,
+                    },
+                    &project_dir,
+                )?;
+            }
+            Some(McpCommands::Remove { id }) => {
+                let project_dir = get_project_dir_cli()?;
+                cli_framework::handle_mcp_action(
+                    cli_framework::McpAction::Remove { id },
+                    &project_dir,
+                )?;
+            }
+        },
+        Some(Commands::Hooks { action }) => match action {
+            HooksCommands::Run { provider } => {
+                run_hooks_runtime(provider)?;
+            }
+        },
         Some(Commands::Providers { action }) => {
             let project_dir = get_project_dir_cli()?;
             let action = match action {
@@ -1367,73 +1473,6 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 handle_migrate_command(force)?;
             }
         },
-        Some(Commands::Session { action }) => {
-            let project_dir = get_project_dir_cli()?;
-            let project_root = project_dir.parent().unwrap_or(&project_dir).to_path_buf();
-            match action {
-                SessionCommands::Start { branch, goal, mode, provider } => {
-                    let branch = branch.unwrap_or(current_branch(&project_root)?);
-                    let session = start_workspace_session(&project_dir, &branch, goal, mode, provider)?;
-                    println!(
-                        "Session started: {} [{}] branch={}{}{}{}",
-                        session.id,
-                        session.status,
-                        session.workspace_branch,
-                        session.mode_id.as_ref().map(|m| format!(" mode={}", m)).unwrap_or_default(),
-                        session.primary_provider.as_ref().map(|p| format!(" provider={}", p)).unwrap_or_default(),
-                        session.goal.as_ref().map(|g| format!(" goal=\"{}\"", g)).unwrap_or_default(),
-                    );
-                }
-                SessionCommands::End { branch, summary, updated_feature, updated_spec } => {
-                    let branch = branch.unwrap_or(current_branch(&project_root)?);
-                    let session = end_workspace_session(
-                        &project_dir,
-                        &branch,
-                        EndWorkspaceSessionRequest {
-                            summary,
-                            updated_feature_ids: updated_feature,
-                            updated_spec_ids: updated_spec,
-                        },
-                    )?;
-                    println!(
-                        "Session ended: {} [{}] branch={}{}",
-                        session.id,
-                        session.status,
-                        session.workspace_branch,
-                        session.summary.as_ref().map(|s| format!(" summary=\"{}\"", s)).unwrap_or_default(),
-                    );
-                }
-                SessionCommands::Status { branch } => {
-                    let branch = branch.unwrap_or(current_branch(&project_root)?);
-                    match get_active_workspace_session(&project_dir, &branch)? {
-                        Some(session) => println!("{}", format_workspace_session(&session)),
-                        None => println!("No active session for workspace '{}'.", branch),
-                    }
-                }
-                SessionCommands::List { branch, limit } => {
-                    let sessions = list_workspace_sessions(&project_dir, branch.as_deref(), limit)?;
-                    if sessions.is_empty() {
-                        println!("No sessions found.");
-                    } else {
-                        for session in sessions {
-                            println!("{}", format_workspace_session(&session));
-                        }
-                    }
-                }
-            }
-        }
-        Some(Commands::Log { note, branch }) => {
-            let project_dir = get_project_dir_cli()?;
-            let project_root = project_dir.parent().unwrap_or(&project_dir).to_path_buf();
-            let branch = branch.unwrap_or(current_branch(&project_root)?);
-            match get_active_workspace_session(&project_dir, &branch)? {
-                None => anyhow::bail!("No active session for '{}'. Run `ship session start` first.", branch),
-                Some(_) => {
-                    log_action_by(&project_dir, "agent", "session.progress", &note)?;
-                    println!("Logged: {}", note);
-                }
-            }
-        }
         None => match get_project_dir(None) {
             Ok(project_dir) => {
                 println!("{}", render_workspace_home(&project_dir)?);
@@ -1442,8 +1481,10 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
                 println!("No Ship project found.");
                 println!("Start here:");
                 println!("  ship init .");
+                println!("  ship ui");
+                println!("Automation/API flow:");
                 println!(
-                    "  ship workspace create feature/<name> --type feature --feature-title \"<Feature Title>\" --checkout --activate"
+                    "  ship workspace create feature/<name> --type feature --checkout --activate --start-session --goal \"<goal>\" --provider <id> --no-input"
                 );
             }
         },
@@ -1452,20 +1493,977 @@ pub fn handle_cli(cli: Cli) -> Result<()> {
     Ok(())
 }
 
+fn run_hooks_runtime(provider_hint: Option<String>) -> Result<()> {
+    let mut raw = String::new();
+    if io::stdin().read_to_string(&mut raw).is_err() {
+        return Ok(());
+    }
+
+    let payload = serde_json::from_str::<serde_json::Value>(&raw)
+        .unwrap_or_else(|_| serde_json::json!({ "raw": raw.trim() }));
+    let event = extract_hook_event_name(&payload);
+    let cwd = payload
+        .get("cwd")
+        .and_then(|value| value.as_str())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let ship_dir = resolve_ship_dir_for_hook_runtime(&cwd);
+    let provider = detect_hook_provider(provider_hint.as_deref(), &event, &payload);
+    let hook_response = build_hook_response(provider, &event, &payload, ship_dir.as_deref());
+
+    append_hook_event_log(
+        provider.as_str(),
+        ship_dir.as_deref(),
+        &cwd,
+        &event,
+        &payload,
+        hook_response.as_ref(),
+    );
+
+    if let Some(response) = hook_response {
+        print!("{}", serde_json::to_string(&response)?);
+    }
+
+    Ok(())
+}
+
+fn extract_hook_event_name(payload: &serde_json::Value) -> String {
+    payload
+        .get("hook_event_name")
+        .and_then(|value| value.as_str())
+        .or_else(|| payload.get("event").and_then(|value| value.as_str()))
+        .or_else(|| payload.get("hook").and_then(|value| value.as_str()))
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn resolve_ship_dir_for_hook_runtime(cwd: &Path) -> Option<PathBuf> {
+    if cwd
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == ".ship")
+    {
+        return Some(cwd.to_path_buf());
+    }
+    if cwd.join(".ship").is_dir() {
+        return Some(cwd.join(".ship"));
+    }
+    resolve_project_ship_dir(cwd)
+}
+
+fn append_hook_event_log(
+    provider_hint: Option<&str>,
+    ship_dir: Option<&Path>,
+    cwd: &Path,
+    event: &str,
+    payload: &serde_json::Value,
+    response: Option<&serde_json::Value>,
+) {
+    let Some(log_path) = hook_telemetry_log_path() else {
+        return;
+    };
+    let Some(parent) = log_path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(file) => file,
+        Err(_) => return,
+    };
+
+    let line = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "event": event,
+        "provider": provider_hint,
+        "cwd": cwd.to_string_lossy(),
+        "ship_dir": ship_dir.map(|path| path.to_string_lossy().to_string()),
+        "payload": payload,
+        "response": response,
+        "decision": response.and_then(extract_hook_decision),
+    });
+    let _ = writeln!(file, "{}", line);
+}
+
+fn hook_telemetry_log_path() -> Option<PathBuf> {
+    let global_dir = get_global_dir().ok()?;
+    Some(
+        global_dir
+            .join("state")
+            .join("telemetry")
+            .join("hooks")
+            .join("events.ndjson"),
+    )
+}
+
+fn read_hook_context(ship_dir: &Path) -> Option<String> {
+    let path = ship_dir
+        .join("generated")
+        .join("runtime")
+        .join("hook-context.md");
+    let content = std::fs::read_to_string(path).ok()?;
+    if content.trim().is_empty() {
+        None
+    } else {
+        Some(content)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HookProvider {
+    Claude,
+    Gemini,
+    Unknown,
+}
+
+impl HookProvider {
+    fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::Claude => Some("claude"),
+            Self::Gemini => Some("gemini"),
+            Self::Unknown => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HookDecision {
+    Allow,
+    Ask,
+    Deny,
+    None,
+}
+
+impl Default for HookDecision {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct HookPolicyOutcome {
+    decision: HookDecision,
+    reason: Option<String>,
+    updated_input: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+struct HookEnvelope {
+    workspace_root: Option<PathBuf>,
+    allowed_paths: Vec<String>,
+    allow_network: bool,
+    allow_installs: bool,
+    auto_approve_patterns: Vec<String>,
+    always_block_patterns: Vec<String>,
+    require_confirmation_patterns: Vec<String>,
+    tool_allow_patterns: Vec<String>,
+    tool_deny_patterns: Vec<String>,
+}
+
+impl Default for HookEnvelope {
+    fn default() -> Self {
+        Self {
+            workspace_root: None,
+            allowed_paths: vec![".".to_string()],
+            allow_network: false,
+            allow_installs: false,
+            auto_approve_patterns: vec![
+                "find *".to_string(),
+                "grep *".to_string(),
+                "rg *".to_string(),
+                "cat *".to_string(),
+                "ls *".to_string(),
+                "git status*".to_string(),
+                "git log*".to_string(),
+                "git diff*".to_string(),
+            ],
+            always_block_patterns: vec![
+                "rm -rf *".to_string(),
+                "git push --force*".to_string(),
+                "npm publish*".to_string(),
+                "cargo publish*".to_string(),
+            ],
+            require_confirmation_patterns: vec![],
+            tool_allow_patterns: vec!["*".to_string()],
+            tool_deny_patterns: vec![],
+        }
+    }
+}
+
+fn detect_hook_provider(
+    provider_hint: Option<&str>,
+    event: &str,
+    payload: &serde_json::Value,
+) -> HookProvider {
+    if let Some(provider) = provider_hint {
+        return match provider.trim().to_ascii_lowercase().as_str() {
+            "claude" => HookProvider::Claude,
+            "gemini" => HookProvider::Gemini,
+            _ => HookProvider::Unknown,
+        };
+    }
+
+    let normalized = normalize_hook_event(event);
+    match normalized.as_str() {
+        "userpromptsubmit" | "pretooluse" | "permissionrequest" | "posttoolusefailure"
+        | "subagentstart" | "subagentstop" | "precompact" => return HookProvider::Claude,
+        "beforetool"
+        | "aftertool"
+        | "beforeagent"
+        | "afteragent"
+        | "sessionend"
+        | "beforemodel"
+        | "aftermodel"
+        | "precompress"
+        | "beforetoolselection" => return HookProvider::Gemini,
+        _ => {}
+    }
+
+    if payload.get("permission_mode").is_some() {
+        return HookProvider::Claude;
+    }
+
+    if payload
+        .get("tool_name")
+        .and_then(|value| value.as_str())
+        .is_some_and(|tool| tool.eq_ignore_ascii_case("run_shell_command"))
+    {
+        return HookProvider::Gemini;
+    }
+
+    HookProvider::Unknown
+}
+
+fn normalize_hook_event(event: &str) -> String {
+    event
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+fn build_hook_response(
+    provider: HookProvider,
+    event: &str,
+    payload: &serde_json::Value,
+    ship_dir: Option<&Path>,
+) -> Option<serde_json::Value> {
+    let normalized_event = normalize_hook_event(event);
+
+    if (normalized_event == "sessionstart" || normalized_event == "userpromptsubmit")
+        && let Some(ship_dir) = ship_dir
+        && let Some(context) = read_hook_context(ship_dir)
+    {
+        return Some(match provider {
+            HookProvider::Gemini => {
+                serde_json::json!({ "hookSpecificOutput": { "additionalContext": context } })
+            }
+            HookProvider::Claude | HookProvider::Unknown => serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": if normalized_event == "userpromptsubmit" { "UserPromptSubmit" } else { "SessionStart" },
+                    "additionalContext": context
+                }
+            }),
+        });
+    }
+
+    let envelope = load_hook_envelope(ship_dir);
+    match normalized_event.as_str() {
+        "pretooluse" | "beforetool" => {
+            let outcome = evaluate_pre_tool_policy(provider, payload, &envelope);
+            map_pre_tool_outcome(provider, outcome)
+        }
+        "permissionrequest" => {
+            let outcome = evaluate_permission_request_policy(payload, &envelope);
+            map_permission_request_outcome(outcome)
+        }
+        _ => None,
+    }
+}
+
+fn load_hook_envelope(ship_dir: Option<&Path>) -> HookEnvelope {
+    let mut envelope = HookEnvelope::default();
+    let Some(ship_dir) = ship_dir else {
+        return envelope;
+    };
+    let path = ship_dir
+        .join("generated")
+        .join("runtime")
+        .join("envelope.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return envelope;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return envelope;
+    };
+    let Some(obj) = value.as_object() else {
+        return envelope;
+    };
+
+    envelope.workspace_root = obj
+        .get("workspace_root")
+        .and_then(|value| value.as_str())
+        .map(PathBuf::from);
+    if let Some(values) = obj.get("allowed_paths").and_then(as_string_array) {
+        envelope.allowed_paths = values;
+    }
+    envelope.allow_network = obj
+        .get("allow_network")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    envelope.allow_installs = obj
+        .get("allow_installs")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if let Some(values) = obj.get("auto_approve_patterns").and_then(as_string_array) {
+        envelope.auto_approve_patterns = values;
+    }
+    if let Some(values) = obj.get("always_block_patterns").and_then(as_string_array) {
+        envelope.always_block_patterns = values;
+    }
+    if let Some(values) = obj.get("require_confirmation").and_then(as_string_array) {
+        envelope.require_confirmation_patterns = values;
+    }
+    if let Some(values) = obj.get("tools_allow").and_then(as_string_array) {
+        envelope.tool_allow_patterns = values;
+    }
+    if let Some(values) = obj.get("tools_deny").and_then(as_string_array) {
+        envelope.tool_deny_patterns = values;
+    }
+    envelope
+}
+
+fn as_string_array(value: &serde_json::Value) -> Option<Vec<String>> {
+    value.as_array().map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+    })
+}
+
+fn evaluate_pre_tool_policy(
+    provider: HookProvider,
+    payload: &serde_json::Value,
+    envelope: &HookEnvelope,
+) -> HookPolicyOutcome {
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let tool_input = payload
+        .get("tool_input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if tool_name.is_empty() {
+        return HookPolicyOutcome::default();
+    }
+
+    if tool_denied(tool_name, envelope) {
+        return HookPolicyOutcome {
+            decision: HookDecision::Deny,
+            reason: Some(format!(
+                "Tool '{}' is disabled by Ship permission policy.",
+                tool_name
+            )),
+            updated_input: None,
+        };
+    }
+
+    if is_shell_tool(provider, tool_name)
+        && let Some(command) = extract_shell_command(&tool_input)
+    {
+        let outcome = evaluate_shell_command(provider, command, envelope);
+        if outcome.decision != HookDecision::None {
+            return outcome;
+        }
+        if tool_requires_confirmation(tool_name, envelope) && provider == HookProvider::Claude {
+            return HookPolicyOutcome {
+                decision: HookDecision::Ask,
+                reason: Some(format!(
+                    "Tool '{}' requires explicit confirmation in this workspace.",
+                    tool_name
+                )),
+                updated_input: None,
+            };
+        }
+        return HookPolicyOutcome::default();
+    }
+
+    if tool_requires_confirmation(tool_name, envelope) && provider == HookProvider::Claude {
+        return HookPolicyOutcome {
+            decision: HookDecision::Ask,
+            reason: Some(format!(
+                "Tool '{}' requires explicit confirmation in this workspace.",
+                tool_name
+            )),
+            updated_input: None,
+        };
+    }
+
+    if is_write_like_tool(tool_name) {
+        let paths = extract_target_paths(&tool_input);
+        if let Some(off_scope) = paths
+            .iter()
+            .find(|path| !is_path_in_allowed_scope(path, envelope))
+        {
+            return HookPolicyOutcome {
+                decision: HookDecision::Deny,
+                reason: Some(format!(
+                    "Path '{}' is outside allowed workspace scope.",
+                    off_scope
+                )),
+                updated_input: None,
+            };
+        }
+    }
+
+    HookPolicyOutcome::default()
+}
+
+fn evaluate_permission_request_policy(
+    payload: &serde_json::Value,
+    envelope: &HookEnvelope,
+) -> HookPolicyOutcome {
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let tool_input = payload
+        .get("tool_input")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    if tool_name.is_empty() {
+        return HookPolicyOutcome::default();
+    }
+
+    if tool_denied(tool_name, envelope) {
+        return HookPolicyOutcome {
+            decision: HookDecision::Deny,
+            reason: Some(format!("Ship policy blocks tool '{}'.", tool_name)),
+            updated_input: None,
+        };
+    }
+
+    if tool_name.eq_ignore_ascii_case("bash")
+        && let Some(command) = extract_shell_command(&tool_input)
+    {
+        let mut outcome = evaluate_shell_command(HookProvider::Claude, command, envelope);
+        if outcome.decision == HookDecision::Ask {
+            outcome.decision = HookDecision::None;
+            outcome.reason = None;
+        }
+        return outcome;
+    }
+
+    HookPolicyOutcome::default()
+}
+
+fn tool_denied(tool_name: &str, envelope: &HookEnvelope) -> bool {
+    envelope
+        .tool_deny_patterns
+        .iter()
+        .any(|pattern| wildcard_match_case_insensitive(pattern, tool_name))
+}
+
+fn tool_requires_confirmation(tool_name: &str, envelope: &HookEnvelope) -> bool {
+    envelope
+        .require_confirmation_patterns
+        .iter()
+        .any(|pattern| wildcard_match_case_insensitive(pattern, tool_name))
+}
+
+fn is_shell_tool(provider: HookProvider, tool_name: &str) -> bool {
+    match provider {
+        HookProvider::Gemini => tool_name.eq_ignore_ascii_case("run_shell_command"),
+        HookProvider::Claude | HookProvider::Unknown => tool_name.eq_ignore_ascii_case("bash"),
+    }
+}
+
+fn extract_shell_command(tool_input: &serde_json::Value) -> Option<&str> {
+    tool_input
+        .get("command")
+        .and_then(|value| value.as_str())
+        .or_else(|| tool_input.get("cmd").and_then(|value| value.as_str()))
+}
+
+fn evaluate_shell_command(
+    provider: HookProvider,
+    command: &str,
+    envelope: &HookEnvelope,
+) -> HookPolicyOutcome {
+    let parts = split_command_chain(command);
+    if parts.is_empty() {
+        return HookPolicyOutcome::default();
+    }
+
+    let mut saw_unknown = false;
+    let mut saw_confirmation = false;
+    let mut saw_safe = false;
+
+    for raw_part in parts {
+        let part = strip_env_prefix(&raw_part);
+        if part.is_empty() {
+            continue;
+        }
+
+        if command_matches_patterns(&part, &envelope.always_block_patterns) {
+            return HookPolicyOutcome {
+                decision: HookDecision::Deny,
+                reason: Some(format!("Command '{}' is blocked by Ship policy.", part)),
+                updated_input: None,
+            };
+        }
+
+        if !envelope.allow_network && looks_like_network_command(&part) {
+            return HookPolicyOutcome {
+                decision: HookDecision::Deny,
+                reason: Some(format!(
+                    "Network command '{}' is not allowed in this workspace.",
+                    part
+                )),
+                updated_input: None,
+            };
+        }
+
+        if !envelope.allow_installs && looks_like_install_command(&part) {
+            return HookPolicyOutcome {
+                decision: HookDecision::Deny,
+                reason: Some(format!(
+                    "Install command '{}' is blocked in this workspace.",
+                    part
+                )),
+                updated_input: None,
+            };
+        }
+
+        if command_matches_patterns(&part, &envelope.require_confirmation_patterns) {
+            saw_confirmation = true;
+            continue;
+        }
+
+        if command_matches_patterns(&part, &envelope.auto_approve_patterns)
+            || looks_like_safe_read_command(&part)
+        {
+            saw_safe = true;
+            continue;
+        }
+
+        saw_unknown = true;
+    }
+
+    if saw_confirmation && provider == HookProvider::Claude {
+        return HookPolicyOutcome {
+            decision: HookDecision::Ask,
+            reason: Some("Command requires confirmation by Ship policy.".to_string()),
+            updated_input: None,
+        };
+    }
+
+    if saw_unknown {
+        return HookPolicyOutcome::default();
+    }
+
+    if saw_safe {
+        return HookPolicyOutcome {
+            decision: HookDecision::Allow,
+            reason: Some("Approved by Ship safe-command policy.".to_string()),
+            updated_input: None,
+        };
+    }
+
+    HookPolicyOutcome::default()
+}
+
+fn split_command_chain(command: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+
+    while let Some(ch) = chars.next() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            escaped = true;
+            current.push(ch);
+            continue;
+        }
+
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            current.push(ch);
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            current.push(ch);
+            continue;
+        }
+
+        if !in_single && !in_double {
+            if ch == ';' || ch == '\n' {
+                push_part(&mut parts, &mut current);
+                continue;
+            }
+            if ch == '&' && chars.peek() == Some(&'&') {
+                let _ = chars.next();
+                push_part(&mut parts, &mut current);
+                continue;
+            }
+            if ch == '|' {
+                if chars.peek() == Some(&'|') {
+                    let _ = chars.next();
+                }
+                push_part(&mut parts, &mut current);
+                continue;
+            }
+        }
+
+        current.push(ch);
+    }
+
+    push_part(&mut parts, &mut current);
+    parts
+}
+
+fn push_part(parts: &mut Vec<String>, current: &mut String) {
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+    current.clear();
+}
+
+fn strip_env_prefix(part: &str) -> String {
+    let mut tokens = part.split_whitespace().peekable();
+    let mut command_tokens = Vec::new();
+
+    while let Some(token) = tokens.next() {
+        if command_tokens.is_empty() && is_env_assignment(token) {
+            continue;
+        }
+
+        command_tokens.push(token.to_string());
+        command_tokens.extend(tokens.map(|tail| tail.to_string()));
+        break;
+    }
+
+    command_tokens.join(" ")
+}
+
+fn is_env_assignment(token: &str) -> bool {
+    let Some((name, value)) = token.split_once('=') else {
+        return false;
+    };
+    if name.is_empty() || value.is_empty() {
+        return false;
+    }
+    name.chars()
+        .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
+}
+
+fn command_matches_patterns(command: &str, patterns: &[String]) -> bool {
+    patterns
+        .iter()
+        .any(|pattern| command_pattern_matches(pattern, command))
+}
+
+fn command_pattern_matches(pattern: &str, command: &str) -> bool {
+    let pattern = normalize_command(pattern);
+    if pattern.is_empty() {
+        return false;
+    }
+    let command = normalize_command(command);
+    if pattern == "*" {
+        return true;
+    }
+    if pattern.contains('*') {
+        return wildcard_match_case_insensitive(&pattern, &command);
+    }
+    command == pattern || command.starts_with(&format!("{} ", pattern))
+}
+
+fn normalize_command(command: &str) -> String {
+    command.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn wildcard_match_case_insensitive(pattern: &str, value: &str) -> bool {
+    wildcard_match(&pattern.to_ascii_lowercase(), &value.to_ascii_lowercase())
+}
+
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let segments: Vec<&str> = pattern
+        .split('*')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return true;
+    }
+
+    let mut cursor = 0usize;
+    for (index, segment) in segments.iter().enumerate() {
+        if index == 0 && !starts_with_wildcard {
+            if !value[cursor..].starts_with(segment) {
+                return false;
+            }
+            cursor += segment.len();
+            continue;
+        }
+
+        if let Some(found) = value[cursor..].find(segment) {
+            cursor += found + segment.len();
+        } else {
+            return false;
+        }
+    }
+
+    if !ends_with_wildcard {
+        if let Some(last) = segments.last() {
+            return value.ends_with(last);
+        }
+    }
+    true
+}
+
+fn looks_like_safe_read_command(command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    normalized.starts_with("ls")
+        || normalized.starts_with("cat ")
+        || normalized.starts_with("pwd")
+        || normalized.starts_with("rg ")
+        || normalized.starts_with("grep ")
+        || normalized.starts_with("find ")
+        || normalized.starts_with("git status")
+        || normalized.starts_with("git diff")
+        || normalized.starts_with("git log")
+}
+
+fn looks_like_network_command(command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    normalized.starts_with("curl ")
+        || normalized.starts_with("wget ")
+        || normalized.starts_with("nc ")
+        || normalized.starts_with("ssh ")
+        || normalized.starts_with("scp ")
+}
+
+fn looks_like_install_command(command: &str) -> bool {
+    let normalized = command.to_ascii_lowercase();
+    normalized.starts_with("npm install")
+        || normalized.starts_with("pnpm add")
+        || normalized.starts_with("yarn add")
+        || normalized.starts_with("pip install")
+        || normalized.starts_with("uv pip install")
+        || normalized.starts_with("cargo add")
+        || normalized.starts_with("go get")
+        || normalized.starts_with("brew install")
+}
+
+fn is_write_like_tool(tool_name: &str) -> bool {
+    let normalized = tool_name.to_ascii_lowercase();
+    normalized.contains("write")
+        || normalized.contains("edit")
+        || normalized.contains("replace")
+        || normalized.contains("delete")
+}
+
+fn extract_target_paths(tool_input: &serde_json::Value) -> Vec<String> {
+    let Some(obj) = tool_input.as_object() else {
+        return Vec::new();
+    };
+
+    let mut paths = Vec::new();
+    for key in [
+        "file_path",
+        "path",
+        "target_path",
+        "destination_path",
+        "absolute_path",
+    ] {
+        if let Some(path) = obj.get(key).and_then(|value| value.as_str()) {
+            paths.push(path.to_string());
+        }
+    }
+
+    if let Some(items) = obj.get("paths").and_then(|value| value.as_array()) {
+        for item in items {
+            if let Some(path) = item.as_str() {
+                paths.push(path.to_string());
+            }
+        }
+    }
+    paths
+}
+
+fn is_path_in_allowed_scope(path: &str, envelope: &HookEnvelope) -> bool {
+    if envelope.allowed_paths.is_empty() {
+        return true;
+    }
+
+    let input_path = PathBuf::from(path);
+    let absolute = if input_path.is_absolute() {
+        input_path
+    } else if let Some(root) = &envelope.workspace_root {
+        root.join(input_path)
+    } else {
+        input_path
+    };
+
+    let relative = envelope
+        .workspace_root
+        .as_ref()
+        .and_then(|root| absolute.strip_prefix(root).ok())
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|| absolute.to_string_lossy().replace('\\', "/"));
+
+    envelope.allowed_paths.iter().any(|pattern| {
+        let normalized = pattern.trim();
+        if normalized.is_empty() {
+            return false;
+        }
+        if normalized == "." || normalized == "**/*" || normalized == "*" {
+            return true;
+        }
+        if normalized.contains('*') {
+            return wildcard_match_case_insensitive(normalized, &relative);
+        }
+        let normalized = normalized.trim_start_matches("./");
+        relative == normalized || relative.starts_with(&format!("{}/", normalized))
+    })
+}
+
+fn map_pre_tool_outcome(
+    provider: HookProvider,
+    outcome: HookPolicyOutcome,
+) -> Option<serde_json::Value> {
+    match provider {
+        HookProvider::Claude | HookProvider::Unknown => match outcome.decision {
+            HookDecision::Allow | HookDecision::Ask | HookDecision::Deny => {
+                let decision = match outcome.decision {
+                    HookDecision::Allow => "allow",
+                    HookDecision::Ask => "ask",
+                    HookDecision::Deny => "deny",
+                    HookDecision::None => return None,
+                };
+                let mut payload = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": decision
+                    }
+                });
+                if let Some(reason) = outcome.reason {
+                    payload["hookSpecificOutput"]["permissionDecisionReason"] =
+                        serde_json::json!(reason);
+                }
+                if let Some(updated) = outcome.updated_input {
+                    payload["hookSpecificOutput"]["updatedInput"] = updated;
+                }
+                Some(payload)
+            }
+            HookDecision::None => None,
+        },
+        HookProvider::Gemini => match outcome.decision {
+            HookDecision::Deny => Some(serde_json::json!({
+                "decision": "deny",
+                "reason": outcome.reason.unwrap_or_else(|| "Blocked by Ship policy.".to_string()),
+            })),
+            HookDecision::Allow => {
+                let mut payload = serde_json::json!({ "decision": "allow" });
+                if let Some(updated) = outcome.updated_input {
+                    payload["hookSpecificOutput"] = serde_json::json!({ "tool_input": updated });
+                }
+                Some(payload)
+            }
+            HookDecision::Ask | HookDecision::None => None,
+        },
+    }
+}
+
+fn map_permission_request_outcome(outcome: HookPolicyOutcome) -> Option<serde_json::Value> {
+    match outcome.decision {
+        HookDecision::Allow => {
+            let mut decision = serde_json::json!({
+                "behavior": "allow",
+            });
+            if let Some(updated) = outcome.updated_input {
+                decision["updatedInput"] = updated;
+            }
+            Some(serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": decision
+                }
+            }))
+        }
+        HookDecision::Deny => Some(serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PermissionRequest",
+                "decision": {
+                    "behavior": "deny",
+                    "message": outcome.reason.unwrap_or_else(|| "Blocked by Ship permission policy.".to_string()),
+                    "interrupt": false
+                }
+            }
+        })),
+        HookDecision::Ask | HookDecision::None => None,
+    }
+}
+
+fn extract_hook_decision(response: &serde_json::Value) -> Option<String> {
+    response
+        .get("decision")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+        .or_else(|| {
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("permissionDecision"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
+        })
+        .or_else(|| {
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("decision"))
+                .and_then(|value| value.get("behavior"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
+        })
+}
+
 fn handle_migrate_command(force: bool) -> Result<()> {
     let project_dir = get_project_dir_cli()?;
     let global_dir = get_global_dir()?;
     let global = migrate_global_state(&global_dir)?;
     let project = migrate_project_state(&project_dir)?;
-    let issues = import_issues_from_files(&project_dir)?;
-    let specs = import_specs_from_files(&project_dir)?;
-    let config = migrate_json_config_file(&project_dir)?;
+    let _ = migrate_json_config_file(&project_dir)?;
     let cleared_project_markers = runtime::clear_project_migration_meta(&project_dir)?;
     let cleared_global_markers = runtime::clear_global_migration_meta()?;
     ensure_user_notes_imported_once(true, true)?;
     ensure_project_imported_once(&project_dir, true, true)?;
     println!(
-        "Migration complete{}:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- startup import markers reset: {} project marker{}, {} global marker{}\n- imported docs: {} issue{}, {} spec{}{}.",
+        "Migration complete{}:\n- file namespace copies: copied={} skipped={} conflicts={}\n- project DB: {} (applied {})\n- global DB: {} (applied {})\n- registry: {} -> {} entries (normalized {})\n- app_state paths normalized: {}\n- startup import markers reset: {} project marker{}, {} global marker{}.",
         if force { " (forced)" } else { "" },
         project.files.copied_files,
         project.files.skipped_identical_files,
@@ -1486,15 +2484,6 @@ fn handle_migrate_command(force: bool) -> Result<()> {
         },
         cleared_global_markers,
         if cleared_global_markers == 1 { "" } else { "s" },
-        issues,
-        if issues == 1 { "" } else { "s" },
-        specs,
-        if specs == 1 { "" } else { "s" },
-        if config {
-            ", config.json → ship.toml"
-        } else {
-            ""
-        },
     );
     Ok(())
 }
@@ -1539,11 +2528,11 @@ fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         if let Some(root) = repo_root {
-            let candidates = [
-                root.join("target/release/bundle/macos/Shipwright.app"),
-                root.join("target/debug/bundle/macos/Shipwright.app"),
-                root.join("crates/ui/src-tauri/target/release/bundle/macos/Shipwright.app"),
-                root.join("crates/ui/src-tauri/target/debug/bundle/macos/Shipwright.app"),
+            let candidates: [PathBuf; 4] = [
+                root.join("target/release/bundle/macos/Ship.app"),
+                root.join("target/debug/bundle/macos/Ship.app"),
+                root.join("crates/ui/src-tauri/target/release/bundle/macos/Ship.app"),
+                root.join("crates/ui/src-tauri/target/debug/bundle/macos/Ship.app"),
             ];
             for bundled_app in candidates {
                 if bundled_app.exists() {
@@ -1555,9 +2544,7 @@ fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
             }
         }
 
-        let status = ProcessCommand::new("open")
-            .args(["-a", "Shipwright"])
-            .status()?;
+        let status = ProcessCommand::new("open").args(["-a", "Ship"]).status()?;
         if status.success() {
             return Ok(());
         }
@@ -1565,7 +2552,7 @@ fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        let status = ProcessCommand::new("shipwright").status();
+        let status = ProcessCommand::new("ship").status();
         if let Ok(status) = status {
             if status.success() {
                 return Ok(());
@@ -1576,7 +2563,7 @@ fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
         let status = ProcessCommand::new("cmd")
-            .args(["/C", "start", "", "Shipwright.exe"])
+            .args(["/C", "start", "", "Ship.exe"])
             .status();
         if let Ok(status) = status {
             if status.success() {
@@ -1586,7 +2573,7 @@ fn launch_ui_executable(repo_root: Option<&Path>) -> Result<()> {
     }
 
     anyhow::bail!(
-        "Could not launch Shipwright executable. Build/install the desktop app, or run `ship ui --dev` from the Ship repository."
+        "Could not launch Ship executable. Build/install the desktop app, or run `ship ui --dev` from the Ship repository."
     )
 }
 
@@ -1616,6 +2603,47 @@ fn current_branch(project_root: &std::path::Path) -> Result<String> {
         anyhow::bail!("Current HEAD is detached; cannot map to a feature branch");
     }
     Ok(branch)
+}
+
+fn prompt_line(prompt: &str) -> Result<String> {
+    print!("{}", prompt);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
+}
+
+fn prompt_optional(prompt: &str) -> Result<Option<String>> {
+    let input = prompt_line(prompt)?;
+    if input.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(input))
+    }
+}
+
+fn prompt_with_default(label: &str, default: &str) -> Result<String> {
+    let prompt = format!("{} [{}]: ", label, default);
+    let input = prompt_line(&prompt)?;
+    if input.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(input)
+    }
+}
+
+fn prompt_yes_no(prompt: &str, default_yes: bool) -> Result<bool> {
+    loop {
+        let input = prompt_line(prompt)?;
+        if input.is_empty() {
+            return Ok(default_yes);
+        }
+        match input.to_ascii_lowercase().as_str() {
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            _ => println!("Please answer yes or no."),
+        }
+    }
 }
 
 fn branch_to_feature_title(branch: &str) -> String {
@@ -1689,7 +2717,7 @@ fn resolve_workspace_feature_link(
         .filter(|title| !title.is_empty())
         .map(|title| title.to_string())
         .unwrap_or_else(|| branch_to_feature_title(branch));
-    let created = create_feature(project_dir, &title, "", None, None, Some(branch))?;
+    let created = create_feature(project_dir, &title, "", None, Some(branch))?;
     println!(
         "Feature created and linked: {} ({})",
         created.feature.metadata.title, created.id
@@ -1948,11 +2976,8 @@ fn format_workspace_summary(workspace: &runtime::workspace::Workspace) -> String
     if let Some(feature_id) = workspace.feature_id.as_deref() {
         parts.push(format!("feature={}", feature_id));
     }
-    if let Some(spec_id) = workspace.spec_id.as_deref() {
-        parts.push(format!("spec={}", spec_id));
-    }
-    if let Some(release_id) = workspace.release_id.as_deref() {
-        parts.push(format!("release={}", release_id));
+    if let Some(target_id) = workspace.target_id.as_deref() {
+        parts.push(format!("target={}", target_id));
     }
     if let Some(mode) = workspace.active_mode.as_deref() {
         parts.push(format!("mode={}", mode));
@@ -2002,8 +3027,8 @@ fn format_workspace_session(session: &runtime::WorkspaceSession) -> String {
             session.updated_feature_ids.join(",")
         ));
     }
-    if !session.updated_spec_ids.is_empty() {
-        parts.push(format!("specs=[{}]", session.updated_spec_ids.join(",")));
+    if let Some(record_id) = session.session_record_id.as_deref() {
+        parts.push(format!("record={}", record_id));
     }
     if let Some(compiled_at) = session.compiled_at.as_ref() {
         parts.push(format!("compiled_at={}", compiled_at));
@@ -2025,26 +3050,13 @@ fn format_workspace_session(session: &runtime::WorkspaceSession) -> String {
 #[derive(Default)]
 struct WorkspaceReconcileReport {
     workspace_updates: usize,
-    spec_updates: usize,
     ambiguous_feature_links: usize,
-    ambiguous_spec_links: usize,
     ambiguous_feature_details: Vec<String>,
-    ambiguous_spec_details: Vec<String>,
 }
 
 fn reconcile_workspace_links(project_dir: &Path, apply: bool) -> Result<WorkspaceReconcileReport> {
     let workspaces = list_workspaces(project_dir)?;
     let features = list_features(project_dir)?;
-    let specs = list_specs(project_dir)?;
-
-    let workspace_by_branch: HashMap<String, runtime::Workspace> = workspaces
-        .iter()
-        .map(|workspace| (workspace.branch.clone(), workspace.clone()))
-        .collect();
-    let workspace_by_id: HashMap<String, runtime::Workspace> = workspaces
-        .iter()
-        .map(|workspace| (workspace.id.clone(), workspace.clone()))
-        .collect();
 
     let mut report = WorkspaceReconcileReport::default();
 
@@ -2085,47 +3097,20 @@ fn reconcile_workspace_links(project_dir: &Path, apply: bool) -> Result<Workspac
             None
         };
 
-        let release_candidate = if workspace.release_id.is_none() {
-            selected_feature.and_then(|entry| entry.feature.metadata.release_id.clone())
-        } else {
-            None
-        };
-
-        let branch_specs = specs
-            .iter()
-            .filter(|entry| {
-                entry.spec.metadata.branch.as_deref() == Some(workspace.branch.as_str())
+        let target_candidate = if workspace.target_id.is_none() {
+            selected_feature.and_then(|entry| {
+                entry
+                    .feature
+                    .metadata
+                    .active_target_id
+                    .clone()
+                    .or_else(|| entry.feature.metadata.release_id.clone())
             })
-            .collect::<Vec<_>>();
-
-        if workspace.spec_id.is_none() && branch_specs.len() > 1 {
-            report.ambiguous_spec_links += 1;
-            report.ambiguous_spec_details.push(format!(
-                "{} -> [{}]",
-                workspace.branch,
-                branch_specs
-                    .iter()
-                    .map(|entry| entry.id.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-
-        let spec_candidate = if workspace.spec_id.is_none() {
-            selected_feature
-                .and_then(|entry| entry.feature.metadata.spec_id.clone())
-                .or_else(|| {
-                    if branch_specs.len() == 1 {
-                        branch_specs.first().map(|entry| entry.id.clone())
-                    } else {
-                        None
-                    }
-                })
         } else {
             None
         };
 
-        if feature_candidate.is_some() || spec_candidate.is_some() || release_candidate.is_some() {
+        if feature_candidate.is_some() || target_candidate.is_some() {
             report.workspace_updates += 1;
             if apply {
                 create_workspace(
@@ -2133,39 +3118,10 @@ fn reconcile_workspace_links(project_dir: &Path, apply: bool) -> Result<Workspac
                     CreateWorkspaceRequest {
                         branch: workspace.branch.clone(),
                         feature_id: feature_candidate,
-                        spec_id: spec_candidate,
-                        release_id: release_candidate,
+                        target_id: target_candidate,
                         ..CreateWorkspaceRequest::default()
                     },
                 )?;
-            }
-        }
-    }
-
-    for spec_entry in specs {
-        let mut spec = spec_entry.spec.clone();
-        let mut changed = false;
-
-        if spec.metadata.workspace_id.is_none()
-            && let Some(branch) = spec.metadata.branch.as_deref()
-            && let Some(workspace) = workspace_by_branch.get(branch)
-        {
-            spec.metadata.workspace_id = Some(workspace.id.clone());
-            changed = true;
-        }
-
-        if spec.metadata.branch.is_none()
-            && let Some(workspace_id) = spec.metadata.workspace_id.as_deref()
-            && let Some(workspace) = workspace_by_id.get(workspace_id)
-        {
-            spec.metadata.branch = Some(workspace.branch.clone());
-            changed = true;
-        }
-
-        if changed {
-            report.spec_updates += 1;
-            if apply {
-                update_spec(project_dir, &spec_entry.id, spec)?;
             }
         }
     }
@@ -2183,8 +3139,9 @@ fn render_workspace_home(project_dir: &Path) -> Result<String> {
     if workspaces.is_empty() {
         out.push_str("No workspaces found.\n");
         out.push_str("Start here:\n");
+        out.push_str("  ship workspace create feature/<name> --type feature\n");
         out.push_str(
-            "  ship workspace create feature/<name> --type feature --feature-title \"<Feature Title>\" --checkout --activate\n",
+            "  ship workspace create feature/<name> --type feature --feature-title \"<Feature Title>\" --checkout --activate --start-session --goal \"<goal>\" --provider <id> --no-input\n",
         );
         out.push_str("  ship workspace list\n");
         return Ok(out);
@@ -2231,33 +3188,8 @@ fn handle_time_command(action: TimeCommands, project_dir: &PathBuf) -> Result<()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or(issue.clone());
 
-            // Try to read the issue title from the file
-            let issue_title = {
-                let path = if issue_path.is_absolute() {
-                    issue_path.clone()
-                } else {
-                    // Search through statuses
-                    let mut found = None;
-                    for status in ISSUE_STATUSES {
-                        let p = runtime::project::issues_dir(project_dir)
-                            .join(status)
-                            .join(&issue_file);
-                        if p.exists() {
-                            found = Some(p);
-                            break;
-                        }
-                    }
-                    found.unwrap_or(issue_path)
-                };
-                if path.exists() {
-                    get_issue_by_id(project_dir, &issue_file)
-                        .ok()
-                        .map(|i| i.issue.metadata.title)
-                        .unwrap_or_else(|| issue_file.clone())
-                } else {
-                    issue_file.clone()
-                }
-            };
+            // Use the file name as the title directly (issue lookup removed)
+            let issue_title = issue_file.clone();
 
             let timer = start_timer(project_dir, &issue_file, &issue_title, note)?;
             println!(
@@ -2392,8 +3324,12 @@ mod tests {
         let project_dir = init_project(tmp.path().to_path_buf())?;
 
         let rendered = render_workspace_home(&project_dir)?;
-        assert!(rendered.contains("No workspaces found."));
-        assert!(rendered.contains("ship workspace create"));
+        assert!(rendered.contains("Workspace Home"));
+        assert!(
+            rendered.contains("No workspaces found.") || rendered.contains("Workspaces:"),
+            "unexpected workspace home output: {}",
+            rendered
+        );
         Ok(())
     }
 
@@ -2406,7 +3342,7 @@ mod tests {
             &project_dir,
             CreateWorkspaceRequest {
                 branch: "feature/workspace-home".to_string(),
-                workspace_type: Some(WorkspaceType::Feature),
+                workspace_type: Some(ShipWorkspaceKind::Feature),
                 ..CreateWorkspaceRequest::default()
             },
         )?;
@@ -2452,14 +3388,10 @@ mod tests {
             "ship",
             "skill",
             "install",
-            "vercel-labs/agent-skills",
+            "vercel-react-best-practices",
             "vercel-react-best-practices",
             "--scope",
             "user",
-            "--repo-path",
-            "skills",
-            "--git-ref",
-            "main",
             "--force",
         ])
         .expect("skill install should parse");
@@ -2470,44 +3402,14 @@ mod tests {
                     SkillCommands::Install {
                         source,
                         id,
-                        git_ref,
-                        repo_path,
                         scope,
                         force,
                     },
             }) => {
-                assert_eq!(source, "vercel-labs/agent-skills");
+                assert_eq!(source, "vercel-react-best-practices");
                 assert_eq!(id, "vercel-react-best-practices");
-                assert_eq!(git_ref, "main");
-                assert_eq!(repo_path, "skills");
                 assert_eq!(scope, "user");
                 assert!(force);
-            }
-            other => panic!("unexpected parse result: {:?}", other),
-        }
-    }
-
-    #[test]
-    fn cli_parses_spec_create_with_workspace_override() {
-        let cli = Cli::try_parse_from([
-            "ship",
-            "spec",
-            "create",
-            "Execution Plan",
-            "--workspace",
-            "feature/execution-plan",
-        ])
-        .expect("spec create with workspace should parse");
-
-        match cli.command {
-            Some(Commands::Spec {
-                action:
-                    SpecCommands::Create {
-                        title, workspace, ..
-                    },
-            }) => {
-                assert_eq!(title, "Execution Plan");
-                assert_eq!(workspace.as_deref(), Some("feature/execution-plan"));
             }
             other => panic!("unexpected parse result: {:?}", other),
         }
@@ -2592,6 +3494,11 @@ mod tests {
                         feature_title,
                         checkout,
                         activate,
+                        start_session,
+                        goal,
+                        provider,
+                        session_mode,
+                        no_input,
                         ..
                     },
             }) => {
@@ -2600,6 +3507,87 @@ mod tests {
                 assert_eq!(feature_title.as_deref(), Some("Workspace First"));
                 assert!(checkout);
                 assert!(activate);
+                assert!(!start_session);
+                assert_eq!(goal, None);
+                assert_eq!(provider, None);
+                assert_eq!(session_mode, None);
+                assert!(!no_input);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_parses_workspace_create_with_session_bootstrap_flags() {
+        let cli = Cli::try_parse_from([
+            "ship",
+            "workspace",
+            "create",
+            "feature/session-bootstrap",
+            "--type",
+            "feature",
+            "--start-session",
+            "--goal",
+            "Implement onboarding path",
+            "--provider",
+            "claude",
+            "--session-mode",
+            "code",
+        ])
+        .expect("workspace create with session bootstrap flags should parse");
+
+        match cli.command {
+            Some(Commands::Workspace {
+                action:
+                    WorkspaceCommands::Create {
+                        branch,
+                        workspace_type,
+                        start_session,
+                        goal,
+                        provider,
+                        session_mode,
+                        no_input,
+                        ..
+                    },
+            }) => {
+                assert_eq!(branch, "feature/session-bootstrap");
+                assert_eq!(workspace_type.as_deref(), Some("feature"));
+                assert!(start_session);
+                assert_eq!(goal.as_deref(), Some("Implement onboarding path"));
+                assert_eq!(provider.as_deref(), Some("claude"));
+                assert_eq!(session_mode.as_deref(), Some("code"));
+                assert!(!no_input);
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_parses_workspace_create_with_no_input() {
+        let cli = Cli::try_parse_from([
+            "ship",
+            "workspace",
+            "create",
+            "feature/automation-path",
+            "--type",
+            "feature",
+            "--no-input",
+        ])
+        .expect("workspace create with no-input should parse");
+
+        match cli.command {
+            Some(Commands::Workspace {
+                action:
+                    WorkspaceCommands::Create {
+                        branch,
+                        workspace_type,
+                        no_input,
+                        ..
+                    },
+            }) => {
+                assert_eq!(branch, "feature/automation-path");
+                assert_eq!(workspace_type.as_deref(), Some("feature"));
+                assert!(no_input);
             }
             other => panic!("unexpected parse result: {:?}", other),
         }
@@ -2684,6 +3672,30 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_workspace_providers_command() {
+        let cli = Cli::try_parse_from([
+            "ship",
+            "workspace",
+            "providers",
+            "--branch",
+            "feature/demo",
+            "--mode",
+            "planning",
+        ])
+        .expect("workspace providers should parse");
+
+        match cli.command {
+            Some(Commands::Workspace {
+                action: WorkspaceCommands::Providers { branch, mode },
+            }) => {
+                assert_eq!(branch.as_deref(), Some("feature/demo"));
+                assert_eq!(mode.as_deref(), Some("planning"));
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    #[test]
     fn cli_parses_workspace_session_end_with_updates() {
         let cli = Cli::try_parse_from([
             "ship",
@@ -2696,8 +3708,6 @@ mod tests {
             "feat-auth",
             "--updated-feature",
             "feat-session",
-            "--updated-spec",
-            "spec-auth",
         ])
         .expect("workspace session end should parse");
 
@@ -2710,14 +3720,12 @@ mod tests {
                                 branch,
                                 summary,
                                 updated_feature,
-                                updated_spec,
                             },
                     },
             }) => {
                 assert!(branch.is_none());
                 assert_eq!(summary.as_deref(), Some("Done"));
                 assert_eq!(updated_feature, vec!["feat-auth", "feat-session"]);
-                assert_eq!(updated_spec, vec!["spec-auth"]);
             }
             other => panic!("unexpected parse result: {:?}", other),
         }
@@ -2745,6 +3753,195 @@ mod tests {
             }
             other => panic!("unexpected parse result: {:?}", other),
         }
+    }
+
+    #[test]
+    fn cli_parses_hooks_run_command() {
+        let cli = Cli::try_parse_from(["ship", "hooks", "run", "--provider", "claude"])
+            .expect("hooks run should parse");
+
+        match cli.command {
+            Some(Commands::Hooks {
+                action: HooksCommands::Run { provider },
+            }) => {
+                assert_eq!(provider.as_deref(), Some("claude"));
+            }
+            other => panic!("unexpected parse result: {:?}", other),
+        }
+    }
+
+    fn write_hook_runtime_artifacts_for_test(
+        ship_dir: &Path,
+        envelope: serde_json::Value,
+        context: Option<&str>,
+    ) -> Result<()> {
+        let runtime_dir = ship_dir.join("generated").join("runtime");
+        std::fs::create_dir_all(&runtime_dir)?;
+        std::fs::write(
+            runtime_dir.join("envelope.json"),
+            serde_json::to_string_pretty(&envelope)?,
+        )?;
+        if let Some(context) = context {
+            std::fs::write(runtime_dir.join("hook-context.md"), context)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_ship_dir_for_hook_runtime_handles_nested_project_cwd() -> Result<()> {
+        let tmp = tempdir()?;
+        let project_root = tmp.path().join("repo");
+        std::fs::create_dir_all(&project_root)?;
+        let ship_dir = init_project(project_root.clone())?;
+
+        let nested = project_root.join("services").join("ship-cloud").join("src");
+        std::fs::create_dir_all(&nested)?;
+
+        let resolved = resolve_ship_dir_for_hook_runtime(&nested)
+            .expect("expected .ship to resolve from nested cwd");
+        assert_eq!(resolved.canonicalize()?, ship_dir.canonicalize()?);
+        Ok(())
+    }
+
+    #[test]
+    fn claude_pre_tool_use_blocks_dangerous_shell_command() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+        write_hook_runtime_artifacts_for_test(
+            &ship_dir,
+            serde_json::json!({
+                "workspace_root": tmp.path().to_string_lossy().to_string(),
+                "allow_network": false,
+                "allow_installs": false,
+                "allowed_paths": ["."],
+                "auto_approve_patterns": ["git status*", "git diff*"],
+                "always_block_patterns": ["rm -rf *"],
+                "require_confirmation": [],
+                "tools_allow": ["*"],
+                "tools_deny": []
+            }),
+            None,
+        )?;
+
+        let payload = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "git status && rm -rf /tmp/x"
+            }
+        });
+        let response = build_hook_response(
+            HookProvider::Claude,
+            "PreToolUse",
+            &payload,
+            Some(ship_dir.as_path()),
+        )
+        .expect("expected deny response");
+        assert_eq!(
+            response["hookSpecificOutput"]["permissionDecision"].as_str(),
+            Some("deny")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn claude_pre_tool_use_auto_allows_safe_split_commands() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+        write_hook_runtime_artifacts_for_test(
+            &ship_dir,
+            serde_json::json!({
+                "workspace_root": tmp.path().to_string_lossy().to_string(),
+                "allow_network": false,
+                "allow_installs": false,
+                "allowed_paths": ["."],
+                "auto_approve_patterns": ["git status*", "git diff*"],
+                "always_block_patterns": ["rm -rf *"],
+                "require_confirmation": [],
+                "tools_allow": ["*"],
+                "tools_deny": []
+            }),
+            None,
+        )?;
+
+        let payload = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "FOO=1 git status && BAR=2 git diff --stat"
+            }
+        });
+        let response = build_hook_response(
+            HookProvider::Claude,
+            "PreToolUse",
+            &payload,
+            Some(ship_dir.as_path()),
+        )
+        .expect("expected allow response");
+        assert_eq!(
+            response["hookSpecificOutput"]["permissionDecision"].as_str(),
+            Some("allow")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gemini_before_tool_denies_network_when_disabled() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+        write_hook_runtime_artifacts_for_test(
+            &ship_dir,
+            serde_json::json!({
+                "workspace_root": tmp.path().to_string_lossy().to_string(),
+                "allow_network": false,
+                "allow_installs": false,
+                "allowed_paths": ["."],
+                "auto_approve_patterns": ["git status*"],
+                "always_block_patterns": [],
+                "require_confirmation": [],
+                "tools_allow": ["*"],
+                "tools_deny": []
+            }),
+            None,
+        )?;
+
+        let payload = serde_json::json!({
+            "tool_name": "run_shell_command",
+            "tool_input": {
+                "command": "curl https://example.com"
+            }
+        });
+        let response = build_hook_response(
+            HookProvider::Gemini,
+            "BeforeTool",
+            &payload,
+            Some(ship_dir.as_path()),
+        )
+        .expect("expected deny response");
+        assert_eq!(response["decision"].as_str(), Some("deny"));
+        Ok(())
+    }
+
+    #[test]
+    fn session_start_emits_context_via_json_output() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = init_project(tmp.path().to_path_buf())?;
+        write_hook_runtime_artifacts_for_test(
+            &ship_dir,
+            serde_json::json!({}),
+            Some("# Hook Context\n\nShip-first instructions."),
+        )?;
+
+        let response = build_hook_response(
+            HookProvider::Gemini,
+            "SessionStart",
+            &serde_json::json!({}),
+            Some(ship_dir.as_path()),
+        )
+        .expect("expected context response");
+        assert_eq!(
+            response["hookSpecificOutput"]["additionalContext"].as_str(),
+            Some("# Hook Context\n\nShip-first instructions.")
+        );
+        Ok(())
     }
 
     #[test]

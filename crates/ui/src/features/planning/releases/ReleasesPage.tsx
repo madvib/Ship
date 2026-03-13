@@ -9,9 +9,11 @@ import { Alert, AlertDescription, Button, Tooltip, TooltipTrigger, TooltipConten
 import MarkdownEditor from '@/components/editor';
 import TemplateEditorButton from '../common/TemplateEditorButton';
 import {
+  readFrontmatterBooleanField,
   readFrontmatterStringField,
   readFrontmatterStringListField,
   splitFrontmatterDocument,
+  setFrontmatterBooleanField,
   setFrontmatterStringField,
   setFrontmatterStringListField,
 } from '@ship/ui';
@@ -34,8 +36,27 @@ interface ReleasesPageProps {
   onCloseReleaseDetail: () => void;
   onSelectRelease: (entry: ReleaseInfo) => void;
   onSelectFeatureFromRelease: (feature: FeatureEntry) => void;
-  onSaveRelease: (fileName: string, content: string) => Promise<void> | void;
-  onCreateRelease: (version: string, content: string) => Promise<void>;
+  onSaveRelease: (
+    fileName: string,
+    content: string,
+    metadata?: {
+      version?: string | null;
+      status?: string | null;
+      supported?: boolean | null;
+      targetDate?: string | null;
+      tags?: string[] | null;
+    }
+  ) => Promise<void> | void;
+  onCreateRelease: (
+    version: string,
+    content: string,
+    metadata?: {
+      status?: string | null;
+      supported?: boolean | null;
+      targetDate?: string | null;
+      tags?: string[] | null;
+    }
+  ) => Promise<void>;
   mcpEnabled?: boolean;
 }
 
@@ -78,6 +99,40 @@ interface ReleaseReadinessSummary {
   ready: boolean;
 }
 
+function parseVersionParts(rawVersion: string): {
+  major: number;
+  minor: number;
+  patch: number;
+  suffix: string | null;
+} | null {
+  const match = rawVersion.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+    suffix: match[4] ?? null,
+  };
+}
+
+function deriveNextReleaseVersion(releases: ReleaseInfo[]): string {
+  const parsed = releases
+    .map((release) => parseVersionParts(release.version ?? ''))
+    .filter((value): value is NonNullable<ReturnType<typeof parseVersionParts>> => value !== null);
+
+  if (parsed.length === 0) return 'v0.1.1-alpha';
+
+  parsed.sort((left, right) => {
+    if (left.major !== right.major) return left.major - right.major;
+    if (left.minor !== right.minor) return left.minor - right.minor;
+    return left.patch - right.patch;
+  });
+  const latest = parsed[parsed.length - 1];
+  const nextPatch = latest.patch + 1;
+  const suffix = latest.suffix ?? 'alpha';
+  return `v${latest.major}.${latest.minor}.${nextPatch}-${suffix}`;
+}
+
 export default function ReleasesPage({
   releases,
   features,
@@ -103,6 +158,7 @@ export default function ReleasesPage({
   const [viewFilter, setViewFilter] = useState<ReleaseView>('all');
   const [activeTargetsOnly, setActiveTargetsOnly] = useState(false);
   const { metricsByFile: featureMetricsByFile } = useFeatureChecklistMetrics(features);
+  const defaultReleaseVersion = useMemo(() => deriveNextReleaseVersion(releases), [releases]);
 
   const matchesReleaseReference = (reference: string | null | undefined, release: ReleaseInfo) =>
     Boolean(reference) &&
@@ -110,7 +166,7 @@ export default function ReleasesPage({
 
   const createInitialReleaseDocument = () => {
     return `+++
-  version = "v0.1.0-alpha"
+  version = "${defaultReleaseVersion}"
 status = "planned"
 supported = false
 target_date = ""
@@ -138,14 +194,16 @@ tags = []
 
   const documentModel = useMemo(() => splitFrontmatterDocument(content), [content]);
   const fm = documentModel.frontmatter;
-  const currentVersion = readFrontmatterStringField(fm, 'version') || 'v0.1.0-alpha';
+  const currentVersion = readFrontmatterStringField(fm, 'version') || defaultReleaseVersion;
   const currentStatus = readFrontmatterStringField(fm, 'status') || 'planned';
+  const currentSupported = readFrontmatterBooleanField(fm, 'supported') ?? false;
   const currentTargetDate = readFrontmatterStringField(fm, 'target_date');
   const currentTags = readFrontmatterStringListField(fm, 'tags');
 
   const handleMetadataUpdate = (updates: {
     version?: string;
     status?: string;
+    supported?: boolean;
     target_date?: string;
     tags?: string[];
   }) => {
@@ -154,6 +212,7 @@ tags = []
 
     if (updates.version !== undefined) nextContent = setFrontmatterStringField(nextContent, 'version', updates.version, delimiter) ?? nextContent;
     if (updates.status !== undefined) nextContent = setFrontmatterStringField(nextContent, 'status', updates.status, delimiter) ?? nextContent;
+    if (updates.supported !== undefined) nextContent = setFrontmatterBooleanField(nextContent, 'supported', updates.supported, delimiter) ?? nextContent;
     if (updates.target_date !== undefined) nextContent = setFrontmatterStringField(nextContent, 'target_date', updates.target_date, delimiter) ?? nextContent;
     if (updates.tags !== undefined) nextContent = setFrontmatterStringListField(nextContent, 'tags', updates.tags, delimiter) ?? nextContent;
 
@@ -296,13 +355,23 @@ tags = []
     event.preventDefault();
     const parsed = splitFrontmatterDocument(content);
     const cleanVersion = readFrontmatterStringField(parsed.frontmatter, 'version').trim();
+    const status = readFrontmatterStringField(parsed.frontmatter, 'status').trim() || null;
+    const targetDateValue = readFrontmatterStringField(parsed.frontmatter, 'target_date').trim();
+    const targetDate = targetDateValue.length > 0 ? targetDateValue : null;
+    const supported = readFrontmatterBooleanField(parsed.frontmatter, 'supported');
+    const tags = readFrontmatterStringListField(parsed.frontmatter, 'tags');
     if (!cleanVersion) {
       setError('Version is required.');
       return;
     }
     try {
       setCreating(true);
-      await onCreateRelease(cleanVersion, content);
+      await onCreateRelease(cleanVersion, content, {
+        status,
+        supported,
+        targetDate,
+        tags,
+      });
       setCreateOpen(false);
       setContent(createInitialReleaseDocument());
       setError(null);
@@ -334,7 +403,7 @@ tags = []
   useEffect(() => {
     if (createOpen) return;
     setContent(createInitialReleaseDocument());
-  }, [createOpen]);
+  }, [createOpen, defaultReleaseVersion]);
 
   if (selectedRelease) {
     return (
@@ -462,6 +531,7 @@ tags = []
             <ReleaseHeaderMetadata
               version={currentVersion}
               status={currentStatus}
+              supported={currentSupported}
               targetDate={currentTargetDate}
               tags={currentTags}
               isEditing={true}

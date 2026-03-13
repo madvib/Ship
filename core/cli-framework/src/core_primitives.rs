@@ -27,8 +27,6 @@ pub enum SkillAction {
     Install {
         source: String,
         id: String,
-        git_ref: String,
-        repo_path: String,
         scope: SkillWriteScope,
         force: bool,
     },
@@ -113,6 +111,7 @@ pub enum ProviderAction {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ProviderImportSummary {
     pub mcp_servers_added: usize,
+    pub skills_added: usize,
     pub permissions_imported: bool,
 }
 
@@ -144,8 +143,6 @@ pub fn handle_skill_action(action: SkillAction, project_dir: Option<&Path>) -> R
         SkillAction::Install {
             source,
             id,
-            git_ref,
-            repo_path,
             scope,
             force,
         } => {
@@ -162,8 +159,8 @@ pub fn handle_skill_action(action: SkillAction, project_dir: Option<&Path>) -> R
                 project_dir,
                 &source,
                 &id,
-                Some(&git_ref),
-                Some(&repo_path),
+                None,
+                None,
                 install_scope,
                 force,
             )?;
@@ -489,9 +486,10 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
             }
             let summary = import_provider_surface(project_dir, &id)?;
             println!(
-                "Imported from {}: mcp_servers={}, permissions={}",
+                "Imported from {}: mcp_servers={}, skills={}, permissions={}",
                 id,
                 summary.mcp_servers_added,
+                summary.skills_added,
                 if summary.permissions_imported {
                     "yes"
                 } else {
@@ -519,10 +517,15 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
             println!("{:<30} {:<14} {}", "MODEL", "CONTEXT", "");
             println!("{}", "-".repeat(60));
             for model in models {
+                let context = if model.context_window == 0 {
+                    "-".to_string()
+                } else {
+                    format!("{}k", model.context_window / 1000)
+                };
                 println!(
                     "{:<30} {:<14} {}",
                     model.id,
-                    format!("{}k", model.context_window / 1000),
+                    context,
                     if model.recommended {
                         "(recommended)"
                     } else {
@@ -550,9 +553,10 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
                 for provider in targets {
                     let summary = import_provider_surface(project_dir, &provider)?;
                     println!(
-                        "Imported from {}: mcp_servers={}, permissions={}",
+                        "Imported from {}: mcp_servers={}, skills={}, permissions={}",
                         provider,
                         summary.mcp_servers_added,
+                        summary.skills_added,
                         if summary.permissions_imported {
                             "yes"
                         } else {
@@ -569,12 +573,17 @@ pub fn handle_provider_action(action: ProviderAction, project_dir: &Path) -> Res
 fn import_provider_surface(project_dir: &Path, provider_id: &str) -> Result<ProviderImportSummary> {
     let mcp_servers_added =
         runtime::agents::export::import_from_provider(provider_id, project_dir.to_path_buf())?;
+    let skills_added = runtime::agents::export::import_skills_from_provider(
+        provider_id,
+        project_dir.to_path_buf(),
+    )?;
     let permissions_imported = runtime::agents::export::import_permissions_from_provider(
         provider_id,
         project_dir.to_path_buf(),
     )?;
     Ok(ProviderImportSummary {
         mcp_servers_added,
+        skills_added,
         permissions_imported,
     })
 }

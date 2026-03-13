@@ -1,3 +1,4 @@
+use crate::agents::config::FeatureAgentConfig;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use serde_json;
@@ -65,7 +66,7 @@ const PROJECT_SCHEMA_WORKSPACE: &str = r#"
 CREATE TABLE IF NOT EXISTS workspace (
   branch         TEXT PRIMARY KEY,
   feature_id     TEXT,
-  spec_id        TEXT,
+  target_id      TEXT,
   active_mode    TEXT,
   providers_json TEXT NOT NULL DEFAULT '[]',
   resolved_at    TEXT NOT NULL,
@@ -77,8 +78,8 @@ CREATE TABLE IF NOT EXISTS workspace (
 const PROJECT_SCHEMA_WORKSPACE_V2: &str = r#"
 ALTER TABLE workspace ADD COLUMN id TEXT;
 ALTER TABLE workspace ADD COLUMN workspace_type TEXT NOT NULL DEFAULT 'feature';
-ALTER TABLE workspace ADD COLUMN status TEXT NOT NULL DEFAULT 'idle';
-ALTER TABLE workspace ADD COLUMN release_id TEXT;
+ALTER TABLE workspace ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE workspace ADD COLUMN environment_id TEXT;
 ALTER TABLE workspace ADD COLUMN last_activated_at TEXT;
 ALTER TABLE workspace ADD COLUMN context_hash TEXT;
 
@@ -104,7 +105,6 @@ CREATE TABLE IF NOT EXISTS workspace_session (
   goal                      TEXT,
   summary                   TEXT,
   updated_feature_ids_json  TEXT NOT NULL DEFAULT '[]',
-  updated_spec_ids_json     TEXT NOT NULL DEFAULT '[]',
   compiled_at               TEXT,
   compile_error             TEXT,
   created_at                TEXT NOT NULL,
@@ -124,12 +124,58 @@ ALTER TABLE workspace ADD COLUMN compiled_at TEXT;
 ALTER TABLE workspace ADD COLUMN compile_error TEXT;
 "#;
 
+const PROJECT_SCHEMA_RUNTIME_PRIMITIVES_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS environment (
+  id            TEXT PRIMARY KEY,
+  name          TEXT,
+  tools_json    TEXT NOT NULL DEFAULT '[]',
+  rules_json    TEXT NOT NULL DEFAULT '[]',
+  permissions_json TEXT NOT NULL DEFAULT '{}',
+  providers_json TEXT NOT NULL DEFAULT '[]',
+  hooks_json    TEXT NOT NULL DEFAULT '{}',
+  mcp_servers_json TEXT NOT NULL DEFAULT '[]',
+  created_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runtime_process (
+  id            TEXT PRIMARY KEY,
+  workspace_id  TEXT NOT NULL,
+  status        TEXT NOT NULL,
+  provider      TEXT,
+  capability    TEXT,
+  started_at    TEXT NOT NULL,
+  ended_at      TEXT,
+  error         TEXT
+);
+CREATE INDEX IF NOT EXISTS runtime_process_workspace_idx
+  ON runtime_process(workspace_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS git_workspace (
+  workspace_id      TEXT PRIMARY KEY,
+  branch            TEXT NOT NULL UNIQUE,
+  worktree_path     TEXT,
+  feature_id        TEXT,
+  release_id        TEXT,
+  compile_generation INTEGER NOT NULL DEFAULT 0,
+  compiled_at       TEXT,
+  compile_error     TEXT,
+  context_hash      TEXT
+);
+CREATE INDEX IF NOT EXISTS git_workspace_feature_idx
+  ON git_workspace(feature_id);
+"#;
+
 const PROJECT_SCHEMA_AGENT_RUNTIME_SETTINGS: &str = r#"
 CREATE TABLE IF NOT EXISTS agent_runtime_settings (
   id             INTEGER PRIMARY KEY CHECK(id = 1),
   active_mode    TEXT,
   providers_json TEXT NOT NULL DEFAULT '[]',
   hooks_json     TEXT NOT NULL DEFAULT '[]',
+  statuses_json  TEXT NOT NULL DEFAULT '[]',
+  ai_json        TEXT,
+  git_json       TEXT NOT NULL DEFAULT '{}',
+  namespaces_json TEXT NOT NULL DEFAULT '[]',
   updated_at     TEXT NOT NULL
 );
 "#;
@@ -244,6 +290,7 @@ CREATE TABLE IF NOT EXISTS release (
   status          TEXT NOT NULL DEFAULT 'planned',
   target_date     TEXT,
   supported       INTEGER,
+  body            TEXT NOT NULL DEFAULT '',
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
@@ -281,24 +328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS feature_doc_revision_feature_idx
   ON feature_doc_revision(feature_id, revision);
 "#;
 
-const PROJECT_SCHEMA_ISSUES_SPECS: &str = r#"
-CREATE TABLE IF NOT EXISTS issue (
-  id              TEXT PRIMARY KEY,
-  title           TEXT NOT NULL,
-  description     TEXT NOT NULL DEFAULT '',
-  status          TEXT NOT NULL DEFAULT 'backlog',
-  assignee        TEXT,
-  priority        TEXT,
-  release_id      TEXT,
-  feature_id      TEXT,
-  spec_id         TEXT,
-  tags_json       TEXT NOT NULL DEFAULT '[]',
-  links_json      TEXT NOT NULL DEFAULT '[]',
-  created_at      TEXT NOT NULL,
-  updated_at      TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS issue_status_idx ON issue(status);
-
+const PROJECT_SCHEMA_SPECS: &str = r#"
 CREATE TABLE IF NOT EXISTS spec (
   id              TEXT PRIMARY KEY,
   title           TEXT NOT NULL,
@@ -336,6 +366,8 @@ CREATE TABLE IF NOT EXISTS event_log (
   details     TEXT
 );
 CREATE INDEX IF NOT EXISTS event_log_timestamp_idx ON event_log(timestamp);
+CREATE INDEX IF NOT EXISTS event_log_lookup_idx
+  ON event_log(timestamp, actor, entity, action, subject);
 "#;
 
 const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
@@ -346,7 +378,7 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
     ("0005_notes", PROJECT_SCHEMA_NOTES),
     ("0006_features_releases", PROJECT_SCHEMA_FEATURES_RELEASES),
     ("0007_workspace_lifecycle", PROJECT_SCHEMA_WORKSPACE_V2),
-    ("0008_issues_specs", PROJECT_SCHEMA_ISSUES_SPECS),
+    ("0008_specs", PROJECT_SCHEMA_SPECS),
     ("0009_migration_meta", SCHEMA_MIGRATION_META),
     ("0010_event_log", PROJECT_SCHEMA_EVENTS),
     (
@@ -360,6 +392,101 @@ const PROJECT_MIGRATIONS: &[(&str, &str)] = &[
         PROJECT_SCHEMA_WORKSPACE_COMPILE_STATE,
     ),
     ("0015_feature_docs", PROJECT_SCHEMA_FEATURE_DOCS),
+    (
+        "0016_feature_body_release_status",
+        "ALTER TABLE feature ADD COLUMN body TEXT NOT NULL DEFAULT '';
+         UPDATE release SET status = 'upcoming' WHERE status = 'planned';
+         UPDATE release SET status = 'deprecated' WHERE status IN ('shipped', 'archived');",
+    ),
+    (
+        "0017_workspace_runtime_contract",
+        "UPDATE workspace
+         SET workspace_type = lower(trim(workspace_type))
+         WHERE workspace_type IS NOT NULL
+           AND trim(workspace_type) != '';
+         UPDATE workspace
+         SET workspace_type = 'feature'
+         WHERE workspace_type IS NULL
+            OR trim(workspace_type) = '';
+         UPDATE workspace
+         SET status = 'active'
+         WHERE lower(trim(status)) = 'active';
+         UPDATE workspace
+         SET status = 'archived'
+         WHERE lower(trim(status)) = 'archived';
+         UPDATE workspace
+         SET status = 'archived'
+         WHERE status IS NOT NULL
+           AND trim(status) != ''
+           AND lower(trim(status)) NOT IN ('active', 'archived');
+         UPDATE workspace
+         SET status = 'active'
+         WHERE status IS NULL OR trim(status) = '';",
+    ),
+    (
+        "0018_runtime_primitives_v3",
+        PROJECT_SCHEMA_RUNTIME_PRIMITIVES_V3,
+    ),
+    (
+        "0019_workspace_target_and_session_records",
+        "CREATE TABLE IF NOT EXISTS workspace_session_record (
+           id                 TEXT PRIMARY KEY,
+           session_id         TEXT NOT NULL UNIQUE REFERENCES workspace_session(id) ON DELETE CASCADE,
+           workspace_id       TEXT NOT NULL,
+           workspace_branch   TEXT NOT NULL,
+           summary            TEXT,
+           updated_feature_ids_json TEXT NOT NULL DEFAULT '[]',
+           created_at         TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS workspace_session_record_workspace_idx
+           ON workspace_session_record(workspace_id, created_at DESC);",
+    ),
+    (
+        "0020_capability_and_target_links",
+        "CREATE TABLE IF NOT EXISTS capability_map (
+           id            TEXT PRIMARY KEY,
+           vision_ref    TEXT,
+           created_at    TEXT NOT NULL,
+           updated_at    TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS capability (
+           id                    TEXT PRIMARY KEY,
+           map_id                TEXT NOT NULL REFERENCES capability_map(id) ON DELETE CASCADE,
+           title                 TEXT NOT NULL,
+           description           TEXT NOT NULL DEFAULT '',
+           parent_capability_id  TEXT REFERENCES capability(id) ON DELETE SET NULL,
+           status                TEXT NOT NULL DEFAULT 'active',
+           ord                   INTEGER NOT NULL DEFAULT 0,
+           created_at            TEXT NOT NULL,
+           updated_at            TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS capability_map_idx
+           ON capability(map_id, ord ASC, updated_at DESC);
+         CREATE TABLE IF NOT EXISTS feature_capability (
+           feature_id      TEXT NOT NULL REFERENCES feature(id) ON DELETE CASCADE,
+           capability_id   TEXT NOT NULL REFERENCES capability(id) ON DELETE CASCADE,
+           is_primary      INTEGER NOT NULL DEFAULT 1,
+           created_at      TEXT NOT NULL,
+           PRIMARY KEY(feature_id, capability_id)
+         );
+         CREATE UNIQUE INDEX IF NOT EXISTS feature_capability_primary_idx
+           ON feature_capability(feature_id)
+           WHERE is_primary = 1;
+         CREATE TABLE IF NOT EXISTS target_feature (
+           target_id       TEXT NOT NULL REFERENCES release(id) ON DELETE CASCADE,
+           feature_id      TEXT NOT NULL REFERENCES feature(id) ON DELETE CASCADE,
+           ord             INTEGER NOT NULL DEFAULT 0,
+           created_at      TEXT NOT NULL,
+           PRIMARY KEY(target_id, feature_id)
+         );
+         CREATE INDEX IF NOT EXISTS target_feature_feature_idx
+           ON target_feature(feature_id, target_id);",
+    ),
+    (
+        "0021_workspace_agent_overrides",
+        "ALTER TABLE workspace ADD COLUMN mcp_servers_json TEXT NOT NULL DEFAULT '[]';
+         ALTER TABLE workspace ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]';",
+    ),
 ];
 const GLOBAL_MIGRATIONS: &[(&str, &str)] = &[
     ("0001_global_schema", GLOBAL_SCHEMA_V1),
@@ -374,7 +501,7 @@ pub struct DatabaseMigrationReport {
     pub applied_migrations: usize,
 }
 
-pub type FeatureBranchLinks = (String, Option<String>, Option<String>);
+pub type FeatureBranchLinks = (String, Option<String>);
 
 pub type WorkspaceDbRow = (
     String,
@@ -384,6 +511,8 @@ pub type WorkspaceDbRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Vec<String>,
+    Vec<String>,
     Vec<String>,
     String,
     bool,
@@ -405,6 +534,8 @@ pub type WorkspaceDbListRow = (
     Option<String>,
     Option<String>,
     Vec<String>,
+    Vec<String>,
+    Vec<String>,
     String,
     bool,
     Option<String>,
@@ -420,11 +551,13 @@ pub struct WorkspaceUpsert<'a> {
     pub workspace_id: &'a str,
     pub workspace_type: &'a str,
     pub status: &'a str,
+    pub environment_id: Option<&'a str>,
     pub feature_id: Option<&'a str>,
-    pub spec_id: Option<&'a str>,
-    pub release_id: Option<&'a str>,
+    pub target_id: Option<&'a str>,
     pub active_mode: Option<&'a str>,
     pub providers: &'a [String],
+    pub mcp_servers: &'a [String],
+    pub skills: &'a [String],
     pub resolved_at: &'a str,
     pub is_worktree: bool,
     pub worktree_path: Option<&'a str>,
@@ -448,10 +581,41 @@ pub struct WorkspaceSessionDb {
     pub goal: Option<String>,
     pub summary: Option<String>,
     pub updated_feature_ids: Vec<String>,
-    pub updated_spec_ids: Vec<String>,
     pub compiled_at: Option<String>,
     pub compile_error: Option<String>,
     pub config_generation_at_start: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSessionRecordDb {
+    pub id: String,
+    pub session_id: String,
+    pub workspace_id: String,
+    pub workspace_branch: String,
+    pub summary: Option<String>,
+    pub updated_feature_ids: Vec<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityMapDb {
+    pub id: String,
+    pub vision_ref: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityDb {
+    pub id: String,
+    pub map_id: String,
+    pub title: String,
+    pub description: String,
+    pub parent_capability_id: Option<String>,
+    pub status: String,
+    pub ord: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -461,6 +625,10 @@ pub struct AgentRuntimeSettingsDb {
     pub providers: Vec<String>,
     pub active_mode: Option<String>,
     pub hooks_json: String,
+    pub statuses_json: String,
+    pub ai_json: Option<String>,
+    pub git_json: String,
+    pub namespaces_json: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -489,15 +657,79 @@ pub struct AgentModeDb {
 }
 
 /// Returns `~/.ship/state/<project-slug>/ship.db` for the given ship_dir.
-/// The slug is derived from the canonical project root path, making it stable
-/// across sessions and safe to store alongside the global DB.
+///
+/// The state key is a human-readable, stable slug (`<project-name>-<project-id>`), so
+/// operators can identify project DBs at a glance while still staying path-independent.
+///
+/// For compatibility, if an older ID-only directory exists (`state/<id>/ship.db`) and the
+/// slug directory does not, Ship promotes the old directory to the slug directory once.
 pub fn project_db_path(ship_dir: &Path) -> Result<PathBuf> {
-    let slug = project_slug(ship_dir)?;
     let global_dir = ship_global_dir()?;
     ensure_global_dir_outside_project(ship_dir, &global_dir)?;
-    Ok(global_dir.join("state").join(slug).join("ship.db"))
+
+    let key = project_db_key(ship_dir)?;
+    promote_legacy_project_state_dir(ship_dir, &global_dir, &key)?;
+    Ok(global_dir.join("state").join(key).join("ship.db"))
 }
 
+/// Stable key used for the project's state directory.
+/// Uses a stable, human-readable slug derived from `ship.toml`.
+///
+/// This avoids calling `get_config` here to prevent dependency loops.
+fn project_db_key(ship_dir: &Path) -> Result<String> {
+    Ok(crate::project::project_slug_from_ship_dir(ship_dir))
+}
+
+fn legacy_project_db_key(ship_dir: &Path) -> Result<String> {
+    crate::project::ensure_project_id(ship_dir)
+}
+
+fn promote_legacy_project_state_dir(
+    ship_dir: &Path,
+    global_dir: &Path,
+    project_key: &str,
+) -> Result<()> {
+    let legacy_key = legacy_project_db_key(ship_dir)?;
+    if legacy_key == project_key {
+        return Ok(());
+    }
+
+    let state_root = global_dir.join("state");
+    let project_dir = state_root.join(project_key);
+    let project_db = project_dir.join("ship.db");
+    if project_db.exists() {
+        return Ok(());
+    }
+
+    let legacy_dir = state_root.join(&legacy_key);
+    let legacy_db = legacy_dir.join("ship.db");
+    if !legacy_db.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = project_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if std::fs::rename(&legacy_dir, &project_dir).is_ok() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&project_dir)?;
+    for suffix in ["", "-wal", "-shm"] {
+        let src = legacy_dir.join(format!("ship.db{}", suffix));
+        if !src.exists() {
+            continue;
+        }
+        let dst = project_dir.join(format!("ship.db{}", suffix));
+        let _ = std::fs::rename(&src, &dst).or_else(|_| {
+            std::fs::copy(&src, &dst)?;
+            std::fs::remove_file(&src)
+        });
+    }
+    let _ = std::fs::remove_dir(&legacy_dir);
+    Ok(())
+}
 pub fn ensure_project_database(ship_dir: &Path) -> Result<DatabaseMigrationReport> {
     let db_path = project_db_path(ship_dir)?;
     ensure_database(&db_path, PROJECT_MIGRATIONS)
@@ -670,7 +902,7 @@ pub fn get_agent_runtime_settings_db(ship_dir: &Path) -> Result<Option<AgentRunt
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
         sqlx::query(
-            "SELECT providers_json, active_mode, hooks_json
+            "SELECT providers_json, active_mode, hooks_json, statuses_json, ai_json, git_json, namespaces_json
              FROM agent_runtime_settings
              WHERE id = 1",
         )
@@ -686,12 +918,20 @@ pub fn get_agent_runtime_settings_db(ship_dir: &Path) -> Result<Option<AgentRunt
     let providers_json: String = row.get(0);
     let active_mode: Option<String> = row.get(1);
     let hooks_json: String = row.get(2);
+    let statuses_json: String = row.get(3);
+    let ai_json: Option<String> = row.get(4);
+    let git_json: String = row.get(5);
+    let namespaces_json: String = row.get(6);
     let providers: Vec<String> = serde_json::from_str(&providers_json).unwrap_or_default();
 
     Ok(Some(AgentRuntimeSettingsDb {
         providers,
         active_mode,
         hooks_json,
+        statuses_json,
+        ai_json,
+        git_json,
+        namespaces_json,
     }))
 }
 
@@ -700,6 +940,10 @@ pub fn set_agent_runtime_settings_db(
     providers: &[String],
     active_mode: Option<&str>,
     hooks_json: &str,
+    statuses_json: &str,
+    ai_json: Option<&str>,
+    git_json: &str,
+    namespaces_json: &str,
 ) -> Result<()> {
     let mut conn = open_project_db(ship_dir)?;
     let providers_json = serde_json::to_string(providers)
@@ -707,17 +951,26 @@ pub fn set_agent_runtime_settings_db(
     let now = Utc::now().to_rfc3339();
     block_on(async {
         sqlx::query(
-            "INSERT INTO agent_runtime_settings (id, providers_json, active_mode, hooks_json, updated_at)
-             VALUES (1, ?, ?, ?, ?)
+            "INSERT INTO agent_runtime_settings
+             (id, providers_json, active_mode, hooks_json, statuses_json, ai_json, git_json, namespaces_json, updated_at)
+             VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                providers_json = excluded.providers_json,
                active_mode = excluded.active_mode,
                hooks_json = excluded.hooks_json,
+               statuses_json = excluded.statuses_json,
+               ai_json = excluded.ai_json,
+               git_json = excluded.git_json,
+               namespaces_json = excluded.namespaces_json,
                updated_at = excluded.updated_at",
         )
         .bind(&providers_json)
         .bind(active_mode)
         .bind(hooks_json)
+        .bind(statuses_json)
+        .bind(ai_json)
+        .bind(git_json)
+        .bind(namespaces_json)
         .bind(&now)
         .execute(&mut conn)
         .await
@@ -1029,30 +1282,27 @@ pub fn clear_branch_doc(ship_dir: &Path, branch: &str) -> Result<()> {
     clear_branch_link(ship_dir, branch)
 }
 
-/// Look up feature-linked ids used by workspace hydration.
-/// Returns `(spec_id, release_id)` when the feature exists.
-pub fn get_feature_links(
-    ship_dir: &Path,
-    feature_id: &str,
-) -> Result<Option<(Option<String>, Option<String>)>> {
+/// Look up feature-linked target id used by workspace hydration.
+/// Returns `target_id` when the feature exists.
+pub fn get_feature_links(ship_dir: &Path, feature_id: &str) -> Result<Option<Option<String>>> {
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
-        sqlx::query("SELECT spec_id, release_id FROM feature WHERE id = ?")
+        sqlx::query("SELECT active_target_id, release_id FROM feature WHERE id = ?")
             .bind(feature_id)
             .fetch_optional(&mut conn)
             .await
     })?;
     if let Some(row) = row_opt {
         use sqlx::Row;
-        let spec_id: Option<String> = row.get(0);
+        let active_target_id: Option<String> = row.get(0);
         let release_id: Option<String> = row.get(1);
-        Ok(Some((spec_id, release_id)))
+        Ok(Some(active_target_id.or(release_id)))
     } else {
         Ok(None)
     }
 }
 
-/// Resolve a feature by git branch and return `(feature_id, spec_id, release_id)`.
+/// Resolve a feature by git branch and return `(feature_id, target_id)`.
 /// Uses most recently updated row when multiple features share the same branch.
 pub fn get_feature_by_branch_links(
     ship_dir: &Path,
@@ -1061,7 +1311,7 @@ pub fn get_feature_by_branch_links(
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
         sqlx::query(
-            "SELECT id, spec_id, release_id
+            "SELECT id, active_target_id, release_id
              FROM feature
              WHERE branch = ?
              ORDER BY updated_at DESC
@@ -1073,12 +1323,284 @@ pub fn get_feature_by_branch_links(
     })?;
     if let Some(row) = row_opt {
         let feature_id: String = row.get(0);
-        let spec_id: Option<String> = row.get(1);
+        let active_target_id: Option<String> = row.get(1);
         let release_id: Option<String> = row.get(2);
-        Ok(Some((feature_id, spec_id, release_id)))
+        Ok(Some((feature_id, active_target_id.or(release_id))))
     } else {
         Ok(None)
     }
+}
+
+/// Read provider candidates declared on a feature's `agent_json.providers`.
+/// Returns:
+/// - `None` when the feature row does not exist
+/// - `Some(vec![])` when present but unset/invalid/empty
+pub fn get_feature_agent_providers(
+    ship_dir: &Path,
+    feature_id: &str,
+) -> Result<Option<Vec<String>>> {
+    let feature_agent = get_feature_agent_config(ship_dir, feature_id)?;
+    let Some(agent) = feature_agent else {
+        return Ok(None);
+    };
+    Ok(Some(agent.providers))
+}
+
+/// Read and parse a feature's `agent_json` payload.
+/// Returns:
+/// - `None` when the feature row does not exist
+/// - `Some(None)` semantics are represented as `Some(FeatureAgentConfig::default())`
+///   when `agent_json` is unset/empty/invalid
+pub fn get_feature_agent_config(
+    ship_dir: &Path,
+    feature_id: &str,
+) -> Result<Option<FeatureAgentConfig>> {
+    let mut conn = open_project_db(ship_dir)?;
+    let row_opt = block_on(async {
+        sqlx::query("SELECT agent_json FROM feature WHERE id = ?")
+            .bind(feature_id)
+            .fetch_optional(&mut conn)
+            .await
+    })?;
+
+    let Some(row) = row_opt else {
+        return Ok(None);
+    };
+
+    let agent_json: Option<String> = row.get(0);
+    let Some(raw) = agent_json else {
+        return Ok(Some(FeatureAgentConfig::default()));
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "{}" || trimmed.eq_ignore_ascii_case("null") {
+        return Ok(Some(FeatureAgentConfig::default()));
+    }
+
+    let parsed: FeatureAgentConfig = match serde_json::from_str(trimmed) {
+        Ok(value) => value,
+        Err(_) => return Ok(Some(FeatureAgentConfig::default())),
+    };
+    Ok(Some(parsed))
+}
+
+/// Replace the ordered feature slice for a target/release.
+pub fn replace_target_features_db(
+    ship_dir: &Path,
+    target_id: &str,
+    feature_ids: &[String],
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    let now = Utc::now().to_rfc3339();
+    block_on(async {
+        sqlx::query("DELETE FROM target_feature WHERE target_id = ?")
+            .bind(target_id)
+            .execute(&mut conn)
+            .await?;
+
+        for (ord, feature_id) in feature_ids.iter().enumerate() {
+            sqlx::query(
+                "INSERT OR IGNORE INTO target_feature (target_id, feature_id, ord, created_at)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(target_id)
+            .bind(feature_id)
+            .bind(ord as i64)
+            .bind(&now)
+            .execute(&mut conn)
+            .await?;
+        }
+
+        Ok::<(), sqlx::Error>(())
+    })?;
+    Ok(())
+}
+
+/// List feature ids currently linked to a target/release ordered by `ord`.
+pub fn list_target_features_db(ship_dir: &Path, target_id: &str) -> Result<Vec<String>> {
+    let mut conn = open_project_db(ship_dir)?;
+    block_on(async {
+        sqlx::query_scalar::<_, String>(
+            "SELECT feature_id
+             FROM target_feature
+             WHERE target_id = ?
+             ORDER BY ord ASC, created_at ASC",
+        )
+        .bind(target_id)
+        .fetch_all(&mut conn)
+        .await
+    })
+    .map_err(Into::into)
+}
+
+/// Set/clear the primary capability for a feature.
+pub fn set_feature_primary_capability_db(
+    ship_dir: &Path,
+    feature_id: &str,
+    capability_id: Option<&str>,
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    let now = Utc::now().to_rfc3339();
+    block_on(async {
+        sqlx::query("DELETE FROM feature_capability WHERE feature_id = ? AND is_primary = 1")
+            .bind(feature_id)
+            .execute(&mut conn)
+            .await?;
+
+        if let Some(capability_id) = capability_id {
+            sqlx::query(
+                "INSERT INTO feature_capability (feature_id, capability_id, is_primary, created_at)
+                 VALUES (?, ?, 1, ?)
+                 ON CONFLICT(feature_id, capability_id)
+                 DO UPDATE SET is_primary = 1",
+            )
+            .bind(feature_id)
+            .bind(capability_id)
+            .bind(&now)
+            .execute(&mut conn)
+            .await?;
+        }
+
+        Ok::<(), sqlx::Error>(())
+    })?;
+    Ok(())
+}
+
+/// Get the primary capability id for a feature when present.
+pub fn get_feature_primary_capability_db(
+    ship_dir: &Path,
+    feature_id: &str,
+) -> Result<Option<String>> {
+    let mut conn = open_project_db(ship_dir)?;
+    block_on(async {
+        sqlx::query_scalar::<_, String>(
+            "SELECT capability_id
+             FROM feature_capability
+             WHERE feature_id = ? AND is_primary = 1
+             ORDER BY created_at DESC
+             LIMIT 1",
+        )
+        .bind(feature_id)
+        .fetch_optional(&mut conn)
+        .await
+    })
+    .map_err(Into::into)
+}
+
+pub fn upsert_capability_map_db(ship_dir: &Path, map: &CapabilityMapDb) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO capability_map (id, vision_ref, created_at, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(id)
+             DO UPDATE SET
+               vision_ref = excluded.vision_ref,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&map.id)
+        .bind(&map.vision_ref)
+        .bind(&map.created_at)
+        .bind(&map.updated_at)
+        .execute(&mut conn)
+        .await
+    })?;
+    Ok(())
+}
+
+pub fn list_capability_maps_db(ship_dir: &Path) -> Result<Vec<CapabilityMapDb>> {
+    let mut conn = open_project_db(ship_dir)?;
+    let rows = block_on(async {
+        sqlx::query(
+            "SELECT id, vision_ref, created_at, updated_at
+             FROM capability_map
+             ORDER BY updated_at DESC, id ASC",
+        )
+        .fetch_all(&mut conn)
+        .await
+    })?;
+    Ok(rows
+        .into_iter()
+        .map(|row| CapabilityMapDb {
+            id: row.get(0),
+            vision_ref: row.get(1),
+            created_at: row.get(2),
+            updated_at: row.get(3),
+        })
+        .collect())
+}
+
+pub fn upsert_capability_db(ship_dir: &Path, capability: &CapabilityDb) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO capability
+             (id, map_id, title, description, parent_capability_id, status, ord, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id)
+             DO UPDATE SET
+               map_id = excluded.map_id,
+               title = excluded.title,
+               description = excluded.description,
+               parent_capability_id = excluded.parent_capability_id,
+               status = excluded.status,
+               ord = excluded.ord,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&capability.id)
+        .bind(&capability.map_id)
+        .bind(&capability.title)
+        .bind(&capability.description)
+        .bind(&capability.parent_capability_id)
+        .bind(&capability.status)
+        .bind(capability.ord)
+        .bind(&capability.created_at)
+        .bind(&capability.updated_at)
+        .execute(&mut conn)
+        .await
+    })?;
+    Ok(())
+}
+
+pub fn list_capabilities_db(ship_dir: &Path, map_id: Option<&str>) -> Result<Vec<CapabilityDb>> {
+    let mut conn = open_project_db(ship_dir)?;
+    let rows = if let Some(map_id) = map_id {
+        block_on(async {
+            sqlx::query(
+                "SELECT id, map_id, title, description, parent_capability_id, status, ord, created_at, updated_at
+                 FROM capability
+                 WHERE map_id = ?
+                 ORDER BY ord ASC, updated_at DESC",
+            )
+            .bind(map_id)
+            .fetch_all(&mut conn)
+            .await
+        })?
+    } else {
+        block_on(async {
+            sqlx::query(
+                "SELECT id, map_id, title, description, parent_capability_id, status, ord, created_at, updated_at
+                 FROM capability
+                 ORDER BY map_id ASC, ord ASC, updated_at DESC",
+            )
+            .fetch_all(&mut conn)
+            .await
+        })?
+    };
+
+    Ok(rows
+        .into_iter()
+        .map(|row| CapabilityDb {
+            id: row.get(0),
+            map_id: row.get(1),
+            title: row.get(2),
+            description: row.get(3),
+            parent_capability_id: row.get(4),
+            status: row.get(5),
+            ord: row.get(6),
+            created_at: row.get(7),
+            updated_at: row.get(8),
+        })
+        .collect())
 }
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -1108,20 +1630,6 @@ fn ensure_global_dir_outside_project(ship_dir: &Path, global_dir: &Path) -> Resu
     Ok(())
 }
 
-/// Derives a filesystem-safe slug from the project root path.
-/// `/home/alice/dev/my-app` → `home-alice-dev-my-app`
-fn project_slug(ship_dir: &Path) -> Result<String> {
-    let slug = crate::project::project_slug_from_ship_dir(ship_dir);
-
-    if slug.is_empty() {
-        return Err(anyhow!(
-            "Could not derive a project slug from {}",
-            ship_dir.display()
-        ));
-    }
-    Ok(slug)
-}
-
 // ─── Workspace ────────────────────────────────────────────────────────────────
 
 /// Retrieve the workspace record for the given branch, or None if none exists.
@@ -1129,7 +1637,7 @@ pub fn get_workspace_db(ship_dir: &Path, branch: &str) -> Result<Option<Workspac
     let mut conn = open_project_db(ship_dir)?;
     let row_opt = block_on(async {
         sqlx::query(
-            "SELECT COALESCE(id, branch), workspace_type, status, feature_id, spec_id, release_id, active_mode, providers_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, COALESCE(config_generation, 0), compiled_at, compile_error
+            "SELECT COALESCE(id, branch), workspace_type, status, environment_id, feature_id, target_id, active_mode, providers_json, mcp_servers_json, skills_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, COALESCE(config_generation, 0), compiled_at, compile_error
              FROM workspace WHERE branch = ?",
         )
         .bind(branch)
@@ -1141,29 +1649,35 @@ pub fn get_workspace_db(ship_dir: &Path, branch: &str) -> Result<Option<Workspac
         let id: String = row.get(0);
         let workspace_type: String = row.get(1);
         let status: String = row.get(2);
-        let feature_id: Option<String> = row.get(3);
-        let spec_id: Option<String> = row.get(4);
-        let release_id: Option<String> = row.get(5);
+        let environment_id: Option<String> = row.get(3);
+        let feature_id: Option<String> = row.get(4);
+        let target_id: Option<String> = row.get(5);
         let active_mode: Option<String> = row.get(6);
         let providers_json: String = row.get(7);
-        let resolved_at: String = row.get(8);
-        let is_worktree: i64 = row.get(9);
-        let worktree_path: Option<String> = row.get(10);
-        let last_activated_at: Option<String> = row.get(11);
-        let context_hash: Option<String> = row.get(12);
-        let config_generation: i64 = row.get(13);
-        let compiled_at: Option<String> = row.get(14);
-        let compile_error: Option<String> = row.get(15);
+        let mcp_servers_json: String = row.get(8);
+        let skills_json: String = row.get(9);
+        let resolved_at: String = row.get(10);
+        let is_worktree: i64 = row.get(11);
+        let worktree_path: Option<String> = row.get(12);
+        let last_activated_at: Option<String> = row.get(13);
+        let context_hash: Option<String> = row.get(14);
+        let config_generation: i64 = row.get(15);
+        let compiled_at: Option<String> = row.get(16);
+        let compile_error: Option<String> = row.get(17);
         let providers: Vec<String> = serde_json::from_str(&providers_json).unwrap_or_default();
+        let mcp_servers: Vec<String> = serde_json::from_str(&mcp_servers_json).unwrap_or_default();
+        let skills: Vec<String> = serde_json::from_str(&skills_json).unwrap_or_default();
         Ok(Some((
             id,
             workspace_type,
             status,
+            environment_id,
             feature_id,
-            spec_id,
-            release_id,
+            target_id,
             active_mode,
             providers,
+            mcp_servers,
+            skills,
             resolved_at,
             is_worktree != 0,
             worktree_path,
@@ -1182,17 +1696,13 @@ pub fn list_workspaces_db(ship_dir: &Path) -> Result<Vec<WorkspaceDbListRow>> {
     let mut conn = open_project_db(ship_dir)?;
     let rows = block_on(async {
         sqlx::query(
-            "SELECT branch, COALESCE(id, branch), workspace_type, status, feature_id, spec_id, release_id, active_mode, providers_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, COALESCE(config_generation, 0), compiled_at, compile_error
+            "SELECT branch, COALESCE(id, branch), workspace_type, status, environment_id, feature_id, target_id, active_mode, providers_json, mcp_servers_json, skills_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, COALESCE(config_generation, 0), compiled_at, compile_error
              FROM workspace
              ORDER BY
                CASE status
                  WHEN 'active' THEN 0
-                 WHEN 'idle' THEN 1
-                 WHEN 'planned' THEN 2
-                 WHEN 'review' THEN 3
-                 WHEN 'merged' THEN 4
-                 WHEN 'archived' THEN 5
-                 ELSE 6
+                 WHEN 'archived' THEN 1
+                 ELSE 2
                END,
                COALESCE(last_activated_at, resolved_at) DESC",
         )
@@ -1207,31 +1717,37 @@ pub fn list_workspaces_db(ship_dir: &Path) -> Result<Vec<WorkspaceDbListRow>> {
         let id: String = row.get(1);
         let workspace_type: String = row.get(2);
         let status: String = row.get(3);
-        let feature_id: Option<String> = row.get(4);
-        let spec_id: Option<String> = row.get(5);
-        let release_id: Option<String> = row.get(6);
+        let environment_id: Option<String> = row.get(4);
+        let feature_id: Option<String> = row.get(5);
+        let target_id: Option<String> = row.get(6);
         let active_mode: Option<String> = row.get(7);
         let providers_json: String = row.get(8);
-        let resolved_at: String = row.get(9);
-        let is_worktree: i64 = row.get(10);
-        let worktree_path: Option<String> = row.get(11);
-        let last_activated_at: Option<String> = row.get(12);
-        let context_hash: Option<String> = row.get(13);
-        let config_generation: i64 = row.get(14);
-        let compiled_at: Option<String> = row.get(15);
-        let compile_error: Option<String> = row.get(16);
+        let mcp_servers_json: String = row.get(9);
+        let skills_json: String = row.get(10);
+        let resolved_at: String = row.get(11);
+        let is_worktree: i64 = row.get(12);
+        let worktree_path: Option<String> = row.get(13);
+        let last_activated_at: Option<String> = row.get(14);
+        let context_hash: Option<String> = row.get(15);
+        let config_generation: i64 = row.get(16);
+        let compiled_at: Option<String> = row.get(17);
+        let compile_error: Option<String> = row.get(18);
         let providers: Vec<String> = serde_json::from_str(&providers_json).unwrap_or_default();
+        let mcp_servers: Vec<String> = serde_json::from_str(&mcp_servers_json).unwrap_or_default();
+        let skills: Vec<String> = serde_json::from_str(&skills_json).unwrap_or_default();
 
         result.push((
             branch,
             id,
             workspace_type,
             status,
+            environment_id,
             feature_id,
-            spec_id,
-            release_id,
+            target_id,
             active_mode,
             providers,
+            mcp_servers,
+            skills,
             resolved_at,
             is_worktree != 0,
             worktree_path,
@@ -1250,19 +1766,25 @@ pub fn upsert_workspace_db(ship_dir: &Path, record: WorkspaceUpsert<'_>) -> Resu
     let mut conn = open_project_db(ship_dir)?;
     let providers_json = serde_json::to_string(record.providers)
         .with_context(|| "Failed to serialize workspace providers")?;
+    let mcp_servers_json = serde_json::to_string(record.mcp_servers)
+        .with_context(|| "Failed to serialize workspace mcp servers")?;
+    let skills_json = serde_json::to_string(record.skills)
+        .with_context(|| "Failed to serialize workspace skills")?;
     block_on(async {
         sqlx::query(
-            "INSERT INTO workspace (branch, id, workspace_type, status, feature_id, spec_id, release_id, active_mode, providers_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, config_generation, compiled_at, compile_error)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO workspace (branch, id, workspace_type, status, environment_id, feature_id, target_id, active_mode, providers_json, mcp_servers_json, skills_json, resolved_at, is_worktree, worktree_path, last_activated_at, context_hash, config_generation, compiled_at, compile_error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(branch) DO UPDATE SET
                id            = excluded.id,
                workspace_type = excluded.workspace_type,
                status        = excluded.status,
+               environment_id = excluded.environment_id,
                feature_id    = excluded.feature_id,
-               spec_id       = excluded.spec_id,
-               release_id    = excluded.release_id,
+               target_id     = excluded.target_id,
                active_mode   = excluded.active_mode,
                providers_json = excluded.providers_json,
+               mcp_servers_json = excluded.mcp_servers_json,
+               skills_json = excluded.skills_json,
                resolved_at   = excluded.resolved_at,
                is_worktree   = excluded.is_worktree,
                worktree_path = excluded.worktree_path,
@@ -1276,11 +1798,13 @@ pub fn upsert_workspace_db(ship_dir: &Path, record: WorkspaceUpsert<'_>) -> Resu
         .bind(record.workspace_id)
         .bind(record.workspace_type)
         .bind(record.status)
+        .bind(record.environment_id)
         .bind(record.feature_id)
-        .bind(record.spec_id)
-        .bind(record.release_id)
+        .bind(record.target_id)
         .bind(record.active_mode)
         .bind(&providers_json)
+        .bind(&mcp_servers_json)
+        .bind(&skills_json)
         .bind(record.resolved_at)
         .bind(if record.is_worktree { 1i64 } else { 0i64 })
         .bind(record.worktree_path)
@@ -1318,8 +1842,14 @@ pub fn delete_workspace_db(ship_dir: &Path, branch: &str) -> Result<bool> {
             .execute(&mut conn)
             .await?;
 
-        sqlx::query("UPDATE spec SET workspace_id = NULL WHERE workspace_id = ?")
+        sqlx::query("DELETE FROM runtime_process WHERE workspace_id = ?")
             .bind(&workspace_id)
+            .execute(&mut conn)
+            .await?;
+
+        sqlx::query("DELETE FROM git_workspace WHERE workspace_id = ? OR branch = ?")
+            .bind(&workspace_id)
+            .bind(branch)
             .execute(&mut conn)
             .await?;
 
@@ -1344,7 +1874,7 @@ pub fn demote_other_active_workspaces_db(
     block_on(async {
         sqlx::query(
             "UPDATE workspace
-             SET status = 'idle', resolved_at = ?
+             SET status = 'archived', resolved_at = ?
              WHERE status = 'active' AND branch != ?",
         )
         .bind(resolved_at)
@@ -1357,9 +1887,7 @@ pub fn demote_other_active_workspaces_db(
 
 fn parse_workspace_session_row(row: &sqlx::sqlite::SqliteRow) -> WorkspaceSessionDb {
     let updated_feature_ids_json: String = row.get(10);
-    let updated_spec_ids_json: String = row.get(11);
     let updated_feature_ids = serde_json::from_str(&updated_feature_ids_json).unwrap_or_default();
-    let updated_spec_ids = serde_json::from_str(&updated_spec_ids_json).unwrap_or_default();
     WorkspaceSessionDb {
         id: row.get(0),
         workspace_id: row.get(1),
@@ -1372,12 +1900,11 @@ fn parse_workspace_session_row(row: &sqlx::sqlite::SqliteRow) -> WorkspaceSessio
         goal: row.get(8),
         summary: row.get(9),
         updated_feature_ids,
-        updated_spec_ids,
-        compiled_at: row.get(12),
-        compile_error: row.get(13),
-        config_generation_at_start: row.get(14),
-        created_at: row.get(15),
-        updated_at: row.get(16),
+        compiled_at: row.get(11),
+        compile_error: row.get(12),
+        config_generation_at_start: row.get(13),
+        created_at: row.get(14),
+        updated_at: row.get(15),
     }
 }
 
@@ -1388,7 +1915,7 @@ pub fn get_workspace_session_db(
     let mut conn = open_project_db(ship_dir)?;
     let row = block_on(async {
         sqlx::query(
-            "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, updated_spec_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
+            "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
              FROM workspace_session
              WHERE id = ?",
         )
@@ -1406,7 +1933,7 @@ pub fn get_active_workspace_session_db(
     let mut conn = open_project_db(ship_dir)?;
     let row = block_on(async {
         sqlx::query(
-            "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, updated_spec_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
+            "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
              FROM workspace_session
              WHERE workspace_id = ? AND status = 'active'
              ORDER BY started_at DESC
@@ -1429,7 +1956,7 @@ pub fn list_workspace_sessions_db(
     let rows = if let Some(workspace_id) = workspace_id {
         block_on(async {
             sqlx::query(
-                "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, updated_spec_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
+                "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
                  FROM workspace_session
                  WHERE workspace_id = ?
                  ORDER BY started_at DESC
@@ -1443,7 +1970,7 @@ pub fn list_workspace_sessions_db(
     } else {
         block_on(async {
             sqlx::query(
-                "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, updated_spec_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
+                "SELECT id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at
                  FROM workspace_session
                  ORDER BY started_at DESC
                  LIMIT ?",
@@ -1461,13 +1988,11 @@ pub fn insert_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
     let mut conn = open_project_db(ship_dir)?;
     let updated_feature_ids_json = serde_json::to_string(&session.updated_feature_ids)
         .with_context(|| "Failed to serialize workspace session updated_feature_ids")?;
-    let updated_spec_ids_json = serde_json::to_string(&session.updated_spec_ids)
-        .with_context(|| "Failed to serialize workspace session updated_spec_ids")?;
     block_on(async {
         sqlx::query(
             "INSERT INTO workspace_session
-             (id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, updated_spec_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, workspace_id, workspace_branch, status, started_at, ended_at, mode_id, primary_provider, goal, summary, updated_feature_ids_json, compiled_at, compile_error, config_generation_at_start, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&session.id)
         .bind(&session.workspace_id)
@@ -1480,7 +2005,6 @@ pub fn insert_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
         .bind(&session.goal)
         .bind(&session.summary)
         .bind(&updated_feature_ids_json)
-        .bind(&updated_spec_ids_json)
         .bind(&session.compiled_at)
         .bind(&session.compile_error)
         .bind(session.config_generation_at_start)
@@ -1496,8 +2020,6 @@ pub fn update_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
     let mut conn = open_project_db(ship_dir)?;
     let updated_feature_ids_json = serde_json::to_string(&session.updated_feature_ids)
         .with_context(|| "Failed to serialize workspace session updated_feature_ids")?;
-    let updated_spec_ids_json = serde_json::to_string(&session.updated_spec_ids)
-        .with_context(|| "Failed to serialize workspace session updated_spec_ids")?;
     block_on(async {
         sqlx::query(
             "UPDATE workspace_session
@@ -1511,7 +2033,6 @@ pub fn update_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
                  goal = ?,
                  summary = ?,
                  updated_feature_ids_json = ?,
-                 updated_spec_ids_json = ?,
                  compiled_at = ?,
                  compile_error = ?,
                  config_generation_at_start = ?,
@@ -1529,7 +2050,6 @@ pub fn update_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
         .bind(&session.goal)
         .bind(&session.summary)
         .bind(&updated_feature_ids_json)
-        .bind(&updated_spec_ids_json)
         .bind(&session.compiled_at)
         .bind(&session.compile_error)
         .bind(session.config_generation_at_start)
@@ -1540,6 +2060,66 @@ pub fn update_workspace_session_db(ship_dir: &Path, session: &WorkspaceSessionDb
         .await
     })?;
     Ok(())
+}
+
+pub fn insert_workspace_session_record_db(
+    ship_dir: &Path,
+    record: &WorkspaceSessionRecordDb,
+) -> Result<()> {
+    let mut conn = open_project_db(ship_dir)?;
+    let updated_feature_ids_json = serde_json::to_string(&record.updated_feature_ids)
+        .with_context(|| "Failed to serialize workspace session record updated_feature_ids")?;
+    block_on(async {
+        sqlx::query(
+            "INSERT INTO workspace_session_record
+             (id, session_id, workspace_id, workspace_branch, summary, updated_feature_ids_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(session_id) DO UPDATE SET
+               id = excluded.id,
+               workspace_id = excluded.workspace_id,
+               workspace_branch = excluded.workspace_branch,
+               summary = excluded.summary,
+               updated_feature_ids_json = excluded.updated_feature_ids_json,
+               created_at = excluded.created_at",
+        )
+        .bind(&record.id)
+        .bind(&record.session_id)
+        .bind(&record.workspace_id)
+        .bind(&record.workspace_branch)
+        .bind(&record.summary)
+        .bind(&updated_feature_ids_json)
+        .bind(&record.created_at)
+        .execute(&mut conn)
+        .await
+    })?;
+    Ok(())
+}
+
+pub fn get_workspace_session_record_db(
+    ship_dir: &Path,
+    session_id: &str,
+) -> Result<Option<WorkspaceSessionRecordDb>> {
+    let mut conn = open_project_db(ship_dir)?;
+    let row = block_on(async {
+        sqlx::query(
+            "SELECT id, session_id, workspace_id, workspace_branch, summary, updated_feature_ids_json, created_at
+             FROM workspace_session_record
+             WHERE session_id = ?",
+        )
+        .bind(session_id)
+        .fetch_optional(&mut conn)
+        .await
+    })?;
+    Ok(row.map(|row| WorkspaceSessionRecordDb {
+        id: row.get(0),
+        session_id: row.get(1),
+        workspace_id: row.get(2),
+        workspace_branch: row.get(3),
+        summary: row.get(4),
+        updated_feature_ids: serde_json::from_str::<Vec<String>>(&row.get::<String, _>(5))
+            .unwrap_or_default(),
+        created_at: row.get(6),
+    }))
 }
 
 // ─── Core ─────────────────────────────────────────────────────────────────────
@@ -1639,7 +2219,9 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
         "active_target_id",
         "ALTER TABLE feature ADD COLUMN active_target_id TEXT",
     )?;
-    if table_exists(connection, "feature")? && column_exists(connection, "feature", "active_target_id")? {
+    if table_exists(connection, "feature")?
+        && column_exists(connection, "feature", "active_target_id")?
+    {
         block_on(async {
             sqlx::query(
                 "CREATE INDEX IF NOT EXISTS feature_active_target_idx ON feature(active_target_id)",
@@ -1678,9 +2260,33 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
     )?;
     ensure_column(
         connection,
-        "issue",
-        "description",
-        "ALTER TABLE issue ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+        "release",
+        "body",
+        "ALTER TABLE release ADD COLUMN body TEXT NOT NULL DEFAULT ''",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "statuses_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN statuses_json TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "ai_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN ai_json TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "git_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN git_json TEXT NOT NULL DEFAULT '{}'",
+    )?;
+    ensure_column(
+        connection,
+        "agent_runtime_settings",
+        "namespaces_json",
+        "ALTER TABLE agent_runtime_settings ADD COLUMN namespaces_json TEXT NOT NULL DEFAULT '[]'",
     )?;
     ensure_column(
         connection,
@@ -1699,6 +2305,16 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
             sqlx::query("CREATE INDEX IF NOT EXISTS spec_workspace_idx ON spec(workspace_id)")
                 .execute(&mut *connection)
                 .await
+        })?;
+    }
+    if table_exists(connection, "event_log")? {
+        block_on(async {
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS event_log_lookup_idx
+                 ON event_log(timestamp, actor, entity, action, subject)",
+            )
+            .execute(&mut *connection)
+            .await
         })?;
     }
 
@@ -1746,13 +2362,31 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
         connection,
         "workspace",
         "status",
-        "ALTER TABLE workspace ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'",
+        "ALTER TABLE workspace ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
     )?;
     ensure_column(
         connection,
         "workspace",
-        "release_id",
-        "ALTER TABLE workspace ADD COLUMN release_id TEXT",
+        "environment_id",
+        "ALTER TABLE workspace ADD COLUMN environment_id TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "workspace",
+        "target_id",
+        "ALTER TABLE workspace ADD COLUMN target_id TEXT",
+    )?;
+    ensure_column(
+        connection,
+        "workspace",
+        "mcp_servers_json",
+        "ALTER TABLE workspace ADD COLUMN mcp_servers_json TEXT NOT NULL DEFAULT '[]'",
+    )?;
+    ensure_column(
+        connection,
+        "workspace",
+        "skills_json",
+        "ALTER TABLE workspace ADD COLUMN skills_json TEXT NOT NULL DEFAULT '[]'",
     )?;
     ensure_column(
         connection,
@@ -1808,8 +2442,105 @@ fn ensure_project_schema_compat(connection: &mut SqliteConnection) -> Result<()>
         "config_generation_at_start",
         "ALTER TABLE workspace_session ADD COLUMN config_generation_at_start INTEGER",
     )?;
+    if table_exists(connection, "workspace_session")? {
+        block_on(async {
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS workspace_session_record (
+                   id                 TEXT PRIMARY KEY,
+                   session_id         TEXT NOT NULL UNIQUE REFERENCES workspace_session(id) ON DELETE CASCADE,
+                   workspace_id       TEXT NOT NULL,
+                   workspace_branch   TEXT NOT NULL,
+                   summary            TEXT,
+                   updated_feature_ids_json TEXT NOT NULL DEFAULT '[]',
+                   created_at         TEXT NOT NULL
+                 )",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS workspace_session_record_workspace_idx
+                 ON workspace_session_record(workspace_id, created_at DESC)",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+    }
 
     if table_exists(connection, "workspace")? {
+        if column_exists(connection, "workspace", "target_id")?
+            && column_exists(connection, "workspace", "release_id")?
+        {
+            block_on(async {
+                sqlx::query(
+                    "UPDATE workspace
+                     SET target_id = release_id
+                     WHERE (target_id IS NULL OR target_id = '')
+                       AND release_id IS NOT NULL
+                       AND release_id != ''",
+                )
+                .execute(&mut *connection)
+                .await
+            })?;
+        }
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace
+                 SET workspace_type = lower(trim(workspace_type))
+                 WHERE workspace_type IS NOT NULL
+                   AND trim(workspace_type) != '';",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace
+                 SET workspace_type = 'feature'
+                 WHERE workspace_type IS NULL
+                    OR trim(workspace_type) = '';",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace
+                 SET status = 'active'
+                 WHERE lower(trim(status)) = 'active';",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace
+                 SET status = 'archived'
+                 WHERE lower(trim(status)) = 'archived';",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace
+                 SET status = 'archived'
+                 WHERE status IS NOT NULL
+                   AND trim(status) != ''
+                   AND lower(trim(status)) NOT IN ('active', 'archived');",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+        block_on(async {
+            sqlx::query(
+                "UPDATE workspace SET status = 'active' WHERE status IS NULL OR trim(status) = '';",
+            )
+            .execute(&mut *connection)
+            .await
+        })?;
+
         if added_workspace_id {
             block_on(async {
                 sqlx::query(
@@ -1944,6 +2675,10 @@ mod tests {
         // ship_dir must have a parent (project root) to derive the slug
         let ship_dir = tmp.path().join(".ship");
         std::fs::create_dir_all(&ship_dir)?;
+        std::fs::write(
+            ship_dir.join(crate::config::PRIMARY_CONFIG_FILE),
+            "id = 'TEST1234'\n",
+        )?;
         // Resolve once to avoid environment-race induced global-dir drift between calls.
         let db_path = project_db_path(&ship_dir)?;
         let report_a = ensure_database(&db_path, PROJECT_MIGRATIONS)?;
@@ -1964,17 +2699,28 @@ mod tests {
     }
 
     #[test]
-    fn project_slug_strips_leading_slash_and_collapses_separators() -> Result<()> {
+    fn project_db_key_auto_populates_missing_id_in_ship_toml() -> Result<()> {
         let tmp = tempdir()?;
         let ship_dir = tmp.path().join(".ship");
         std::fs::create_dir_all(&ship_dir)?;
-        let slug = project_slug(&ship_dir)?;
-        assert!(!slug.starts_with('-'), "slug should not start with a dash");
-        assert!(
-            !slug.contains("--"),
-            "slug should not contain consecutive dashes"
-        );
-        assert!(!slug.is_empty());
+        std::fs::write(
+            ship_dir.join(crate::config::PRIMARY_CONFIG_FILE),
+            "version = '1'\nname = 'legacy-project'\n",
+        )?;
+
+        let key = project_db_key(&ship_dir)?;
+        assert!(!key.trim().is_empty());
+
+        let raw = std::fs::read_to_string(ship_dir.join(crate::config::PRIMARY_CONFIG_FILE))?;
+        let parsed: toml::Value = toml::from_str(&raw)?;
+        let persisted_id = parsed
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        assert!(key.contains("legacy-project-"));
+        assert!(key.ends_with(&persisted_id.to_ascii_lowercase()));
         Ok(())
     }
 
@@ -2020,7 +2766,203 @@ mod tests {
         let id: Option<String> = row.get(0);
         let status: Option<String> = row.get(1);
         assert_eq!(id.as_deref(), Some("feature/demo"));
-        assert_eq!(status.as_deref(), Some("idle"));
+        assert_eq!(status.as_deref(), Some("active"));
+        Ok(())
+    }
+
+    #[test]
+    fn compat_workspace_contract_enforces_canonical_workspace_values() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("compat-contract.db");
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        block_on(async {
+            sqlx::query(
+                "CREATE TABLE workspace (
+                   branch TEXT PRIMARY KEY,
+                   id TEXT,
+                   workspace_type TEXT NOT NULL DEFAULT 'feature',
+                   status TEXT NOT NULL DEFAULT 'active',
+                   feature_id TEXT,
+                   spec_id TEXT,
+                   release_id TEXT,
+                   active_mode TEXT,
+                   providers_json TEXT NOT NULL DEFAULT '[]',
+                   resolved_at TEXT NOT NULL,
+                   is_worktree INTEGER NOT NULL DEFAULT 0,
+                   worktree_path TEXT,
+                   last_activated_at TEXT,
+                   context_hash TEXT
+                 )",
+            )
+            .execute(&mut conn)
+            .await?;
+            sqlx::query(
+                "INSERT INTO workspace (branch, id, workspace_type, status, resolved_at)
+                 VALUES
+                   ('legacy/patch', 'legacy-patch', 'PATCH', 'planned', '2026-01-01T00:00:00Z'),
+                   ('legacy/service', 'legacy-service', 'SERVICE', 'ARCHIVED', '2026-01-01T00:00:00Z'),
+                   ('legacy/unknown', 'legacy-unknown', 'spike', 'review', '2026-01-01T00:00:00Z'),
+                   ('legacy/empty', 'legacy-empty', 'feature', '', '2026-01-01T00:00:00Z')",
+            )
+            .execute(&mut conn)
+            .await?;
+            Ok::<_, sqlx::Error>(())
+        })?;
+
+        ensure_project_schema_compat(&mut conn)?;
+
+        let rows = block_on(async {
+            sqlx::query("SELECT branch, workspace_type, status FROM workspace ORDER BY branch")
+                .fetch_all(&mut conn)
+                .await
+        })?;
+        let mut normalized = std::collections::HashMap::new();
+        for row in rows {
+            let branch: String = row.get(0);
+            let workspace_type: String = row.get(1);
+            let status: String = row.get(2);
+            normalized.insert(branch, (workspace_type, status));
+        }
+
+        assert_eq!(
+            normalized.get("legacy/patch"),
+            Some(&("patch".to_string(), "archived".to_string()))
+        );
+        assert_eq!(
+            normalized.get("legacy/service"),
+            Some(&("service".to_string(), "archived".to_string()))
+        );
+        assert_eq!(
+            normalized.get("legacy/unknown"),
+            Some(&("spike".to_string(), "archived".to_string()))
+        );
+        assert_eq!(
+            normalized.get("legacy/empty"),
+            Some(&("feature".to_string(), "active".to_string()))
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_runtime_contract_migration_normalizes_status_and_casing_only() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("workspace-contract.db");
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        // Create minimal workspace shape expected by migration 0017.
+        block_on(async {
+            sqlx::query(
+                "CREATE TABLE workspace (
+                   branch TEXT PRIMARY KEY,
+                   id TEXT,
+                   workspace_type TEXT NOT NULL DEFAULT 'feature',
+                   status TEXT NOT NULL DEFAULT 'active',
+                   feature_id TEXT,
+                   spec_id TEXT,
+                   release_id TEXT,
+                   active_mode TEXT,
+                   providers_json TEXT NOT NULL DEFAULT '[]',
+                   resolved_at TEXT NOT NULL DEFAULT '',
+                   is_worktree INTEGER NOT NULL DEFAULT 0,
+                   worktree_path TEXT,
+                   last_activated_at TEXT,
+                   context_hash TEXT
+                 )",
+            )
+            .execute(&mut conn)
+            .await?;
+            sqlx::query(
+                "INSERT INTO workspace (branch, id, workspace_type, status, resolved_at)
+                 VALUES
+                 ('legacy/patch', 'w-patch', 'PATCH', 'planned', '2026-01-01T00:00:00Z'),
+                   ('legacy/service', 'w-service', 'SERVICE', 'ARCHIVED', '2026-01-01T00:00:00Z'),
+                   ('legacy/unknown', 'w-unknown', 'spike', 'review', '2026-01-01T00:00:00Z'),
+                   ('legacy/empty-status', 'w-empty', 'feature', '', '2026-01-01T00:00:00Z')",
+            )
+            .execute(&mut conn)
+            .await?;
+            Ok::<_, sqlx::Error>(())
+        })?;
+
+        // Apply migration 0017 directly.
+        let ddl_0017 = PROJECT_MIGRATIONS
+            .iter()
+            .find(|(version, _)| *version == "0017_workspace_runtime_contract")
+            .map(|(_, ddl)| *ddl)
+            .ok_or_else(|| anyhow!("migration 0017 not found"))?;
+        block_on(async { sqlx::query(ddl_0017).execute(&mut conn).await })?;
+
+        let patch_row = block_on(async {
+            sqlx::query(
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/patch'",
+            )
+            .fetch_one(&mut conn)
+            .await
+        })?;
+        let patch_kind: String = patch_row.get(0);
+        let patch_status: String = patch_row.get(1);
+        assert_eq!(patch_kind, "patch");
+        assert_eq!(patch_status, "archived");
+
+        let service_row = block_on(async {
+            sqlx::query(
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/service'",
+            )
+            .fetch_one(&mut conn)
+            .await
+        })?;
+        let service_kind: String = service_row.get(0);
+        let service_status: String = service_row.get(1);
+        assert_eq!(service_kind, "service");
+        assert_eq!(service_status, "archived");
+
+        let unknown_row = block_on(async {
+            sqlx::query(
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/unknown'",
+            )
+            .fetch_one(&mut conn)
+            .await
+        })?;
+        let unknown_kind: String = unknown_row.get(0);
+        let unknown_status: String = unknown_row.get(1);
+        assert_eq!(unknown_kind, "spike");
+        assert_eq!(unknown_status, "archived");
+
+        let empty_status_row = block_on(async {
+            sqlx::query(
+                "SELECT workspace_type, status FROM workspace WHERE branch = 'legacy/empty-status'",
+            )
+            .fetch_one(&mut conn)
+            .await
+        })?;
+        let empty_kind: String = empty_status_row.get(0);
+        let empty_status: String = empty_status_row.get(1);
+        assert_eq!(empty_kind, "feature");
+        assert_eq!(empty_status, "active");
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_primitives_migration_creates_projection_tables() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("runtime-primitives.db");
+        ensure_database(&db_path, PROJECT_MIGRATIONS)?;
+
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        assert!(table_exists(&mut conn, "environment")?);
+        assert!(table_exists(&mut conn, "runtime_process")?);
+        assert!(table_exists(&mut conn, "git_workspace")?);
+
+        assert!(column_exists(&mut conn, "workspace", "environment_id")?);
         Ok(())
     }
 
@@ -2072,33 +3014,13 @@ mod tests {
     }
 
     #[test]
-    fn compat_adds_issue_description_and_spec_workspace_columns() -> Result<()> {
+    fn compat_adds_spec_body_and_workspace_columns() -> Result<()> {
         let tmp = tempdir()?;
-        let db_path = tmp.path().join("issue-spec-compat.db");
+        let db_path = tmp.path().join("spec-compat.db");
         let db_url = sqlite_url(&db_path);
         let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
         let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
 
-        block_on(async {
-            sqlx::query(
-                "CREATE TABLE issue (
-                   id TEXT PRIMARY KEY,
-                   title TEXT NOT NULL,
-                   status TEXT NOT NULL DEFAULT 'backlog',
-                   assignee TEXT,
-                   priority TEXT,
-                   release_id TEXT,
-                   feature_id TEXT,
-                   spec_id TEXT,
-                   tags_json TEXT NOT NULL DEFAULT '[]',
-                   links_json TEXT NOT NULL DEFAULT '[]',
-                   created_at TEXT NOT NULL,
-                   updated_at TEXT NOT NULL
-                 )",
-            )
-            .execute(&mut conn)
-            .await
-        })?;
         block_on(async {
             sqlx::query(
                 "CREATE TABLE spec (
@@ -2120,7 +3042,6 @@ mod tests {
 
         ensure_project_schema_compat(&mut conn)?;
 
-        assert!(column_exists(&mut conn, "issue", "description")?);
         assert!(column_exists(&mut conn, "spec", "body")?);
         assert!(column_exists(&mut conn, "spec", "workspace_id")?);
         Ok(())
@@ -2200,6 +3121,100 @@ mod tests {
         })?;
         assert_eq!(workspace_id.as_deref(), Some("feature-auth"));
 
+        Ok(())
+    }
+
+    #[test]
+    fn migrations_create_capability_and_target_link_tables() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("capability-target-links.db");
+        ensure_database(&db_path, PROJECT_MIGRATIONS)?;
+
+        let db_url = sqlite_url(&db_path);
+        let options = SqliteConnectOptions::from_str(&db_url)?.create_if_missing(true);
+        let mut conn = block_on(async { SqliteConnection::connect_with(&options).await })?;
+
+        assert!(table_exists(&mut conn, "capability_map")?);
+        assert!(table_exists(&mut conn, "capability")?);
+        assert!(table_exists(&mut conn, "feature_capability")?);
+        assert!(table_exists(&mut conn, "target_feature")?);
+        Ok(())
+    }
+
+    #[test]
+    fn capability_and_target_link_helpers_round_trip() -> Result<()> {
+        let tmp = tempdir()?;
+        let ship_dir = crate::project::init_project(tmp.path().to_path_buf())?;
+        ensure_project_database(&ship_dir)?;
+
+        let now = Utc::now().to_rfc3339();
+        let mut conn = open_project_connection(&ship_dir)?;
+        block_on(async {
+            sqlx::query(
+                "INSERT INTO release (id, version, status, created_at, updated_at)
+                 VALUES (?, ?, 'planned', ?, ?)",
+            )
+            .bind("target-q2")
+            .bind("v0.2.0")
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut conn)
+            .await?;
+
+            sqlx::query(
+                "INSERT INTO feature (id, title, created_at, updated_at)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind("feat-auth")
+            .bind("Auth")
+            .bind(&now)
+            .bind(&now)
+            .execute(&mut conn)
+            .await?;
+
+            Ok::<(), sqlx::Error>(())
+        })?;
+        block_on(async { conn.close().await })?;
+
+        replace_target_features_db(&ship_dir, "target-q2", &["feat-auth".to_string()])?;
+        let target_features = list_target_features_db(&ship_dir, "target-q2")?;
+        assert_eq!(target_features, vec!["feat-auth".to_string()]);
+
+        upsert_capability_map_db(
+            &ship_dir,
+            &CapabilityMapDb {
+                id: "cap-map-main".to_string(),
+                vision_ref: Some("vision.md".to_string()),
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            },
+        )?;
+        let maps = list_capability_maps_db(&ship_dir)?;
+        assert!(maps.iter().any(|entry| entry.id == "cap-map-main"));
+
+        upsert_capability_db(
+            &ship_dir,
+            &CapabilityDb {
+                id: "cap-auth".to_string(),
+                map_id: "cap-map-main".to_string(),
+                title: "Authentication".to_string(),
+                description: "Identity and auth flows".to_string(),
+                parent_capability_id: None,
+                status: "active".to_string(),
+                ord: 0,
+                created_at: now.clone(),
+                updated_at: now,
+            },
+        )?;
+
+        let capabilities = list_capabilities_db(&ship_dir, Some("cap-map-main"))?;
+        assert!(capabilities.iter().any(|entry| entry.id == "cap-auth"));
+
+        set_feature_primary_capability_db(&ship_dir, "feat-auth", Some("cap-auth"))?;
+        assert_eq!(
+            get_feature_primary_capability_db(&ship_dir, "feat-auth")?.as_deref(),
+            Some("cap-auth")
+        );
         Ok(())
     }
 

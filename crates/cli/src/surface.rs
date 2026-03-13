@@ -20,11 +20,6 @@ pub enum Commands {
         /// Directory to initialize (defaults to current directory)
         path: Option<PathBuf>,
     },
-    /// Manage project issues
-    Issue {
-        #[command(subcommand)]
-        action: IssueCommands,
-    },
     /// Manage architecture decisions
     Adr {
         #[command(subcommand)]
@@ -40,11 +35,7 @@ pub enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
-    /// Manage specs
-    Spec {
-        #[command(subcommand)]
-        action: SpecCommands,
-    },
+
     /// Manage releases
     Release {
         #[command(subcommand)]
@@ -55,7 +46,7 @@ pub enum Commands {
         #[command(subcommand)]
         action: FeatureCommands,
     },
-    /// Manage workspace lifecycle state
+    /// Manage core workspace lifecycle state (create, activate, session, archive)
     Workspace {
         #[command(subcommand)]
         action: WorkspaceCommands,
@@ -93,7 +84,7 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigCommands,
     },
-    /// Track time spent on issues
+    /// Track time spent on work items
     #[command(hide = true)]
     Time {
         #[command(subcommand)]
@@ -104,23 +95,16 @@ pub enum Commands {
         #[command(subcommand)]
         action: ModeCommands,
     },
-    /// Manage the active session (shortcut for `workspace session`)
-    Session {
-        #[command(subcommand)]
-        action: SessionCommands,
-    },
-    /// Log a progress note to the active session
-    Log {
-        /// Note to record
-        note: String,
-        /// Branch workspace key (defaults to current git branch)
-        #[arg(long)]
-        branch: Option<String>,
-    },
     /// Manage MCP servers registered in .ship/agents/mcp.toml. Runs the server if no subcommand is provided.
     Mcp {
         #[command(subcommand)]
         action: Option<McpCommands>,
+    },
+    /// Internal hook runtime used by provider hook commands.
+    #[command(hide = true)]
+    Hooks {
+        #[command(subcommand)]
+        action: HooksCommands,
     },
     /// Manage AI agent providers (detect, connect, disconnect)
     Providers {
@@ -157,12 +141,12 @@ pub enum GitCommands {
     Status,
     /// Include a category in git commits
     Include {
-        /// One of: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
+        /// One of: releases, features, adrs, notes, vision, agents, ship.toml, templates
         category: String,
     },
     /// Exclude a category from git commits (adds to .ship/.gitignore)
     Exclude {
-        /// One of: issues, releases, features, specs, adrs, notes, agents, ship.toml, templates
+        /// One of: releases, features, adrs, notes, vision, agents, ship.toml, templates
         category: String,
     },
     /// Install git hooks for feature-aware checkout
@@ -201,7 +185,7 @@ pub enum GhostCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommands {
-    /// Manage issue statuses/categories
+    /// Manage workflow statuses/categories
     Status {
         #[command(subcommand)]
         action: StatusCommands,
@@ -310,12 +294,22 @@ pub enum ProviderCommands {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum HooksCommands {
+    /// Process a single hook payload from stdin.
+    Run {
+        /// Optional provider hint (claude or gemini) for diagnostics.
+        #[arg(long)]
+        provider: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum StatusCommands {
-    /// List configured issue statuses
+    /// List configured workflow statuses
     List,
     /// Add a new status
     Add { name: String },
-    /// Remove a status (does not delete existing issues)
+    /// Remove a status
     Remove { name: String },
 }
 
@@ -354,20 +348,6 @@ pub enum TimeCommands {
     },
     /// Generate a time report for the current project
     Report,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum IssueCommands {
-    /// Create a new issue
-    Create { title: String, description: String },
-    /// List all issues
-    List,
-    /// Move an issue to a new status
-    Move {
-        file_name: String,
-        from: String,
-        to: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -421,18 +401,12 @@ pub enum NoteCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommands {
-    /// Install a skill from a Git source (GitHub shorthand, URL, or local path)
+    /// Install a skill via skills.sh (paste command or pass skill ID)
     Install {
-        /// Source repo: owner/repo, git URL, or local path
+        /// skills.sh command or skill ID
         source: String,
         /// Skill ID (directory name containing SKILL.md)
         id: String,
-        /// Git ref to clone
-        #[arg(long, default_value = "main")]
-        git_ref: String,
-        /// Subpath in repo to search
-        #[arg(long, default_value = ".")]
-        repo_path: String,
         /// Scope: user (default) or project
         #[arg(long, default_value = "user")]
         scope: String,
@@ -487,24 +461,6 @@ pub enum SkillCommands {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum SpecCommands {
-    /// Create a new spec
-    Create {
-        title: String,
-        /// Optional initial content (defaults to scaffold)
-        #[arg(short, long)]
-        content: Option<String>,
-        /// Workspace branch/id. Defaults to the active workspace.
-        #[arg(long)]
-        workspace: Option<String>,
-    },
-    /// List spec documents
-    List,
-    /// Print a spec document's markdown content
-    Get { file_name: String },
-}
-
-#[derive(Subcommand, Debug)]
 pub enum ReleaseCommands {
     /// Create a new release
     Create {
@@ -541,9 +497,7 @@ pub enum FeatureCommands {
         /// Link this feature to a release ID
         #[arg(long)]
         release_id: Option<String>,
-        /// Link this feature to a spec ID
-        #[arg(long)]
-        spec_id: Option<String>,
+
         /// Link this feature to a git branch name
         #[arg(long)]
         branch: Option<String>,
@@ -639,10 +593,10 @@ pub enum WorkspaceCommands {
         #[arg(long)]
         mode: Option<String>,
     },
-    /// Create/update a workspace runtime record (git checkout optional)
+    /// Create/update a workspace runtime record (git checkout optional, session bootstrap supported)
     Create {
         branch: String,
-        /// Optional workspace type: feature | refactor | experiment | hotfix
+        /// Optional workspace type: feature | patch | service
         #[arg(long = "type")]
         workspace_type: Option<String>,
         /// Link this workspace to a feature id
@@ -651,12 +605,12 @@ pub enum WorkspaceCommands {
         /// Title for an auto-created feature when --type feature is used without --feature
         #[arg(long)]
         feature_title: Option<String>,
-        /// Link this workspace to a spec id
-        #[arg(long)]
-        spec: Option<String>,
-        /// Link this workspace to a release id
-        #[arg(long)]
-        release: Option<String>,
+        /// Optional profile preset id used to seed workspace configuration
+        #[arg(long = "environment-id", alias = "profile")]
+        environment_id: Option<String>,
+        /// Link this workspace to a target id ("release" is accepted as an alias)
+        #[arg(long, alias = "release")]
+        target: Option<String>,
         /// Optional workspace mode override for this branch workspace
         #[arg(long)]
         mode: Option<String>,
@@ -672,6 +626,21 @@ pub enum WorkspaceCommands {
         /// Path for the worktree (defaults to ../{branch})
         #[arg(long)]
         worktree_path: Option<String>,
+        /// Start a session immediately after workspace setup
+        #[arg(long, default_value_t = false)]
+        start_session: bool,
+        /// Session goal/intention for immediate start
+        #[arg(long)]
+        goal: Option<String>,
+        /// Primary provider for immediate session start
+        #[arg(long)]
+        provider: Option<String>,
+        /// Optional mode override for immediate session start
+        #[arg(long = "session-mode")]
+        session_mode: Option<String>,
+        /// Disable interactive follow-up prompts (recommended for scripts/agents)
+        #[arg(long, default_value_t = false)]
+        no_input: bool,
     },
     /// Manage execution sessions within a long-lived workspace
     Session {
@@ -689,7 +658,7 @@ pub enum WorkspaceCommands {
     },
     /// Mark a workspace as archived
     Archive { branch: String },
-    /// Reconcile legacy feature/spec/workspace links (dry-run by default)
+    /// Reconcile feature/workspace links (dry-run by default)
     Reconcile {
         /// Apply mutations (omit for dry-run preview)
         #[arg(long, default_value_t = false)]
@@ -704,47 +673,14 @@ pub enum WorkspaceCommands {
         #[arg(long, default_value_t = false)]
         dry_run: bool,
     },
-}
-
-/// Top-level session commands — delegates to workspace session internals.
-#[derive(Subcommand, Debug)]
-pub enum SessionCommands {
-    /// Start a new session (defaults to current workspace branch)
-    Start {
+    /// Show effective provider resolution and precedence for a workspace
+    Providers {
+        /// Branch workspace key (defaults to current git branch)
         #[arg(long)]
         branch: Option<String>,
-        /// Session goal/intention
-        #[arg(long)]
-        goal: Option<String>,
-        /// Optional mode override
+        /// Optional mode override for previewing provider resolution
         #[arg(long)]
         mode: Option<String>,
-        /// Primary provider
-        #[arg(long)]
-        provider: Option<String>,
-    },
-    /// End the active session
-    End {
-        #[arg(long)]
-        branch: Option<String>,
-        #[arg(long)]
-        summary: Option<String>,
-        #[arg(long = "updated-feature")]
-        updated_feature: Vec<String>,
-        #[arg(long = "updated-spec")]
-        updated_spec: Vec<String>,
-    },
-    /// Show the active session status
-    Status {
-        #[arg(long)]
-        branch: Option<String>,
-    },
-    /// List recent sessions
-    List {
-        #[arg(long)]
-        branch: Option<String>,
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
     },
 }
 
@@ -776,9 +712,6 @@ pub enum WorkspaceSessionCommands {
         /// Feature IDs updated during the session
         #[arg(long = "updated-feature")]
         updated_feature: Vec<String>,
-        /// Spec IDs updated during the session
-        #[arg(long = "updated-spec")]
-        updated_spec: Vec<String>,
     },
     /// Show the active session for a workspace (defaults to current branch workspace)
     Status {
@@ -794,6 +727,14 @@ pub enum WorkspaceSessionCommands {
         /// Max sessions to return
         #[arg(long, default_value_t = 20)]
         limit: usize,
+    },
+    /// Record a progress note for the active session in this workspace
+    Note {
+        /// Progress note
+        note: String,
+        /// Branch workspace key (defaults to current git branch)
+        #[arg(long)]
+        branch: Option<String>,
     },
 }
 
@@ -832,7 +773,7 @@ pub enum ProjectCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum DevCommands {
-    /// Migrate legacy YAML issues and JSON config to TOML
+    /// Repair legacy state and re-import markdown-backed entities
     Migrate {
         /// Re-run startup markdown imports even if already marked complete
         #[arg(long, default_value_t = false)]

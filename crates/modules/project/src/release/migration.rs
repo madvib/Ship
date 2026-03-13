@@ -34,7 +34,7 @@ pub fn import_releases_from_files(ship_dir: &Path) -> Result<usize> {
 
                 if let Ok(release) = Release::from_markdown(&content) {
                     let status = if path.starts_with(&releases_dir.join("upcoming")) {
-                        ReleaseStatus::Planned
+                        ReleaseStatus::Upcoming
                     } else {
                         release.metadata.status.clone()
                     };

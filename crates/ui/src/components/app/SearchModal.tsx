@@ -2,7 +2,6 @@ import * as React from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import {
     StickyNote,
-    FileText,
     Target,
     Gavel,
     Package,
@@ -11,8 +10,6 @@ import {
     Bot,
     Settings,
     FileStack,
-    Zap,
-    Check,
     RefreshCw,
     Layers3,
     Shield,
@@ -61,12 +58,10 @@ export function SearchModal() {
 
     const {
         setNotesScope,
-        setError: setWorkspaceError,
     } = workspace;
 
     const {
         notes,
-        specs,
         features,
         adrs,
         releases,
@@ -146,31 +141,27 @@ export function SearchModal() {
         if (!runtimeBranch) return;
         await runWorkspaceMutation(async () => {
             const workspaceExists = knownWorkspaceBranches.includes(runtimeBranch);
-            const result = workspaceExists
-                ? await activateWorkspaceCmd(runtimeBranch)
-                : await createWorkspaceCmd(runtimeBranch, { activate: true });
-            if (result.status === 'error') {
-                throw new Error(result.error || `Failed to ensure workspace for ${runtimeBranch}`);
+
+            if (workspaceExists) {
+                const activateResult = await activateWorkspaceCmd(runtimeBranch);
+                if (activateResult.status === 'error') {
+                    throw new Error(activateResult.error || `Failed to ensure workspace for ${runtimeBranch}`);
+                }
+                return;
+            }
+
+            const createResult = await createWorkspaceCmd(runtimeBranch);
+            if (createResult.status === 'error') {
+                throw new Error(createResult.error || `Failed to create workspace for ${runtimeBranch}`);
+            }
+
+            const activateResult = await activateWorkspaceCmd(runtimeBranch);
+            if (activateResult.status === 'error') {
+                throw new Error(activateResult.error || `Workspace created but activation failed for ${runtimeBranch}`);
             }
         });
     }, [knownWorkspaceBranches, runWorkspaceMutation, runtimeBranch]);
 
-    const openSpecContext = React.useCallback(async (spec: typeof specs[number]) => {
-        const relatedFeature = features.find(
-            (feature) => feature.spec_id === spec.id || feature.spec_id === spec.file_name
-        );
-        if (relatedFeature) {
-            await navigate({ to: FEATURES_ROUTE });
-            await handleSelectFeature(relatedFeature);
-            return;
-        }
-
-        await navigate({ to: FEATURES_ROUTE });
-        await ship.handleSelectSpec(spec);
-        const message = `Spec "${spec.spec.metadata.title || spec.id}" is not linked to a feature yet.`;
-        setWorkspaceError(message);
-        throw new Error(message);
-    }, [features, handleSelectFeature, navigate, setWorkspaceError, ship]);
 
     const openSettingsSection = React.useCallback((section: 'providers' | 'mcp' | 'skills' | 'rules' | 'permissions') => {
         const routeBySection = {
@@ -223,35 +214,6 @@ export function SearchModal() {
                         <span>Settings</span>
                     </CommandItem>
                 </CommandGroup>
-
-                <CommandSeparator />
-
-                {!workspace.noProject && (
-                    <CommandGroup heading="Agent Mode">
-                        <CommandItem
-                            onSelect={() => runCommand(() => workspace.handleSetActiveMode(null))}
-                        >
-                            <Zap className="mr-2 h-4 w-4" />
-                            <span className="flex-1">Default Mode</span>
-                            {workspace.activeModeId === null && <Check className="ml-2 h-4 w-4 text-primary" />}
-                        </CommandItem>
-                        {workspace.modes.map((mode) => (
-                            <CommandItem
-                                key={mode.id}
-                                onSelect={() => runCommand(() => workspace.handleSetActiveMode(mode.id))}
-                            >
-                                <Zap className="mr-2 h-4 w-4" />
-                                <div className="flex-1 min-w-0">
-                                    <span>{mode.name}</span>
-                                    {mode.description && (
-                                        <span className="ml-2 text-xs text-muted-foreground">{mode.description}</span>
-                                    )}
-                                </div>
-                                {workspace.activeModeId === mode.id && <Check className="ml-2 h-4 w-4 text-primary" />}
-                            </CommandItem>
-                        ))}
-                    </CommandGroup>
-                )}
 
                 <CommandSeparator />
 
@@ -330,28 +292,6 @@ export function SearchModal() {
                     </CommandGroup>
                 )}
 
-                {specs.length > 0 && (
-                    <CommandGroup heading="Specs">
-                        {specs.map((spec) => (
-                            <CommandItem
-                                key={`spec-${spec.file_name}`}
-                                onSelect={() =>
-                                    runCommand(() => openSpecContext(spec))
-                                }
-                            >
-                                <FileText className="mr-2 h-4 w-4" />
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                    <span className="truncate">
-                                        {spec.spec.metadata.title || spec.id}
-                                    </span>
-                                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                                        {spec.id}
-                                    </span>
-                                </div>
-                            </CommandItem>
-                        ))}
-                    </CommandGroup>
-                )}
 
                 {releases.length > 0 && (
                     <CommandGroup heading="Releases">

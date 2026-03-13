@@ -8,6 +8,7 @@ export * from "./components/calendar";
 export * from "./components/card";
 export * from "./components/checkbox";
 export * from "./components/combobox";
+export * from "./components/collapsible";
 export * from "./components/command";
 export * from "./components/date-picker";
 export * from "./components/dialog";
@@ -49,6 +50,8 @@ export * from "./components/editor/EditorLogo";
 export * from "./components/ai/message";
 export * from "./components/ai/prompt-input";
 export * from "./components/ai/side-by-side";
+export * from "./components/ai/task";
+export * from "./components/ai-elements/file-tree";
 
 // Utils
 export * from "./lib/utils";
