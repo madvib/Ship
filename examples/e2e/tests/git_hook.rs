@@ -91,7 +91,7 @@ fn claude_md_omits_issue_section() {
 }
 
 #[test]
-fn claude_md_includes_skill_body() {
+fn claude_md_excludes_skill_body_and_exports_provider_skill_file() {
     let p = TestProject::with_git().unwrap();
     let feature_path = create_feature(
         p.ship_dir.clone(),
@@ -114,7 +114,6 @@ fn claude_md_includes_skill_body() {
         &feature_path.0,
         FeatureAgentConfig {
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec!["nextjs-conventions".to_string()],
             providers: vec![],
@@ -124,7 +123,16 @@ fn claude_md_includes_skill_body() {
     on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
 
     let content = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
-    assert!(content.contains("Prefer route groups for auth pages."));
+    let skill_file = std::fs::read_to_string(
+        p.root()
+            .join(".claude")
+            .join("skills")
+            .join("nextjs-conventions")
+            .join("SKILL.md"),
+    )
+    .unwrap();
+    assert!(!content.contains("Prefer route groups for auth pages."));
+    assert!(skill_file.contains("Prefer route groups for auth pages."));
 }
 
 #[test]
@@ -148,7 +156,6 @@ fn mcp_json_written_on_checkout() {
         &feature_path.0,
         FeatureAgentConfig {
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec!["github".to_string()],
             skills: vec![],
             providers: vec![],
@@ -187,7 +194,7 @@ fn repeated_post_checkout_is_deterministic_for_claude_md() {
 }
 
 #[test]
-fn default_task_policy_requires_ship_tooling_in_generated_context() {
+fn default_task_policy_is_not_inlined_into_generated_context() {
     let p = TestProject::with_git().unwrap();
     let feature_path = create_feature(
         p.ship_dir.clone(),
@@ -210,7 +217,6 @@ fn default_task_policy_requires_ship_tooling_in_generated_context() {
         &feature_path.0,
         FeatureAgentConfig {
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec!["ship-policy".to_string()],
             providers: vec![],
@@ -219,9 +225,21 @@ fn default_task_policy_requires_ship_tooling_in_generated_context() {
 
     on_post_checkout(&p.ship_dir, "feature/policy", &p.root()).unwrap();
     let content = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    let skill_file = std::fs::read_to_string(
+        p.root()
+            .join(".claude")
+            .join("skills")
+            .join("ship-policy")
+            .join("SKILL.md"),
+    )
+    .unwrap();
     assert!(
-        content.contains("Use Ship as the system of record"),
-        "default task policy guidance should be included in CLAUDE.md"
+        !content.contains("Use Ship as the system of record"),
+        "skill guidance should not be included in CLAUDE.md"
+    );
+    assert!(
+        skill_file.contains("Use Ship as the system of record"),
+        "skill guidance should be exported to provider skill files"
     );
 }
 
@@ -291,7 +309,6 @@ fn claude_md_reflects_skill_updates_after_regeneration() {
         &feature_path.0,
         FeatureAgentConfig {
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec!["skill-sync-test".to_string()],
             providers: vec![],
@@ -300,9 +317,21 @@ fn claude_md_reflects_skill_updates_after_regeneration() {
 
     on_post_checkout(&p.ship_dir, "feature/skill-sync", &p.root()).unwrap();
     let first = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    let first_skill = std::fs::read_to_string(
+        p.root()
+            .join(".claude")
+            .join("skills")
+            .join("skill-sync-test")
+            .join("SKILL.md"),
+    )
+    .unwrap();
     assert!(
-        first.contains("Always validate API contracts with baseline snapshots."),
-        "initial skill content should be present in CLAUDE.md"
+        !first.contains("Always validate API contracts with baseline snapshots."),
+        "skill body should not be inlined into CLAUDE.md"
+    );
+    assert!(
+        first_skill.contains("Always validate API contracts with baseline snapshots."),
+        "initial skill content should be present in claude SKILL.md output"
     );
 
     update_skill(
@@ -314,14 +343,30 @@ fn claude_md_reflects_skill_updates_after_regeneration() {
     .unwrap();
     on_post_checkout(&p.ship_dir, "feature/skill-sync", &p.root()).unwrap();
     let second = std::fs::read_to_string(p.root().join("CLAUDE.md")).unwrap();
+    let second_skill = std::fs::read_to_string(
+        p.root()
+            .join(".claude")
+            .join("skills")
+            .join("skill-sync-test")
+            .join("SKILL.md"),
+    )
+    .unwrap();
 
     assert!(
-        second.contains("Always validate API contracts with schema-driven checks."),
-        "updated skill content should be present after regeneration"
+        !second.contains("Always validate API contracts with baseline snapshots."),
+        "stale skill content should not remain in CLAUDE.md after regeneration"
     );
     assert!(
-        !second.contains("Always validate API contracts with baseline snapshots."),
-        "stale skill content should not remain after regeneration"
+        !second.contains("Always validate API contracts with schema-driven checks."),
+        "updated skill content should not be inlined into CLAUDE.md"
+    );
+    assert!(
+        second_skill.contains("Always validate API contracts with schema-driven checks."),
+        "updated skill content should be present in claude SKILL.md output after regeneration"
+    );
+    assert!(
+        !second_skill.contains("Always validate API contracts with baseline snapshots."),
+        "stale skill content should not remain in claude SKILL.md output after regeneration"
     );
 }
 
@@ -350,7 +395,6 @@ fn agents_md_reflects_skill_updates_for_codex_after_regeneration() {
         &feature_path.0,
         FeatureAgentConfig {
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec!["codex-skill-sync-test".to_string()],
             providers: vec!["codex".to_string()],
@@ -368,8 +412,8 @@ fn agents_md_reflects_skill_updates_for_codex_after_regeneration() {
     )
     .unwrap();
     assert!(
-        first.contains("Use strict release gating for codex provider."),
-        "initial skill content should be present in AGENTS.md"
+        !first.contains("Use strict release gating for codex provider."),
+        "skill content should not be inlined into AGENTS.md"
     );
     assert!(
         first_skill.contains("Use strict release gating for codex provider."),
@@ -399,12 +443,12 @@ fn agents_md_reflects_skill_updates_for_codex_after_regeneration() {
     .unwrap();
 
     assert!(
-        second.contains("Use explicit rollback gates for codex provider."),
-        "updated skill content should be present in AGENTS.md after regeneration"
-    );
-    assert!(
         !second.contains("Use strict release gating for codex provider."),
         "stale skill content should not remain in AGENTS.md after regeneration"
+    );
+    assert!(
+        !second.contains("Use explicit rollback gates for codex provider."),
+        "updated skill content should not be inlined into AGENTS.md after regeneration"
     );
     assert!(
         second_skill.contains("Use explicit rollback gates for codex provider."),

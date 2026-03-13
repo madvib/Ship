@@ -8,7 +8,7 @@ Skill package path: `.ship/agents/skills/provider-integration-hardening/`.
 - Audit result:
   - Hook export schema was stale (flat array, no grouped `hooks` entries).
 - Implemented:
-  - Grouped hook export in `~/.claude/settings.json` with nested command hooks.
+  - Grouped hook export in `.claude/settings.json` (project-local) with nested command hooks.
   - Added support for newer Claude events in Ship trigger model.
   - Added hook metadata export (`timeout`, `description`).
 - Verification:

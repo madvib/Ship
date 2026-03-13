@@ -169,15 +169,14 @@ Capabilities:
 
 - create/edit/delete skills
 - install from curated library
-- install from URL/repo path with inferred skill ID
-- install accepts GitHub `tree/blob` URLs and infers `git_ref` + `repo_path` automatically
+- install from `skills.sh` (skill ID or copied install command)
 - studio folder-audit view via file-tree
 
 Tooltips now cover:
 
 - creating new skills
 - catalog install action
-- URL/repo install action
+- skills.sh install action
 - studio/list toggle
 - delete action
 
@@ -203,8 +202,8 @@ Provider status:
 - `Codex`: no native hook surface yet (stored in Ship config, not exported natively)
 
 Managed runtime artifacts are written to:
-- `.ship/agents/runtime/hook-context.md`
-- `.ship/agents/runtime/envelope.json`
+- `.ship/generated/runtime/hook-context.md`
+- `.ship/generated/runtime/envelope.json`
 - `~/.ship/state/telemetry/hooks/events.ndjson` (internal telemetry)
 
 Default managed hook command:
@@ -231,7 +230,6 @@ Tabs:
 - `Tools`: allow/deny glob patterns
 - `Commands`: allow/deny/require-confirmation command patterns with CLI autocomplete
 - `Filesystem`: allow/deny path globs
-- `Limits`: max cost and max turns
 
 Autocomplete suggestions are inferred from:
 

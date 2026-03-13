@@ -355,9 +355,9 @@ mod branch_hierarchy {
         p.assert_root_file_not_contains("CLAUDE.md", "Auth System");
     }
 
-    /// Default task-policy skill is included in CLAUDE.md even without explicit feature agent config.
+    /// Default task-policy skill is exported to provider skills, not inlined into CLAUDE.md.
     #[test]
-    fn default_skill_appears_in_claude_md() {
+    fn default_skill_not_inlined_in_claude_md() {
         let p = setup();
         create_feature(
             p.ship_dir.clone(),
@@ -371,12 +371,16 @@ mod branch_hierarchy {
 
         on_post_checkout(&p.ship_dir, "feature/a", &p.root()).unwrap();
 
-        p.assert_root_file_contains("CLAUDE.md", "Ship Workflow Policy");
+        p.assert_root_file_not_contains("CLAUDE.md", "Ship Workflow Policy");
+        p.assert_root_file_contains(
+            ".claude/skills/task-policy/SKILL.md",
+            "Ship Workflow Policy",
+        );
     }
 
-    /// Custom project skill is inlined into CLAUDE.md.
+    /// Custom project skill is exported as a provider skill file, not inlined into CLAUDE.md.
     #[test]
-    fn custom_skill_inlined_in_claude_md() {
+    fn custom_skill_exported_without_prompt_inlining() {
         let p = setup();
         create_skill(
             &p.ship_dir,
@@ -397,7 +401,9 @@ mod branch_hierarchy {
 
         on_post_checkout(&p.ship_dir, "feature/a", &p.root()).unwrap();
 
-        p.assert_root_file_contains("CLAUDE.md", "Always use TypeScript");
+        p.assert_root_file_not_contains("CLAUDE.md", "Stack Conventions");
+        p.assert_root_file_not_contains("CLAUDE.md", "Always use TypeScript");
+        p.assert_root_file_contains(".claude/skills/stack/SKILL.md", "Always use TypeScript");
     }
 }
 
@@ -830,7 +836,11 @@ mod core_loop {
         // 5. CLAUDE.md generated with feature context
         p.assert_root_file("CLAUDE.md");
         p.assert_root_file_contains("CLAUDE.md", "Payment Processing");
-        p.assert_root_file_contains("CLAUDE.md", "Ship Workflow Policy");
+        p.assert_root_file_not_contains("CLAUDE.md", "Ship Workflow Policy");
+        p.assert_root_file_contains(
+            ".claude/skills/task-policy/SKILL.md",
+            "Ship Workflow Policy",
+        );
         let workspace = get_workspace(&p.ship_dir, "feature/payments")
             .unwrap()
             .expect("feature workspace should be present");

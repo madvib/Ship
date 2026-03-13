@@ -1,8 +1,13 @@
 mod helpers;
 
 use helpers::TestProject;
-use runtime::{WorkspaceStatus, get_workspace};
+use runtime::config::{McpServerConfig, McpServerType, ProjectConfig, save_config};
+use runtime::{
+    CreateWorkspaceRequest, WorkspaceStatus, create_skill, create_workspace,
+    get_workspace, get_workspace_provider_matrix, sync_workspace,
+};
 use ship_module_project::ops::feature::{create_feature, get_feature_by_id};
+use std::collections::HashMap;
 use std::process::{Command, Output};
 
 fn run_cli(project: &TestProject, args: &[&str]) -> Output {
@@ -31,6 +36,21 @@ fn branch_exists(project: &TestProject, branch: &str) -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+fn make_stdio_server(id: &str) -> McpServerConfig {
+    McpServerConfig {
+        id: id.to_string(),
+        name: id.to_string(),
+        command: "npx".to_string(),
+        args: vec!["-y".to_string(), format!("@mcp/{id}")],
+        env: HashMap::new(),
+        scope: "project".to_string(),
+        server_type: McpServerType::Stdio,
+        url: None,
+        disabled: false,
+        timeout_secs: None,
+    }
 }
 
 #[test]
@@ -228,6 +248,85 @@ fn workspace_session_start_status_end_and_list_happy_path() {
 }
 
 #[test]
+fn workspace_session_status_marks_restart_required_after_agent_config_change() {
+    let project = TestProject::with_git().unwrap();
+    let init = project.initial_commit().unwrap();
+    assert_success(&init, "initial git commit failed");
+
+    let out = run_cli(
+        &project,
+        &["workspace", "create", "feature/stale-session", "--checkout"],
+    );
+    assert_success(&out, "workspace create --checkout failed");
+
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "session",
+            "start",
+            "--branch",
+            "feature/stale-session",
+            "--goal",
+            "Verify stale session detection",
+        ],
+    );
+    assert_success(&out, "workspace session start failed");
+
+    let active_before = runtime::get_active_workspace_session(&project.ship_dir, "feature/stale-session")
+        .unwrap()
+        .expect("active session should exist");
+    let generation_at_start = active_before
+        .config_generation_at_start
+        .expect("generation at start should be recorded");
+    assert!(!active_before.stale_context, "new session should not be stale");
+
+    create_skill(
+        &project.ship_dir,
+        "session-stale-skill",
+        "Session Stale Skill",
+        "Used to verify stale session detection after config recompiles.",
+    )
+    .unwrap();
+
+    let _ = create_workspace(
+        &project.ship_dir,
+        CreateWorkspaceRequest {
+            branch: "feature/stale-session".to_string(),
+            skills: Some(vec!["session-stale-skill".to_string()]),
+            ..CreateWorkspaceRequest::default()
+        },
+    )
+    .unwrap();
+    let updated_workspace = sync_workspace(&project.ship_dir, "feature/stale-session").unwrap();
+    assert!(
+        updated_workspace.config_generation > generation_at_start,
+        "workspace config generation should increment after agent override update"
+    );
+
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "session",
+            "status",
+            "--branch",
+            "feature/stale-session",
+        ],
+    );
+    assert_success(&out, "workspace session status failed");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("stale_context=true"),
+        "status should mark stale context after config change:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("restart_required=true"),
+        "status should signal restart requirement when stale:\n{stdout}"
+    );
+}
+
+#[test]
 fn workspace_checkout_activation_demotes_previous_active_workspace() {
     let project = TestProject::with_git().unwrap();
     let init = project.initial_commit().unwrap();
@@ -317,6 +416,139 @@ fn workspace_sync_regenerates_agent_context_for_current_workspace() {
     );
     assert_success(&out, "workspace sync failed");
     project.assert_root_file_contains("CLAUDE.md", "# [ship] Sync Context");
+}
+
+#[test]
+fn workspace_agent_overrides_drive_effective_codex_compile_output() {
+    let project = TestProject::with_git().unwrap();
+    let init = project.initial_commit().unwrap();
+    assert_success(&init, "initial git commit failed");
+
+    let mut config = ProjectConfig::default();
+    config.providers = vec!["claude".to_string(), "codex".to_string()];
+    config.mcp_servers = vec![make_stdio_server("github"), make_stdio_server("linear")];
+    save_config(&config, Some(project.ship_dir.clone())).unwrap();
+
+    create_skill(
+        &project.ship_dir,
+        "ws-selected",
+        "Workspace Selected",
+        "Only this skill should be exported for the workspace override.",
+    )
+    .unwrap();
+    create_skill(
+        &project.ship_dir,
+        "ws-ignored",
+        "Workspace Ignored",
+        "This skill should be excluded by workspace overrides.",
+    )
+    .unwrap();
+
+    let branch = "feature/workspace-agent-overrides";
+    let out = run_cli(
+        &project,
+        &[
+            "workspace",
+            "create",
+            branch,
+            "--type",
+            "feature",
+            "--feature-title",
+            "Workspace Agent Overrides",
+            "--checkout",
+        ],
+    );
+    assert_success(&out, "workspace create --checkout failed");
+
+    let pre_matrix = get_workspace_provider_matrix(&project.ship_dir, branch, None).unwrap();
+    assert!(
+        pre_matrix.allowed_providers == vec!["claude".to_string(), "codex".to_string()]
+            || pre_matrix.allowed_providers == vec!["codex".to_string(), "claude".to_string()],
+        "pre-override provider matrix should include project providers"
+    );
+
+    let _ = create_workspace(
+        &project.ship_dir,
+        CreateWorkspaceRequest {
+            branch: branch.to_string(),
+            providers: Some(vec!["codex".to_string()]),
+            mcp_servers: Some(vec!["github".to_string()]),
+            skills: Some(vec!["ws-selected".to_string()]),
+            ..CreateWorkspaceRequest::default()
+        },
+    )
+    .unwrap();
+    let updated_workspace = get_workspace(&project.ship_dir, branch)
+        .unwrap()
+        .expect("workspace should exist after override update");
+    assert_eq!(
+        updated_workspace.providers,
+        vec!["codex".to_string()],
+        "workspace provider override should persist"
+    );
+    assert_eq!(
+        updated_workspace.mcp_servers,
+        vec!["github".to_string()],
+        "workspace MCP override should persist"
+    );
+    assert_eq!(
+        updated_workspace.skills,
+        vec!["ws-selected".to_string()],
+        "workspace skill override should persist"
+    );
+
+    let synced_runtime_workspace = sync_workspace(&project.ship_dir, branch).unwrap();
+    assert_eq!(
+        synced_runtime_workspace.mcp_servers,
+        vec!["github".to_string()],
+        "runtime sync should retain workspace MCP override"
+    );
+    let runtime_sync_codex_cfg: toml::Value =
+        toml::from_str(&project.read_root_file(".codex/config.toml")).unwrap();
+    let runtime_sync_mcp_servers = runtime_sync_codex_cfg
+        .get("mcp_servers")
+        .and_then(|value| value.as_table())
+        .expect("runtime sync codex config should contain mcp_servers table");
+    assert!(
+        !runtime_sync_mcp_servers.contains_key("linear"),
+        "runtime workspace sync should exclude unselected MCP server"
+    );
+
+    let post_matrix = get_workspace_provider_matrix(&project.ship_dir, branch, None).unwrap();
+    assert!(
+        post_matrix.allowed_providers == vec!["codex".to_string()],
+        "post-override provider matrix should be narrowed to codex"
+    );
+
+    sync_workspace(&project.ship_dir, branch).unwrap();
+
+    let codex_cfg: toml::Value =
+        toml::from_str(&project.read_root_file(".codex/config.toml")).unwrap();
+    let mcp_servers = codex_cfg
+        .get("mcp_servers")
+        .and_then(|value| value.as_table())
+        .expect("codex config should contain mcp_servers table");
+    let exported_server_ids: Vec<String> = mcp_servers.keys().cloned().collect();
+    assert!(
+        mcp_servers.contains_key("github"),
+        "workspace-selected MCP server should be exported for codex"
+    );
+    assert!(
+        !mcp_servers.contains_key("linear"),
+        "workspace-unselected MCP server should be excluded from codex export (exported={exported_server_ids:?})"
+    );
+
+    assert!(
+        project
+            .root()
+            .join(".agents/skills/ws-selected/SKILL.md")
+            .exists(),
+        "selected workspace skill should be exported to codex skill output"
+    );
+    assert!(
+        !project.root().join(".agents/skills/ws-ignored").exists(),
+        "workspace-unselected skill should be excluded from codex skill output"
+    );
 }
 
 #[test]

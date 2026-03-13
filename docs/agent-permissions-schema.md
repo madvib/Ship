@@ -46,7 +46,7 @@ This keeps one base policy surface while still allowing mode-specific tool gatin
 Current export mappings are explicit and provider-specific:
 
 - `claude`:
-  - Output: `~/.claude/settings.json`
+  - Output: `$WORKSPACE_ROOT/.claude/settings.json`
   - Mapping: `permissions.tools.allow/deny` -> `settings.permissions.allow/deny`
 - `gemini`:
   - Output: `$WORKSPACE_ROOT/.gemini/policies/ship-permissions.toml`
@@ -70,7 +70,7 @@ When adding new provider mappings, keep conversion in `agent_export.rs` explicit
 
 `runtime::agent_export::import_permissions_from_provider(provider, ship_dir)` supports:
 
-- `claude`: reads `~/.claude/settings.json` permissions allow/deny arrays.
+- `claude`: reads workspace `.claude/settings.json` permissions allow/deny arrays (falls back to `~/.claude/settings.json` only when project-local file is missing).
 - `gemini`: reads workspace `ship-permissions.toml` policy rules.
 - `codex`: reads `.codex/rules/*.rules` (`prefix_rule(...)`) plus legacy fallback fields in `.codex/config.toml`.
 

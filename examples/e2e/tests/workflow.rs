@@ -10,6 +10,7 @@ fn init_creates_namespace_structure() {
 
     // top-level vision
     p.assert_ship_file("vision.md");
+    p.assert_no_ship_file("project");
     p.assert_no_ship_file("project/vision.md");
     p.assert_no_ship_file("TEMPLATE.md");
     p.assert_no_ship_file("README.md");
@@ -19,6 +20,9 @@ fn init_creates_namespace_structure() {
     p.assert_ship_file("agents/mcp.toml");
     p.assert_ship_file("agents/permissions.toml");
     p.assert_ship_file("agents/skills/task-policy/SKILL.md");
+    p.assert_ship_file_contains("agents/mcp.toml", "[mcp.servers.ship]");
+    p.assert_ship_file_contains("agents/mcp.toml", "command = \"ship\"");
+    p.assert_ship_file_contains("agents/mcp.toml", "\"serve\"");
 
     // shared
     p.assert_ship_file("generated");

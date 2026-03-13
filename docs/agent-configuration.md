@@ -279,7 +279,7 @@ never touched.
 
 ### 6. Write hooks and native permissions
 
-**Claude — `~/.claude/settings.json`:**
+**Claude — `.claude/settings.json` (project-local):**
 Written when managed Ship hooks are enabled (default) or tool permissions differ from
 default (`["*"]` allow, empty deny). Merges into existing settings, preserving user entries.
 
@@ -431,7 +431,7 @@ automatically — run `ship git sync` to regenerate provider configs.
 Reads provider-native permission files and writes them to `.ship/agents/permissions.toml`.
 Destructive on the permissions file — previous content is replaced.
 
-### From Claude (`~/.claude/settings.json`)
+### From Claude (`.claude/settings.json`, project-local)
 
 Reads `permissions.allow` and `permissions.deny` arrays directly.
 Maps 1:1 to `tools.allow` / `tools.deny`.
@@ -585,7 +585,7 @@ command = "echo 'running bash'"
 `BeforeToolSelection`
 
 **Claude and Gemini** have hooks exported to native config files:
-- Claude: `~/.claude/settings.json`
+- Claude: `.claude/settings.json`
 - Gemini: `.gemini/settings.json`
 
 **Codex assessment:** Codex currently has no native hooks section in config schema,
@@ -593,8 +593,8 @@ so Ship keeps hooks provider-agnostic and skips Codex hook export.
 
 **Runtime hook artifacts (Ship-managed):**
 At export time for Claude/Gemini, Ship writes runtime hook artifacts to:
-- `.ship/agents/runtime/hook-context.md`
-- `.ship/agents/runtime/envelope.json`
+- `.ship/generated/runtime/hook-context.md`
+- `.ship/generated/runtime/envelope.json`
 - `~/.ship/state/telemetry/hooks/events.ndjson` (internal telemetry appended by `ship hooks run`; not user-facing project config)
 
 `ship hooks run` now evaluates pre-tool/permission events against `envelope.json`
@@ -621,9 +621,9 @@ and emits provider-native allow/ask/deny decisions for Claude/Gemini.
 | File | When written | Content |
 |---|---|---|
 | `.mcp.json` | Every sync | MCP server registry (JSON) |
-| `CLAUDE.md` | Every sync | Feature context, skills, rules inlined |
+| `CLAUDE.md` | Every sync | Session context + rules (skills are exported to provider-native skills directories) |
 | `.claude/skills/<id>/SKILL.md` | Every sync | One file per active skill |
-| `~/.claude/settings.json` | Every sync when managed hooks are enabled (default), otherwise when hooks/non-default permissions exist | Hooks + tool permissions |
+| `.claude/settings.json` | Every sync when managed hooks are enabled (default), otherwise when hooks/non-default permissions exist | Hooks + tool permissions |
 
 ### Gemini
 

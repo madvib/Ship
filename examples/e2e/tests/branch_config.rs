@@ -81,9 +81,9 @@ fn claude_md_omits_issue_section() {
     p.assert_root_file_not_contains("CLAUDE.md", "## Open Issues");
 }
 
-/// Skill content is inlined into CLAUDE.md under ## Skills.
+/// Skill bodies are not inlined into CLAUDE.md.
 #[test]
-fn claude_md_inlines_skill_content() {
+fn claude_md_excludes_skill_content() {
     let p = TestProject::with_git().unwrap();
     let feat = create_feature(
         p.ship_dir.clone(),
@@ -107,7 +107,6 @@ fn claude_md_inlines_skill_content() {
         FeatureAgentConfig {
             providers: vec![],
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec!["conventions".to_string()],
         },
@@ -115,7 +114,8 @@ fn claude_md_inlines_skill_content() {
 
     on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
 
-    p.assert_root_file_contains("CLAUDE.md", "Always use anyhow for errors.");
+    p.assert_root_file_not_contains("CLAUDE.md", "conventions");
+    p.assert_root_file_not_contains("CLAUDE.md", "Always use anyhow for errors.");
 }
 
 /// Feature-level MCP filtering restricts .mcp.json to only the declared servers.
@@ -141,7 +141,6 @@ fn mcp_json_contains_only_feature_declared_servers() {
         FeatureAgentConfig {
             providers: vec![],
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec!["github".to_string()],
             skills: vec![],
         },
@@ -262,7 +261,6 @@ fn switching_to_main_restores_baseline_mcp_servers() {
         FeatureAgentConfig {
             providers: vec![],
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec!["linear".to_string()],
             skills: vec![],
         },
@@ -309,7 +307,6 @@ fn switching_to_main_removes_feature_override_provider_outputs() {
         FeatureAgentConfig {
             providers: vec!["codex".to_string()],
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec![],
         },
@@ -388,6 +385,14 @@ fn worktree_claude_md_written_to_worktree_root() {
     p.checkout("main").unwrap();
 
     let wt = p.add_worktree("feature/auth").unwrap();
+    let root_claude = p.root().join("CLAUDE.md");
+    if root_claude.exists() {
+        std::fs::remove_file(&root_claude).unwrap();
+    }
+    assert!(
+        !root_claude.exists(),
+        "precondition: main repo root should not have CLAUDE.md before worktree sync"
+    );
     on_post_checkout(&wt.ship_dir, "feature/auth", &wt.path).unwrap();
 
     let claude_md = wt.path.join("CLAUDE.md");
@@ -536,7 +541,6 @@ fn checkout_skips_unknown_feature_provider_ids_and_exports_valid_targets() {
         FeatureAgentConfig {
             providers: vec!["unknown-provider".to_string(), " CLAUDE ".to_string()],
             model: None,
-            max_cost_per_session: None,
             mcp_servers: vec![],
             skills: vec![],
         },
@@ -707,8 +711,10 @@ fn workspace_mode_override_applies_on_checkout() {
     .unwrap();
 
     on_post_checkout(&p.ship_dir, "feature/auth", &p.root()).unwrap();
-    p.assert_root_file_contains("CLAUDE.md", "CODE-MODE-CONTENT");
+    p.assert_root_file_not_contains("CLAUDE.md", "CODE-MODE-CONTENT");
     p.assert_root_file_not_contains("CLAUDE.md", "PLANNING-MODE-CONTENT");
+    p.assert_root_file_contains(".claude/skills/rt-code-skill/SKILL.md", "CODE-MODE-CONTENT");
+    p.assert_no_root_file(".claude/skills/rt-planning-skill/SKILL.md");
 }
 
 // ─── Generated file gitignore ─────────────────────────────────────────────────
