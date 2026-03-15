@@ -9,9 +9,7 @@ export default function Header() {
           to="/"
           className="flex items-center gap-2 text-sm font-bold tracking-tight no-underline"
         >
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-[10px] font-black text-primary-foreground">
-            S
-          </span>
+          <img src="/ship-logos/ship_logo.svg" alt="Ship" className="size-6" />
           <span>Ship</span>
           <span className="text-[10px] font-semibold text-muted-foreground tracking-wider uppercase">Studio</span>
         </Link>

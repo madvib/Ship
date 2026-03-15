@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StudioRouteImport } from './routes/studio'
 import { Route as CompilerRouteImport } from './routes/compiler'
-import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -23,11 +22,6 @@ const StudioRoute = StudioRouteImport.update({
 const CompilerRoute = CompilerRouteImport.update({
   id: '/compiler',
   path: '/compiler',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -43,14 +37,12 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
   '/compiler': typeof CompilerRoute
   '/studio': typeof StudioRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
   '/compiler': typeof CompilerRoute
   '/studio': typeof StudioRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -58,22 +50,20 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/about': typeof AboutRoute
   '/compiler': typeof CompilerRoute
   '/studio': typeof StudioRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/compiler' | '/studio' | '/api/auth/$'
+  fullPaths: '/' | '/compiler' | '/studio' | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/compiler' | '/studio' | '/api/auth/$'
-  id: '__root__' | '/' | '/about' | '/compiler' | '/studio' | '/api/auth/$'
+  to: '/' | '/compiler' | '/studio' | '/api/auth/$'
+  id: '__root__' | '/' | '/compiler' | '/studio' | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AboutRoute: typeof AboutRoute
   CompilerRoute: typeof CompilerRoute
   StudioRoute: typeof StudioRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -95,13 +85,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CompilerRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -121,7 +104,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AboutRoute: AboutRoute,
   CompilerRoute: CompilerRoute,
   StudioRoute: StudioRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

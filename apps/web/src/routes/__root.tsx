@@ -21,16 +21,13 @@ const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getIte
 export const Route = createRootRouteWithContext<MyRouterContext>()({
   head: () => ({
     meta: [
-      {
-        charSet: 'utf-8',
-      },
-      {
-        name: 'viewport',
-        content: 'width=device-width, initial-scale=1',
-      },
-      {
-        title: 'Ship Studio — Agent Configuration',
-      },
+      { charSet: 'utf-8' },
+      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      { title: 'Ship Studio — Configure your AI agents' },
+      { name: 'description', content: 'Build once, export to Claude Code, Gemini CLI, Codex, and Cursor. MCP servers, skills, and permissions — all in sync.' },
+      { property: 'og:title', content: 'Ship Studio' },
+      { property: 'og:description', content: 'Build once, export to Claude Code, Gemini CLI, Codex, and Cursor.' },
+      { property: 'og:url', content: 'https://getship.dev' },
     ],
     links: [
       {
