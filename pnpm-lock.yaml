@@ -36,6 +36,9 @@ importers:
       vite:
         specifier: ^7.0.4
         version: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)
+      vite-plugin-static-copy:
+        specifier: ^2.2.0
+        version: 2.3.2(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0))
 
   apps/desktop:
     dependencies:
@@ -330,6 +333,9 @@ importers:
       vite:
         specifier: ^7.3.1
         version: 7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)
+      vite-plugin-static-copy:
+        specifier: ^2.2.0
+        version: 2.3.2(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0))
       vite-tsconfig-paths:
         specifier: ^5.1.4
         version: 5.1.4(typescript@5.8.3)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0))
@@ -339,6 +345,8 @@ importers:
       wrangler:
         specifier: ^4.73.0
         version: 4.73.0
+
+  packages/assets: {}
 
   packages/compiler: {}
 
@@ -5565,6 +5573,10 @@ packages:
     resolution: {integrity: sha512-kuUqqHNUqoIWp/c467RI4X6mmyuojY5jGutNU0wVTmEOOfcuwLqyMVoAi9MKi2Ak+5i9+nhmrK4ufZE8069kHA==}
     engines: {node: '>=18'}
 
+  p-map@7.0.4:
+    resolution: {integrity: sha512-tkAQEw8ysMzmkhgw8k+1U/iPhWNhykKnSk4Rd5zLoPJCuJaGRPo6YposrZgaxHKzDHdDWWZvE/Sk7hsL2X/CpQ==}
+    engines: {node: '>=18'}
+
   p-queue@8.1.1:
     resolution: {integrity: sha512-aNZ+VfjobsWryoiPnEApGGmf5WmNsCo9xu8dfaYamG5qaLP7ClhLN6NgsFe6SwJ2UbLEBK5dv9x8Mn5+RVhMWQ==}
     engines: {node: '>=18'}
@@ -6597,6 +6609,12 @@ packages:
     peerDependenciesMeta:
       vite:
         optional: true
+
+  vite-plugin-static-copy@2.3.2:
+    resolution: {integrity: sha512-iwrrf+JupY4b9stBttRWzGHzZbeMjAHBhkrn67MNACXJVjEMRpCI10Q3AkxdBkl45IHaTfw/CNVevzQhP7yTwg==}
+    engines: {node: ^18.0.0 || >=20.0.0}
+    peerDependencies:
+      vite: ^5.0.0 || ^6.0.0
 
   vite-tsconfig-paths@5.1.4:
     resolution: {integrity: sha512-cYj0LRuLV2c2sMqhqhGpaO3LretdtMn/BVX4cPLanIZuwwrkVl+lK84E/miEXkCHWXuq65rhNN4rXsBcOB3S4w==}
@@ -12900,6 +12918,8 @@ snapshots:
     dependencies:
       yocto-queue: 1.2.2
 
+  p-map@7.0.4: {}
+
   p-queue@8.1.1:
     dependencies:
       eventemitter3: 5.0.4
@@ -14178,6 +14198,24 @@ snapshots:
       - '@types/node'
       - rollup
       - supports-color
+
+  vite-plugin-static-copy@2.3.2(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)):
+    dependencies:
+      chokidar: 3.6.0
+      fast-glob: 3.3.3
+      fs-extra: 11.3.4
+      p-map: 7.0.4
+      picocolors: 1.1.1
+      vite: 7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)
+
+  vite-plugin-static-copy@2.3.2(vite@7.3.1(@types/node@25.3.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)):
+    dependencies:
+      chokidar: 3.6.0
+      fast-glob: 3.3.3
+      fs-extra: 11.3.4
+      p-map: 7.0.4
+      picocolors: 1.1.1
+      vite: 7.3.1(@types/node@25.3.3)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)
 
   vite-tsconfig-paths@5.1.4(typescript@5.8.3)(vite@7.3.1(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.31.1)(tsx@4.21.0)):
     dependencies:

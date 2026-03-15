@@ -8,7 +8,7 @@
     "predev": "pnpm run gen:bindings",
     "prebuild": "pnpm run gen:bindings",
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node -e \"const fs=require('fs'),p=require('path');const src='../../packages/assets/public',dst='dist';fs.readdirSync(src).forEach(f=>{const s=p.join(src,f),d=p.join(dst,f);fs.existsSync(s)&&fs.lstatSync(s).isFile()&&fs.copyFileSync(s,d)})\"]",
     "test:ui": "vitest run",
     "test:ui:watch": "vitest",
     "preview": "vite preview",
