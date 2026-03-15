@@ -1,36 +1,80 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from 'react'
-import { Bot, Zap, ArrowRight, Layers, Sparkles, ChevronDown } from 'lucide-react'
+import { Layers, Zap, Bot, ArrowRight, ChevronDown, Sparkles } from 'lucide-react'
+import { ProviderLogo } from '../features/compiler/ProviderLogo'
 
 export const Route = createFileRoute('/')({ component: HomePage })
 
 const PROVIDER_TABS = [
-  { id: 'claude', label: 'Claude Code', color: 'text-amber-600 dark:text-amber-400' },
-  { id: 'gemini', label: 'Gemini CLI', color: 'text-blue-600 dark:text-blue-400' },
-  { id: 'codex', label: 'Codex CLI', color: 'text-emerald-600 dark:text-emerald-400' },
+  { id: 'claude',  label: 'Claude Code' },
+  { id: 'gemini',  label: 'Gemini CLI'  },
+  { id: 'codex',   label: 'Codex CLI'   },
+  { id: 'cursor',  label: 'Cursor'      },
 ]
 
-const EXAMPLE_CONFIG = `[project]
-name = "my-app"
-providers = ["claude", "gemini"]
+const PROVIDER_OUTPUTS: Record<string, { filename: string; content: string }> = {
+  claude: {
+    filename: 'CLAUDE.md + .mcp.json',
+    content: `# CLAUDE.md
 
-[[mcp_servers]]
-id = "github"
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_TOKEN = "$GITHUB_TOKEN" }
+## Rules
+Use TypeScript. Prefer explicit types.
+No workarounds without a linked issue.
 
-[[skills]]
-id = "ship-workflow"
-name = "Ship Workflow"
+## Skills
+- Smart Commit: atomic, well-described commits
+- Shipflow: plan → build → wrap up
 
-[[rules]]
-id = "code-style"
-file_name = "code-style.md"
-`
+## MCP servers
+- github: search repos, manage PRs
+- memory: persist context across sessions`,
+  },
+  gemini: {
+    filename: 'GEMINI.md + .gemini/settings.json',
+    content: `# GEMINI.md
+
+## Rules
+Use TypeScript. Prefer explicit types.
+No workarounds without a linked issue.
+
+## Skills
+- Smart Commit: atomic, well-described commits
+- Shipflow: plan → build → wrap up`,
+  },
+  codex: {
+    filename: 'AGENTS.md + .codex/config.toml',
+    content: `# AGENTS.md
+
+## Rules
+Use TypeScript. Prefer explicit types.
+No workarounds without a linked issue.
+
+## Skills
+- Smart Commit: atomic, well-described commits
+- Shipflow: plan → build → wrap up`,
+  },
+  cursor: {
+    filename: '.cursor/mcp.json + .cursor/rules/',
+    content: `// .cursor/mcp.json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "$GITHUB_TOKEN" }
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    }
+  }
+}`,
+  },
+}
 
 function HomePage() {
   const [activeProvider, setActiveProvider] = useState('claude')
+  const output = PROVIDER_OUTPUTS[activeProvider]
 
   return (
     <main className="min-h-screen">
@@ -42,7 +86,7 @@ function HomePage() {
         <div className="relative mx-auto max-w-4xl text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/8 px-3 py-1.5 text-xs font-semibold tracking-wide text-primary uppercase">
             <Sparkles className="size-3" />
-            Ship Studio — Early Access
+            Early Access
           </div>
 
           <h1 className="mb-6 font-display text-5xl font-bold tracking-tight sm:text-7xl">
@@ -51,7 +95,7 @@ function HomePage() {
           </h1>
 
           <p className="mx-auto mb-10 max-w-2xl text-lg text-muted-foreground sm:text-xl">
-            Build once. Export to Claude Code, Gemini CLI, Codex, and Cursor — with MCP servers, skills, and permissions all in sync.
+            Configure MCP servers, skills, and permissions once — export to Claude Code, Gemini CLI, Codex CLI, and Cursor with a single click.
           </p>
 
           <div className="flex flex-wrap justify-center gap-3">
@@ -73,45 +117,41 @@ function HomePage() {
         </div>
       </section>
 
-      {/* Live preview strip */}
+      {/* Live preview */}
       <section className="border-y border-border/60 bg-muted/30 px-6 py-12 sm:px-10">
         <div className="mx-auto max-w-5xl">
           <p className="mb-6 text-center text-xs font-semibold tracking-widest text-muted-foreground uppercase">
-            Build once → export to
+            Export to
           </p>
-          <div className="flex items-center justify-center gap-3">
+
+          {/* Provider tab pills */}
+          <div className="mb-6 flex flex-wrap items-center justify-center gap-2">
             {PROVIDER_TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveProvider(tab.id)}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition ${
                   activeProvider === tab.id
-                    ? 'border-primary/30 bg-primary/10 ' + tab.color
-                    : 'border-border/60 bg-card text-muted-foreground hover:border-border'
+                    ? 'border-primary/30 bg-primary/10 text-foreground'
+                    : 'border-border/60 bg-card text-muted-foreground hover:border-border hover:text-foreground'
                 }`}
               >
+                <ProviderLogo provider={tab.id} size="sm" />
                 {tab.label}
               </button>
             ))}
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div className="overflow-hidden rounded-xl border border-border/60 bg-card">
-              <div className="border-b border-border/60 px-4 py-2.5">
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Library config</p>
-              </div>
-              <pre className="overflow-x-auto p-4 text-xs leading-relaxed text-foreground/80">{EXAMPLE_CONFIG}</pre>
+          {/* Animated output preview */}
+          <div
+            key={activeProvider}
+            className="overflow-hidden rounded-xl border border-border/60 bg-card animate-in fade-in slide-in-from-bottom-2 duration-300"
+          >
+            <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-4 py-2.5">
+              <ProviderLogo provider={activeProvider} size="sm" />
+              <p className="font-mono text-[11px] font-medium text-muted-foreground">{output.filename}</p>
             </div>
-            <div className="overflow-hidden rounded-xl border border-primary/20 bg-card">
-              <div className="border-b border-primary/20 bg-primary/5 px-4 py-2.5">
-                <p className="text-[11px] font-medium text-primary uppercase tracking-wide">
-                  Output — {activeProvider === 'claude' ? '.mcp.json + CLAUDE.md' : activeProvider === 'gemini' ? '.gemini/settings.json + GEMINI.md' : '.codex/config.toml + AGENTS.md'}
-                </p>
-              </div>
-              <div className="p-4">
-                <OutputPreview provider={activeProvider} />
-              </div>
-            </div>
+            <pre className="overflow-x-auto p-5 text-xs leading-relaxed text-foreground/80">{output.content}</pre>
           </div>
         </div>
       </section>
@@ -122,34 +162,36 @@ function HomePage() {
           <h2 className="mb-12 text-center font-display text-3xl font-bold sm:text-4xl">
             How it works
           </h2>
-          <div className="grid gap-6 sm:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-3">
             {[
               {
                 icon: Layers,
                 step: '01',
                 title: 'Build your library',
-                description: 'Add MCP servers, skills, rules, and permissions in Ship Studio. Browse the curated catalog.',
+                description: 'Add MCP servers, skills, and rules from the curated catalog or your own.',
               },
               {
                 icon: Zap,
                 step: '02',
                 title: 'Configure your mode',
-                description: 'Name your mode and choose which AI coding assistants to target. Configure permissions per provider.',
+                description: 'Choose which AI agents to target. Permissions apply per provider automatically.',
               },
               {
                 icon: Bot,
                 step: '03',
                 title: 'Export everywhere',
-                description: 'Download provider-native config files. Claude Code, Gemini CLI, and Codex all start with the same context.',
+                description: 'Download provider-native config files. All agents start with the same context.',
               },
             ].map(({ icon: Icon, step, title, description }) => (
-              <div key={step} className="relative rounded-2xl border border-border/60 bg-card p-6">
-                <span className="mb-4 block font-display text-4xl font-bold text-primary/20">{step}</span>
-                <div className="mb-3 flex size-9 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
-                  <Icon className="size-4 text-primary" />
+              <div key={step} className="rounded-2xl border border-border/60 bg-card p-5">
+                <div className="mb-3 flex items-center gap-3">
+                  <span className="font-display text-2xl font-bold text-primary/25">{step}</span>
+                  <div className="flex size-8 items-center justify-center rounded-lg border border-primary/20 bg-primary/10">
+                    <Icon className="size-4 text-primary" />
+                  </div>
                 </div>
-                <h3 className="mb-2 text-base font-semibold">{title}</h3>
-                <p className="text-sm text-muted-foreground">{description}</p>
+                <h3 className="mb-1.5 text-sm font-semibold">{title}</h3>
+                <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
               </div>
             ))}
           </div>
@@ -162,7 +204,7 @@ function HomePage() {
           <h2 className="mb-3 font-display text-2xl font-bold sm:text-3xl">
             Ready to unify your agent stack?
           </h2>
-          <p className="mb-6 text-muted-foreground">
+          <p className="mb-6 text-sm text-muted-foreground">
             Configure once and get provider-ready output files in seconds — entirely in your browser.
           </p>
           <a
@@ -175,43 +217,5 @@ function HomePage() {
         </div>
       </section>
     </main>
-  )
-}
-
-function OutputPreview({ provider }: { provider: string }) {
-  const outputs: Record<string, string> = {
-    claude: `{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "$GITHUB_TOKEN" }
-    }
-  }
-}`,
-    gemini: `{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_TOKEN": "$GITHUB_TOKEN" }
-    }
-  },
-  "theme": "Default"
-}`,
-    codex: `model: gpt-4o
-mcpServers:
-  github:
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-github"
-    env:
-      GITHUB_TOKEN: $GITHUB_TOKEN`,
-  }
-  return (
-    <pre className="overflow-x-auto text-xs leading-relaxed text-foreground/80">
-      {outputs[provider]}
-    </pre>
   )
 }

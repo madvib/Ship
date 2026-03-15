@@ -33,7 +33,6 @@ export interface Provider {
   name: string
   description: string
   files: string[]
-  logo?: string
 }
 
 export const PROVIDERS: Provider[] = [
@@ -42,14 +41,12 @@ export const PROVIDERS: Provider[] = [
     name: 'Claude Code',
     description: "Anthropic's AI coding assistant",
     files: ['CLAUDE.md', '.mcp.json', '.claude/settings.json'],
-    logo: '/provider-logos/claude.svg',
   },
   {
     id: 'gemini',
     name: 'Gemini CLI',
     description: "Google's AI coding assistant",
     files: ['GEMINI.md', '.gemini/settings.json'],
-    logo: '/provider-logos/googlegemini.svg',
   },
   {
     id: 'codex',
@@ -62,6 +59,5 @@ export const PROVIDERS: Provider[] = [
     name: 'Cursor',
     description: 'AI-first code editor by Anysphere',
     files: ['AGENTS.md', '.cursor/mcp.json', '.cursor/rules/'],
-    logo: '/provider-logos/cursor.svg',
   },
 ]

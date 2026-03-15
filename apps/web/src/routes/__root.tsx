@@ -30,10 +30,9 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
       { property: 'og:url', content: 'https://getship.dev' },
     ],
     links: [
-      {
-        rel: 'stylesheet',
-        href: appCss,
-      },
+      { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', href: '/ship-logos/ship_logo.svg', type: 'image/svg+xml' },
+      { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
     ],
   }),
   shellComponent: RootDocument,

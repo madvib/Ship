@@ -14,6 +14,7 @@ import { RulesForm } from '../features/compiler/sections/RulesForm'
 import { PermissionsForm } from '../features/compiler/sections/PermissionsForm'
 import { DEFAULT_LIBRARY, DEFAULT_PERMISSIONS } from '../features/compiler/types'
 import type { ProjectLibrary, CompileResult } from '../features/compiler/types'
+import { ProviderLogo } from '../features/compiler/ProviderLogo'
 import type { McpServerConfig, Skill } from '@ship/ui'
 
 export const Route = createFileRoute('/studio')({ component: StudioPage })
@@ -96,14 +97,14 @@ interface CuratedSkill {
 
 const CURATED_SKILLS: CuratedSkill[] = [
   {
-    id: 'ship-workflow',
-    displayName: 'Ship Workflow',
+    id: 'shipflow',
+    displayName: 'Shipflow',
     description: 'Guides AI through planning, working, and session wrap-up',
     skill: {
-      id: 'ship-workflow',
-      name: 'Ship Workflow',
+      id: 'shipflow',
+      name: 'Shipflow',
       description: 'Project intelligence workflow',
-      content: `# Ship Workflow\n\nUse Ship to plan, execute, and wrap up work sessions.\n\n## Planning\nStart sessions with context: goals, active feature, current workspace.\n\n## Working  \nLog progress against specs. Reference ADRs for architectural decisions.\n\n## Wrapping up\nEnd sessions with a summary. Update spec status. Log what shipped.\n`,
+      content: `# Shipflow\n\nUse Ship to plan, execute, and wrap up work sessions.\n\n## Planning\nStart sessions with context: goals, active feature, current workspace.\n\n## Working  \nLog progress against specs. Reference ADRs for architectural decisions.\n\n## Wrapping up\nEnd sessions with a summary. Update spec status. Log what shipped.\n`,
     },
   },
   {
@@ -163,48 +164,6 @@ const PROVIDER_SHORT: Record<string, string> = {
   gemini: 'Gemini',
   codex: 'Codex',
   cursor: 'Cursor',
-}
-
-// Provider colors for text badges (used when no logo)
-const PROVIDER_COLOR: Record<string, string> = {
-  claude: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
-  gemini: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  codex: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
-  cursor: 'bg-violet-500/15 text-violet-700 dark:text-violet-400',
-}
-
-// ProviderLogo — renders the correct logo per provider with dark/light mode handling.
-// cursor: CUBE_2D_DARK (visible in dark mode) / CUBE_2D_LIGHT (visible in light mode)
-// codex: OpenAI black mono (dark:invert → white in dark mode)
-// claude + gemini: SVG with dark:invert
-function ProviderLogo({ provider, size = 'sm' }: { provider: string; size?: 'sm' | 'md' }) {
-  const cls = size === 'sm' ? 'size-3.5' : 'size-4'
-
-  if (provider === 'cursor') {
-    return (
-      <>
-        <img src="/ide-logos/CUBE_2D_LIGHT.svg" alt="Cursor" className={`${cls} object-contain dark:hidden`} />
-        <img src="/ide-logos/CUBE_2D_DARK.svg" alt="Cursor" className={`${cls} object-contain hidden dark:block`} />
-      </>
-    )
-  }
-  if (provider === 'codex') {
-    return <img src="/provider-logos/OpenAI-black-monoblossom.svg" alt="Codex" className={`${cls} object-contain dark:invert`} />
-  }
-  if (provider === 'claude') {
-    return <img src="/provider-logos/claude.svg" alt="Claude" className={`${cls} object-contain`} />
-  }
-  if (provider === 'gemini') {
-    return <img src="/provider-logos/googlegemini.svg" alt="Gemini" className={`${cls} object-contain`} />
-  }
-  // Fallback: colored initial badge
-  const color = PROVIDER_COLOR[provider] ?? 'bg-muted text-muted-foreground'
-  const short = PROVIDER_SHORT[provider] ?? provider
-  return (
-    <span className={`inline-flex items-center justify-center rounded text-[9px] font-bold px-1 ${color}`}>
-      {short.slice(0, 2).toUpperCase()}
-    </span>
-  )
 }
 
 // ── InspectorTab helpers ──────────────────────────────────────────────────────

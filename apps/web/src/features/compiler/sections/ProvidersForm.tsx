@@ -1,4 +1,5 @@
 import { PROVIDERS } from '../types'
+import { ProviderLogo } from '../ProviderLogo'
 
 interface Props {
   selected: string[]
@@ -30,11 +31,7 @@ export function ProvidersForm({ selected, activeMode, onToggle, onModeChange }: 
               />
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background p-1.5">
-                  {p.logo ? (
-                    <img src={p.logo} alt={p.name} className="size-full object-contain dark:invert" />
-                  ) : (
-                    <span className="text-[10px] font-bold text-muted-foreground">{p.name.slice(0, 2).toUpperCase()}</span>
-                  )}
+                  <ProviderLogo provider={p.id} size="md" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold leading-none">{p.name}</p>
