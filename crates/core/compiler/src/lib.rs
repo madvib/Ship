@@ -7,6 +7,7 @@ pub mod types;
 pub use compile::{
     CompileOutput, ContextFile, McpKey, ProviderDescriptor, SkillsDir,
     build_claude_settings_patch, compile, get_provider, list_providers,
+    CURSOR_PERMISSIVE_ALLOW,
 };
 pub use resolve::{FeatureOverrides, ProjectLibrary, ResolvedConfig, resolve, resolve_library};
 pub use types::{
@@ -38,16 +39,32 @@ mod wasm {
     /// The JSON-serialisable result returned to JS callers.
     #[derive(serde::Serialize)]
     struct CompileResult {
-        /// Provider id that was compiled (e.g. "claude", "gemini", "codex").
+        /// Provider id that was compiled (e.g. "claude", "gemini", "codex", "cursor").
         provider: String,
         /// Context file content (CLAUDE.md / GEMINI.md / AGENTS.md), if any.
         context_content: Option<String>,
         /// MCP servers object — ready to merge into the provider's config file.
         mcp_servers: serde_json::Value,
+        /// Project-relative path where the MCP config file should be written.
+        /// e.g. `".mcp.json"` (Claude) or `".cursor/mcp.json"` (Cursor).
+        mcp_config_path: Option<&'static str>,
         /// Skill files: relative path → file content.
         skill_files: std::collections::HashMap<String, String>,
+        /// Per-file rule output for providers that use individual rule files.
+        /// Populated for Cursor (`.cursor/rules/<name>.mdc`). Empty for other providers.
+        rule_files: std::collections::HashMap<String, String>,
         /// Claude-only: `permissions` + `hooks` patch for `.claude/settings.json`.
         claude_settings_patch: Option<serde_json::Value>,
+        /// Codex-only: `[mcp_servers.*]` TOML tables for `.codex/config.toml`.
+        codex_config_patch: Option<String>,
+        /// Gemini-only: `hooks` section for `.gemini/settings.json`.
+        gemini_settings_patch: Option<serde_json::Value>,
+        /// Gemini-only: `.gemini/policies/ship.toml` content.
+        gemini_policy_patch: Option<String>,
+        /// Cursor-only: full `.cursor/hooks.json` content.
+        cursor_hooks_patch: Option<serde_json::Value>,
+        /// Cursor-only: `.cursor/cli.json` permissions (CLI-only, not IDE).
+        cursor_cli_permissions: Option<serde_json::Value>,
     }
 
     /// Compile a [`ProjectLibrary`] for a single provider.
@@ -77,8 +94,15 @@ mod wasm {
             provider: provider.to_string(),
             context_content: output.context_content,
             mcp_servers: output.mcp_servers,
+            mcp_config_path: output.mcp_config_path,
             skill_files: output.skill_files,
+            rule_files: output.rule_files,
             claude_settings_patch: output.claude_settings_patch,
+            codex_config_patch: output.codex_config_patch,
+            gemini_settings_patch: output.gemini_settings_patch,
+            gemini_policy_patch: output.gemini_policy_patch,
+            cursor_hooks_patch: output.cursor_hooks_patch,
+            cursor_cli_permissions: output.cursor_cli_permissions,
         };
 
         serde_json::to_string(&result)
@@ -105,8 +129,15 @@ mod wasm {
                     provider: provider_id.clone(),
                     context_content: output.context_content,
                     mcp_servers: output.mcp_servers,
+                    mcp_config_path: output.mcp_config_path,
                     skill_files: output.skill_files,
+                    rule_files: output.rule_files,
                     claude_settings_patch: output.claude_settings_patch,
+                    codex_config_patch: output.codex_config_patch,
+                    gemini_settings_patch: output.gemini_settings_patch,
+                    gemini_policy_patch: output.gemini_policy_patch,
+                    cursor_hooks_patch: output.cursor_hooks_patch,
+                    cursor_cli_permissions: output.cursor_cli_permissions,
                 };
                 if let Ok(v) = serde_json::to_value(&result) {
                     results.insert(provider_id.clone(), v);

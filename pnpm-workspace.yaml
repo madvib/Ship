@@ -3,3 +3,7 @@ packages:
   - "apps/web"
   - "apps/site"
   - "packages/*"
+
+ignoredBuiltDependencies:
+  - esbuild
+  - lightningcss

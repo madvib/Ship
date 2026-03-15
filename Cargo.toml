@@ -11,6 +11,7 @@ members = [
     "crates/plugins/time-tracker",
     "crates/plugins/ghost-issues",
     "apps/desktop/src-tauri",
+    "apps/ship-studio",
     "examples/e2e",
 ]
 resolver = "2"

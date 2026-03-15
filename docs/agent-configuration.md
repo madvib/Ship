@@ -385,19 +385,6 @@ command = "my-server"
 args = ["--port", "3000"]
 ```
 
-Example `.codex/rules/ship.rules` output:
-```starlark
-prefix_rule(
-    pattern = ["rm", "-rf"],
-    decision = "forbidden",
-)
-
-prefix_rule(
-    pattern = ["git", "push", "--force"],
-    decision = "prompt",
-)
-```
-
 ### 7. Save managed state
 
 Updates `managed_mcp_state` table in project SQLite with the list of server IDs just

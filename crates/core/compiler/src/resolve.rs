@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::types::{
-    McpServerConfig, ModeConfig, Permissions, ProjectConfig, Rule, Skill,
+    HookConfig, McpServerConfig, ModeConfig, Permissions, ProjectConfig, Rule, Skill,
 };
 
 /// Thin overrides that a feature branch can apply on top of project defaults.
@@ -32,6 +32,7 @@ pub struct ResolvedConfig {
     pub skills: Vec<Skill>,
     pub rules: Vec<Rule>,
     pub permissions: Permissions,
+    pub hooks: Vec<HookConfig>,
     pub active_mode: Option<String>,
 }
 
@@ -64,6 +65,9 @@ pub struct ProjectLibrary {
     /// Permissions from `agents/permissions.toml`.
     #[serde(default)]
     pub permissions: Permissions,
+    /// Hooks from `agents/hooks.toml`.
+    #[serde(default)]
+    pub hooks: Vec<HookConfig>,
 }
 
 /// Resolve a [`ProjectLibrary`] directly — the new-model entry point.
@@ -84,6 +88,7 @@ pub fn resolve_library(
         &library.skills,
         &library.rules,
         &library.permissions,
+        &library.hooks,
         feature,
         active_mode_override,
     )
@@ -94,6 +99,7 @@ pub fn resolve(
     skills: &[Skill],
     rules: &[Rule],
     permissions: &Permissions,
+    hooks: &[HookConfig],
     feature: Option<&FeatureOverrides>,
     active_mode_override: Option<&str>,
 ) -> ResolvedConfig {
@@ -183,6 +189,7 @@ pub fn resolve(
         skills: resolved_skills,
         rules: resolved_rules,
         permissions: permissions.clone(),
+        hooks: hooks.to_vec(),
         active_mode,
     }
 }
@@ -197,7 +204,7 @@ fn normalize_providers(ids: &[String]) -> Vec<String> {
         if id.is_empty() {
             continue;
         }
-        if !matches!(id.as_str(), "claude" | "gemini" | "codex") {
+        if !matches!(id.as_str(), "claude" | "gemini" | "codex" | "cursor") {
             continue;
         }
         if seen.insert(id.clone()) {
@@ -283,7 +290,7 @@ mod tests {
     #[test]
     fn default_provider_is_claude() {
         let config = ProjectConfig::default();
-        let resolved = resolve(&config, &[], &[], &Permissions::default(), None, None);
+        let resolved = resolve(&config, &[], &[], &Permissions::default(), &[], None, None);
         assert_eq!(resolved.providers, vec!["claude"]);
     }
 
@@ -302,6 +309,7 @@ mod tests {
             &[],
             &[],
             &Permissions::default(),
+            &[],
             Some(&feature),
             None,
         );
@@ -323,7 +331,7 @@ mod tests {
             ..Default::default()
         };
         let skills = vec![make_skill("alpha"), make_skill("beta")];
-        let resolved = resolve(&config, &skills, &[], &Permissions::default(), None, None);
+        let resolved = resolve(&config, &skills, &[], &Permissions::default(), &[], None, None);
         assert_eq!(resolved.mcp_servers.len(), 1);
         assert_eq!(resolved.mcp_servers[0].id, "github");
         assert_eq!(resolved.skills.len(), 1);
@@ -352,7 +360,7 @@ mod tests {
         };
         let skills = vec![make_skill("plan-skill"), make_skill("code-skill")];
 
-        let planning = resolve(&config, &skills, &[], &Permissions::default(), None, None);
+        let planning = resolve(&config, &skills, &[], &Permissions::default(), &[], None, None);
         assert_eq!(planning.active_mode.as_deref(), Some("planning"));
 
         let code = resolve(
@@ -360,6 +368,7 @@ mod tests {
             &skills,
             &[],
             &Permissions::default(),
+            &[],
             None,
             Some("code"),
         );

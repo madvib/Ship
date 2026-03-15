@@ -14,8 +14,8 @@ export default defineConfig(async () => ({
     dedupe: ["react", "react-dom"],
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
-      "@ship/ui": fileURLToPath(new URL("../ui-kit/src/index.tsx", import.meta.url)),
-      "@ship/ui/styles": fileURLToPath(new URL("../ui-kit/src/styles", import.meta.url)),
+      "@ship/primitives": fileURLToPath(new URL("../../packages/primitives/src/index.tsx", import.meta.url)),
+      "@ship/ui": fileURLToPath(new URL("../../packages/ui/src/index.ts", import.meta.url)),
     }
   },
 

@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub struct ToolPermissions {
     #[serde(default = "allow_all_default")]
     pub allow: Vec<String>,
+    /// Patterns that trigger confirmation before tool use (Claude "ask" tier).
+    #[serde(default)]
+    pub ask: Vec<String>,
     #[serde(default)]
     pub deny: Vec<String>,
 }
@@ -71,6 +74,12 @@ pub struct Permissions {
     pub network: NetworkPermissions,
     #[serde(default)]
     pub agent: AgentLimits,
+    /// Claude Code default permission mode: "default", "acceptEdits", "plan", "bypassPermissions".
+    #[serde(default)]
+    pub default_mode: Option<String>,
+    /// Additional working directories Claude has access to.
+    #[serde(default)]
+    pub additional_directories: Vec<String>,
 }
 
 fn allow_all_default() -> Vec<String> {

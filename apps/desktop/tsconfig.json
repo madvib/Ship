@@ -31,11 +31,17 @@
       "@/*": [
         "./src/*"
       ],
+      "@ship/primitives": [
+        "../../packages/primitives/src/index.tsx"
+      ],
+      "@ship/primitives/*": [
+        "../../packages/primitives/src/*"
+      ],
       "@ship/ui": [
-        "../ui-kit/src/index.tsx"
+        "../../packages/ui/src/index.ts"
       ],
       "@ship/ui/*": [
-        "../ui-kit/src/*"
+        "../../packages/ui/src/*"
       ]
     }
   },
