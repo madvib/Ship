@@ -1,9 +1,11 @@
 packages:
-  - "apps/desktop"
   - "apps/web"
-  - "apps/site"
   - "packages/*"
 
 ignoredBuiltDependencies:
+  - esbuild
+  - lightningcss
+
+onlyBuiltDependencies:
   - esbuild
   - lightningcss

@@ -68,7 +68,6 @@ dist/
 # Team Coordination
 TEAM.md
 
-.devcontainer
 
 # Ship runtime DB artifacts
 **/.ship/ship.db

@@ -1,15 +1,13 @@
 {
   "name": "ship-monorepo",
   "private": true,
+  "scripts": {
+    "lint": "vp lint",
+    "lint:fix": "vp lint --fix"
+  },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.0",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.6.0",
-    "shadcn": "^3.8.5",
-    "tailwindcss": "^4.2.0",
-    "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite-plus": "^0.1.11",
+    "typescript": "~5.8.3"
   },
   "pnpm": {
     "overrides": {

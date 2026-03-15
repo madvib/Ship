@@ -24,10 +24,10 @@ initSync({ module: wasmBytes })
 
 let passed = 0
 let failed = 0
-let suiteName = ''
+let _suiteName = ''
 
 function suite(name) {
-  suiteName = name
+  _suiteName = name
   console.log(`\n${name}`)
 }
 

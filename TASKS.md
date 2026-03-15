@@ -9,12 +9,17 @@
 
 - [x] Disable Ship MCP (old workflow layer)
 - [x] Archive apps/cli/ → archive/cli-v0
+- [x] Archive apps/desktop/, apps/site/, crates/plugins/, examples/, docs/, crates/modules/git/
 - [x] Clean rules + memory (remove old workflow references)
-- [x] Write ARCHITECTURE.md
-- [ ] Fix Cargo workspace — remove archived cli from workspace members
-- [ ] Rename ship-studio-cli binary to `ship` in Cargo.toml + update paths
-- [ ] Add workspace + session commands to ship-studio-cli
-- [ ] Install superpowers into .agents/skills/ for workflow
+- [x] Write ARCHITECTURE.md, SPEC.md, TASKS.md
+- [x] Fix Cargo workspace — remove archived members
+- [x] Rename ship-studio-cli binary to `ship`
+- [x] Trim MCP to platform-only tools
+- [x] Remove stale git hooks
+- [x] Rewrite ~/.ship/skills to remove workflow-layer references
+- [x] Clean state pushed to main
+- [x] Devcontainer + rust-toolchain.toml
+- [x] Vite+ / oxlint toolchain wired up
 
 ## Day 2 — Auth + Persistence (branch prefix: `feat/auth-`)
 
