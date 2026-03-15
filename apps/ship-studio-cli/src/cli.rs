@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "ship-studio")]
+#[command(name = "ship")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Agent configuration studio — compose, compile, distribute")]
 pub struct Cli {

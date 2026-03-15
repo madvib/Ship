@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Sun, Moon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Switch } from './switch'
 
 type ThemeMode = 'light' | 'dark'
 
@@ -33,29 +35,31 @@ export function ThemeToggle() {
   }
 
   return (
-    <div className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/40 p-0.5">
-      <button
+    <div className="flex items-center gap-1 rounded-full border bg-muted/20 p-1">
+      <div
+        className={cn(
+          'flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1 transition-all',
+          mode === 'light' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground'
+        )}
         onClick={() => set('light')}
-        aria-label="Light mode"
-        className={`flex size-6 items-center justify-center rounded transition ${
-          mode === 'light'
-            ? 'bg-background text-foreground shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
       >
         <Sun className="size-3.5" />
-      </button>
-      <button
+        <span className="text-[10px] font-bold uppercase tracking-tighter">Light</span>
+      </div>
+      <Switch
+        checked={mode === 'dark'}
+        onCheckedChange={(checked) => set(checked ? 'dark' : 'light')}
+      />
+      <div
+        className={cn(
+          'flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1 transition-all',
+          mode === 'dark' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground'
+        )}
         onClick={() => set('dark')}
-        aria-label="Dark mode"
-        className={`flex size-6 items-center justify-center rounded transition ${
-          mode === 'dark'
-            ? 'bg-background text-foreground shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
       >
         <Moon className="size-3.5" />
-      </button>
+        <span className="text-[10px] font-bold uppercase tracking-tighter">Dark</span>
+      </div>
     </div>
   )
 }

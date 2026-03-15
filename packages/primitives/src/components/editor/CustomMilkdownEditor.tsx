@@ -25,8 +25,11 @@ export default function CustomMilkdownEditor({
     const crepeRef = useRef<Crepe | null>(null);
     const tooltipObserverRef = useRef<MutationObserver | null>(null);
     const externalValueRef = useRef(value);
-    const lastEmittedValueRef = useRef(value);
     const onChangeRef = useRef(onChange);
+    // Tracks every markdown string emitted by this editor instance.
+    // When React re-renders with one of these values it was echoed from the editor —
+    // skip replaceAll so we never reset the cursor during normal typing.
+    const editorEmissionsRef = useRef(new Set<string>());
 
     useEffect(() => {
         onChangeRef.current = onChange;
@@ -35,16 +38,20 @@ export default function CustomMilkdownEditor({
     useEffect(() => {
         externalValueRef.current = value;
 
-        // Only treat value changes as external when they differ from the last value we emitted.
-        // This avoids replaceAll loops that reset selection/caret while typing.
-        if (value === lastEmittedValueRef.current) return;
+        if (editorEmissionsRef.current.has(value)) {
+            // Value originated from this editor and was echoed back via onChange.
+            // Calling replaceAll here would reset the cursor — skip it.
+            editorEmissionsRef.current.delete(value);
+            return;
+        }
 
+        // Not in the emissions set → genuine external update (AI sample, undo, etc.)
         const crepe = crepeRef.current;
         if (!crepe) return;
+        if (crepe.getMarkdown() === value) return;
 
-        const editorValue = crepe.getMarkdown();
-        if (editorValue === value) return;
-        lastEmittedValueRef.current = value;
+        // Discard any stale emissions — they're no longer relevant after an external reset.
+        editorEmissionsRef.current.clear();
         crepe.editor.action(replaceAll(value, true));
     }, [value]);
 
@@ -53,6 +60,8 @@ export default function CustomMilkdownEditor({
         if (!root) return;
 
         let disposed = false;
+        editorEmissionsRef.current.clear();
+
         const crepe = new Crepe({
             root,
             defaultValue: externalValueRef.current,
@@ -77,8 +86,8 @@ export default function CustomMilkdownEditor({
 
         crepe.on((listener) => {
             listener.markdownUpdated((_ctx, markdown) => {
-                if (markdown === lastEmittedValueRef.current) return;
-                lastEmittedValueRef.current = markdown;
+                if (markdown === externalValueRef.current) return;
+                editorEmissionsRef.current.add(markdown);
                 externalValueRef.current = markdown;
                 onChangeRef.current(markdown);
             });
@@ -108,8 +117,7 @@ export default function CustomMilkdownEditor({
                     el.title = toolbarLabels[index] ?? 'Format';
                 });
 
-                const candidates = slashCandidates;
-                for (const element of candidates) {
+                for (const element of slashCandidates) {
                     const el = element as HTMLElement;
                     if (el.title) continue;
                     const label = el.textContent?.replace(/\s+/g, ' ').trim();

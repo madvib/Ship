@@ -330,7 +330,7 @@ function StudioPage() {
         </a>
       </div>
 
-    <div className="hidden md:flex h-[calc(100vh-49px)] flex-col overflow-hidden">
+    <div className="hidden md:flex flex-1 min-h-0 flex-col overflow-hidden">
       {/* Mode header strip */}
       <ModeHeader
         modeName={modeName}
@@ -732,43 +732,49 @@ function ComposerPanel({
         })}
       </div>
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl p-4 lg:p-6">
+      {/* Skills get full-height treatment; everything else scrolls */}
+      {activeSection === 'skills' ? (
+        <div className="flex flex-1 min-h-0 flex-col p-4 lg:p-5">
           <SectionHeader section={activeSection} library={library} />
-
-          {activeSection === 'providers' && (
-            <ProvidersForm
-              selected={selectedProviders}
-              onToggle={onToggleProvider}
-            />
-          )}
-          {activeSection === 'mcp' && (
-            <McpServersForm
-              servers={library.mcp_servers}
-              onChange={(mcp_servers) => onLibraryChange({ mcp_servers })}
-            />
-          )}
-          {activeSection === 'skills' && (
+          <div className="flex-1 min-h-0">
             <SkillsForm
               skills={library.skills}
               onChange={(skills) => onLibraryChange({ skills })}
             />
-          )}
-          {activeSection === 'rules' && (
-            <RulesForm
-              rules={library.rules}
-              onChange={(rules) => onLibraryChange({ rules })}
-            />
-          )}
-          {activeSection === 'permissions' && (
-            <PermissionsForm
-              permissions={library.permissions ?? DEFAULT_PERMISSIONS}
-              onChange={(permissions) => onLibraryChange({ permissions })}
-            />
-          )}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-3xl p-4 lg:p-6">
+            <SectionHeader section={activeSection} library={library} />
+
+            {activeSection === 'providers' && (
+              <ProvidersForm
+                selected={selectedProviders}
+                onToggle={onToggleProvider}
+              />
+            )}
+            {activeSection === 'mcp' && (
+              <McpServersForm
+                servers={library.mcp_servers}
+                onChange={(mcp_servers) => onLibraryChange({ mcp_servers })}
+              />
+            )}
+            {activeSection === 'rules' && (
+              <RulesForm
+                rules={library.rules}
+                onChange={(rules) => onLibraryChange({ rules })}
+              />
+            )}
+            {activeSection === 'permissions' && (
+              <PermissionsForm
+                permissions={library.permissions ?? DEFAULT_PERMISSIONS}
+                onChange={(permissions) => onLibraryChange({ permissions })}
+              />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

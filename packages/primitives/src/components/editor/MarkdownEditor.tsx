@@ -17,17 +17,9 @@ import {
 } from '../dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../tooltip';
 import CustomMilkdownEditor from './CustomMilkdownEditor';
-// import FrontmatterPanel from './FrontmatterPanel';
-import {
-    composeFrontmatterDocument,
-    FrontmatterDelimiter,
-    parseFrontmatterEntries,
-    splitFrontmatterDocument,
-    stripAllFrontmatter,
-} from './frontmatter';
+import { stripAllFrontmatter } from './frontmatter';
 
 type EditorMode = 'edit' | 'read';
-// Legacy mode aliases accepted via defaultMode prop
 type LegacyEditorMode = 'doc' | 'raw' | 'preview' | 'split' | 'edit' | 'read';
 
 export interface MarkdownEditorProps {
@@ -48,16 +40,11 @@ export interface MarkdownEditorProps {
     fillHeight?: boolean;
     fullWidth?: boolean;
     editorClassName?: string;
+    /** @deprecated No-op — frontmatter display is YAGNI until rich field components exist */
     showFrontmatter?: boolean;
-    frontmatterPanel?:
-    | ReactNode
-    | ((args: {
-        frontmatter: string | null;
-        delimiter: FrontmatterDelimiter | null;
-        onChange: (frontmatter: string | null, delimiter: FrontmatterDelimiter) => void;
-    }) => ReactNode);
+    /** @deprecated No-op — metadata panels should manage frontmatter directly */
+    frontmatterPanel?: ReactNode | unknown;
     showAiActions?: boolean;
-    // This is a generic editor, so transform command should be passed in or handled via module slots
     onTransformText?: (instruction: string, text: string) => Promise<string>;
 }
 
@@ -67,7 +54,6 @@ function normalizeMode(defaultMode?: EditorMode | LegacyEditorMode): EditorMode 
     }
     return 'edit';
 }
-
 
 export default function MarkdownEditor({
     label,
@@ -86,8 +72,6 @@ export default function MarkdownEditor({
     fillHeight = false,
     fullWidth = true,
     editorClassName,
-    showFrontmatter = true,
-    frontmatterPanel,
     showAiActions = true,
     onTransformText,
 }: MarkdownEditorProps) {
@@ -112,18 +96,13 @@ export default function MarkdownEditor({
         internalMarkdownRef.current = value;
     }, [value]);
 
-    const model = useMemo(() => splitFrontmatterDocument(internalMarkdown), [internalMarkdown]);
-    const frontmatterEntries = useMemo(() => parseFrontmatterEntries(model.frontmatter), [model.frontmatter]);
     const wordCount = useMemo(() => {
-        const trimmed = model.body.trim();
+        const trimmed = stripAllFrontmatter(internalMarkdown).trim();
         return trimmed ? trimmed.split(/\s+/).length : 0;
-    }, [model.body]);
-
-    const activeDelimiter: FrontmatterDelimiter = model.delimiter ?? '+++';
+    }, [internalMarkdown]);
 
     const resolvedSampleLabel = sampleLabel ?? (sampleRequiresMcp ? 'Generate Draft' : 'Insert Template');
     const sampleDisabled = sampling || !onMcpSample || (sampleRequiresMcp && !mcpEnabled);
-    const metadataManagedExternally = !!frontmatterPanel;
 
     const handleEditorChange = (next: string) => {
         if (next === internalMarkdownRef.current) return;
@@ -132,36 +111,15 @@ export default function MarkdownEditor({
         onChangeRef.current(next);
     };
 
-    const handleBodyChange = (body: string) => {
-        handleEditorChange(composeFrontmatterDocument(model.frontmatter, body, activeDelimiter));
-    };
-
     const triggerSample = async () => {
         if (!onMcpSample || sampling) return;
-
         try {
             setSampling(true);
             const sample = await onMcpSample();
-            if (!sample || !sample.trim()) return;
-
-            const scaffold = splitFrontmatterDocument(sample.trim());
-            const current = splitFrontmatterDocument(internalMarkdown);
-
-            let mergedFrontmatter = current.frontmatter;
-            let mergedDelimiter: FrontmatterDelimiter = current.delimiter ?? '+++';
-            if (!mergedFrontmatter && scaffold.frontmatter) {
-                mergedFrontmatter = scaffold.frontmatter;
-                mergedDelimiter = scaffold.delimiter ?? '+++';
-            }
-
-            const currentBody = current.body.trimEnd();
-            const scaffoldBody = scaffold.body.trim();
-            const mergedBody =
-                currentBody && scaffoldBody
-                    ? `${currentBody}\n\n${scaffoldBody}`
-                    : currentBody || scaffoldBody;
-
-            const combined = composeFrontmatterDocument(mergedFrontmatter, mergedBody, mergedDelimiter);
+            if (!sample?.trim()) return;
+            const combined = internalMarkdown.trimEnd()
+                ? `${internalMarkdown.trimEnd()}\n\n${sample.trim()}`
+                : sample.trim();
             setSampleUndoState({ before: internalMarkdown, after: combined });
             handleEditorChange(combined);
         } finally {
@@ -176,7 +134,7 @@ export default function MarkdownEditor({
     };
 
     const handleAiAction = async (action: 'polish' | 'shorten' | 'expand' | 'fix_grammar') => {
-        if (!model.body.trim() || !onTransformText) return;
+        if (!internalMarkdown.trim() || !onTransformText) return;
         setAiActionError(null);
         setSampling(true);
         try {
@@ -184,10 +142,10 @@ export default function MarkdownEditor({
                 polish: 'Polish the writing to be more professional and clear',
                 shorten: 'Make the text more concise and remove jargon',
                 expand: 'Add more relevant details and context',
-                fix_grammar: 'Fix any grammar or spelling issues'
+                fix_grammar: 'Fix any grammar or spelling issues',
             };
-            const res = await onTransformText(instructionMap[action], model.body);
-            handleBodyChange(res);
+            const res = await onTransformText(instructionMap[action], internalMarkdown);
+            handleEditorChange(res);
         } catch (err) {
             console.error(`AI Action failed: ${err}`);
             setAiActionError(String(err));
@@ -195,8 +153,6 @@ export default function MarkdownEditor({
             setSampling(false);
         }
     };
-
-
 
     return (
         <div
@@ -217,7 +173,6 @@ export default function MarkdownEditor({
                 )}
 
                 <div className="ml-auto flex shrink-0 items-center gap-1">
-
                     {onMcpSample && mode === 'edit' && (
                         <>
                             <Button
@@ -250,37 +205,35 @@ export default function MarkdownEditor({
                                         </Button>
                                     } />
                                     <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl">
-                                <DropdownMenuGroup>
-                                    <DropdownMenuLabel className="px-2 pb-2 opacity-50 uppercase text-[9px] tracking-[0.2em] font-black">
-                                        Transform Text
-                                    </DropdownMenuLabel>
-                                </DropdownMenuGroup>
-                                <DropdownMenuSeparator className="opacity-50" />
-                                <div className="space-y-0.5">
-                                    <DropdownMenuItem onClick={() => handleAiAction('polish')} className="flex items-center gap-2 rounded-md">
-                                        <Sparkles className="size-3.5 text-amber-500" />
-                                        <span className="text-sm">Polish Writing</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleAiAction('shorten')} className="flex items-center gap-2 rounded-md">
-                                        <AlignLeft className="size-3.5 text-blue-500" />
-                                        <span className="text-sm">Make Concise</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleAiAction('expand')} className="flex items-center gap-2 rounded-md">
-                                        <Type className="size-3.5 text-indigo-500" />
-                                        <span className="text-sm">Expand Details</span>
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator className="opacity-50" />
-                                    <DropdownMenuItem onClick={() => handleAiAction('fix_grammar')} className="flex items-center gap-2 rounded-md">
-                                        <CheckCircle className="size-3.5 text-emerald-500" />
-                                        <span className="text-sm">Fix Grammar</span>
-                                    </DropdownMenuItem>
-                                </div>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                                        <DropdownMenuGroup>
+                                            <DropdownMenuLabel className="px-2 pb-2 opacity-50 uppercase text-[9px] tracking-[0.2em] font-black">
+                                                Transform Text
+                                            </DropdownMenuLabel>
+                                        </DropdownMenuGroup>
+                                        <DropdownMenuSeparator className="opacity-50" />
+                                        <div className="space-y-0.5">
+                                            <DropdownMenuItem onClick={() => handleAiAction('polish')} className="flex items-center gap-2 rounded-md">
+                                                <Sparkles className="size-3.5 text-amber-500" />
+                                                <span className="text-sm">Polish Writing</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleAiAction('shorten')} className="flex items-center gap-2 rounded-md">
+                                                <AlignLeft className="size-3.5 text-blue-500" />
+                                                <span className="text-sm">Make Concise</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleAiAction('expand')} className="flex items-center gap-2 rounded-md">
+                                                <Type className="size-3.5 text-indigo-500" />
+                                                <span className="text-sm">Expand Details</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator className="opacity-50" />
+                                            <DropdownMenuItem onClick={() => handleAiAction('fix_grammar')} className="flex items-center gap-2 rounded-md">
+                                                <CheckCircle className="size-3.5 text-emerald-500" />
+                                                <span className="text-sm">Fix Grammar</span>
+                                            </DropdownMenuItem>
+                                        </div>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             </TooltipTrigger>
-                            <TooltipContent>
-                                Refine, polish, or transform your text using AI.
-                            </TooltipContent>
+                            <TooltipContent>Refine, polish, or transform your text using AI.</TooltipContent>
                         </Tooltip>
                     )}
 
@@ -302,12 +255,10 @@ export default function MarkdownEditor({
                     </Button>
                 </div>
             </div>
-            {aiActionError && (
-                <p className="text-[11px] text-destructive">
-                    AI action failed: {aiActionError}
-                </p>
-            )}
 
+            {aiActionError && (
+                <p className="text-[11px] text-destructive">AI action failed: {aiActionError}</p>
+            )}
 
             {/* Editor / Reader */}
             <div className={cn(fillHeight && 'min-h-0 flex-1')}>
@@ -315,8 +266,8 @@ export default function MarkdownEditor({
                     <div className={cn(fillHeight ? 'flex h-full min-h-0 flex-col' : 'space-y-1')}>
                         <div className={cn(fillHeight ? 'min-h-0 flex-1' : 'h-full')}>
                             <CustomMilkdownEditor
-                                value={model.body}
-                                onChange={handleBodyChange}
+                                value={internalMarkdown}
+                                onChange={handleEditorChange}
                                 placeholder={placeholder}
                                 fillHeight={fillHeight}
                                 minHeightPx={minHeightPx}
@@ -334,31 +285,10 @@ export default function MarkdownEditor({
                         )}
                         style={fillHeight ? undefined : { minHeight: `${minHeightPx}px`, maxHeight: '600px' }}
                     >
-                        {/* Frontmatter summary in read mode */}
-                        {showFrontmatter && model.frontmatter && !metadataManagedExternally && (
-                            <section className="ship-markdown-frontmatter mb-4 rounded-md border bg-muted/30 px-3 py-2">
-                                <p className="text-muted-foreground mb-1 text-[11px] font-medium uppercase tracking-wide">
-                                    Metadata
-                                </p>
-                                {frontmatterEntries.length > 0 ? (
-                                    <dl className="grid gap-x-3 gap-y-0.5 text-xs md:grid-cols-[9rem_1fr]">
-                                        {frontmatterEntries.map((entry) => (
-                                            <div key={`${entry.key}-${entry.value}`} className="contents">
-                                                <dt className="text-muted-foreground font-medium">{entry.key}</dt>
-                                                <dd className="font-mono break-words">{entry.value || '""'}</dd>
-                                            </div>
-                                        ))}
-                                    </dl>
-                                ) : (
-                                    <pre className="whitespace-pre-wrap break-words text-xs">
-                                        <code>{model.frontmatter}</code>
-                                    </pre>
-                                )}
-                            </section>
-                        )}
-
-                        {stripAllFrontmatter(model.body).trim() ? (
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{stripAllFrontmatter(model.body)}</ReactMarkdown>
+                        {stripAllFrontmatter(internalMarkdown).trim() ? (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {stripAllFrontmatter(internalMarkdown)}
+                            </ReactMarkdown>
                         ) : (
                             <p className="text-muted-foreground text-sm">Nothing to preview yet.</p>
                         )}

@@ -20,6 +20,7 @@ import { Route as ProjectAgentsRouteImport } from './routes/project/agents'
 import { Route as ProjectAdrsRouteImport } from './routes/project/adrs'
 import { Route as ProjectActivityRouteImport } from './routes/project/activity'
 import { Route as ProjectWorkflowWorkspaceRouteImport } from './routes/project/workflow.workspace'
+import { Route as ProjectAgentsV0RouteImport } from './routes/project/agents.v0'
 import { Route as ProjectAgentsSkillsRouteImport } from './routes/project/agents.skills'
 import { Route as ProjectAgentsRulesRouteImport } from './routes/project/agents.rules'
 import { Route as ProjectAgentsProvidersRouteImport } from './routes/project/agents.providers'
@@ -83,6 +84,11 @@ const ProjectWorkflowWorkspaceRoute =
     path: '/project/workflow/workspace',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ProjectAgentsV0Route = ProjectAgentsV0RouteImport.update({
+  id: '/v0',
+  path: '/v0',
+  getParentRoute: () => ProjectAgentsRoute,
+} as any)
 const ProjectAgentsSkillsRoute = ProjectAgentsSkillsRouteImport.update({
   id: '/skills',
   path: '/skills',
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
   '/project/agents/skills': typeof ProjectAgentsSkillsRoute
+  '/project/agents/v0': typeof ProjectAgentsV0Route
   '/project/workflow/workspace': typeof ProjectWorkflowWorkspaceRoute
 }
 export interface FileRoutesByTo {
@@ -151,6 +158,7 @@ export interface FileRoutesByTo {
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
   '/project/agents/skills': typeof ProjectAgentsSkillsRoute
+  '/project/agents/v0': typeof ProjectAgentsV0Route
   '/project/workflow/workspace': typeof ProjectWorkflowWorkspaceRoute
 }
 export interface FileRoutesById {
@@ -171,6 +179,7 @@ export interface FileRoutesById {
   '/project/agents/providers': typeof ProjectAgentsProvidersRoute
   '/project/agents/rules': typeof ProjectAgentsRulesRoute
   '/project/agents/skills': typeof ProjectAgentsSkillsRoute
+  '/project/agents/v0': typeof ProjectAgentsV0Route
   '/project/workflow/workspace': typeof ProjectWorkflowWorkspaceRoute
 }
 export interface FileRouteTypes {
@@ -192,6 +201,7 @@ export interface FileRouteTypes {
     | '/project/agents/providers'
     | '/project/agents/rules'
     | '/project/agents/skills'
+    | '/project/agents/v0'
     | '/project/workflow/workspace'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -211,6 +221,7 @@ export interface FileRouteTypes {
     | '/project/agents/providers'
     | '/project/agents/rules'
     | '/project/agents/skills'
+    | '/project/agents/v0'
     | '/project/workflow/workspace'
   id:
     | '__root__'
@@ -230,6 +241,7 @@ export interface FileRouteTypes {
     | '/project/agents/providers'
     | '/project/agents/rules'
     | '/project/agents/skills'
+    | '/project/agents/v0'
     | '/project/workflow/workspace'
   fileRoutesById: FileRoutesById
 }
@@ -326,6 +338,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectWorkflowWorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/project/agents/v0': {
+      id: '/project/agents/v0'
+      path: '/v0'
+      fullPath: '/project/agents/v0'
+      preLoaderRoute: typeof ProjectAgentsV0RouteImport
+      parentRoute: typeof ProjectAgentsRoute
+    }
     '/project/agents/skills': {
       id: '/project/agents/skills'
       path: '/skills'
@@ -378,6 +397,7 @@ interface ProjectAgentsRouteChildren {
   ProjectAgentsProvidersRoute: typeof ProjectAgentsProvidersRoute
   ProjectAgentsRulesRoute: typeof ProjectAgentsRulesRoute
   ProjectAgentsSkillsRoute: typeof ProjectAgentsSkillsRoute
+  ProjectAgentsV0Route: typeof ProjectAgentsV0Route
 }
 
 const ProjectAgentsRouteChildren: ProjectAgentsRouteChildren = {
@@ -387,6 +407,7 @@ const ProjectAgentsRouteChildren: ProjectAgentsRouteChildren = {
   ProjectAgentsProvidersRoute: ProjectAgentsProvidersRoute,
   ProjectAgentsRulesRoute: ProjectAgentsRulesRoute,
   ProjectAgentsSkillsRoute: ProjectAgentsSkillsRoute,
+  ProjectAgentsV0Route: ProjectAgentsV0Route,
 }
 
 const ProjectAgentsRouteWithChildren = ProjectAgentsRoute._addFileChildren(

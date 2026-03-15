@@ -5,13 +5,7 @@ members = [
     "crates/core/mcp-framework",
     "crates/core/runtime",
     "crates/modules/project",
-    "crates/modules/git",
-    "apps/cli",
     "apps/mcp",
-    "crates/plugins/time-tracker",
-    "crates/plugins/ghost-issues",
-    "apps/desktop/src-tauri",
     "apps/ship-studio-cli",
-    "examples/e2e",
 ]
 resolver = "2"

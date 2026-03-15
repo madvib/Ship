@@ -52,7 +52,7 @@ command = "ship"
 args = ["mcp"]
 scope = "project"
 server_type = "stdio"
-disabled = false
+disabled = true
 timeout_secs = 30
 
 [mcp.servers.ship.env]

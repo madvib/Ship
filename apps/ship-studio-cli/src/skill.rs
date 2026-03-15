@@ -30,7 +30,7 @@ pub fn list() -> Result<()> {
 
     if !found {
         println!("No skills installed.");
-        println!("Create one with: ship-studio skill create <id>");
+        println!("Create one with: ship skill create <id>");
     }
     Ok(())
 }

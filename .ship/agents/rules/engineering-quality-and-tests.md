@@ -12,7 +12,7 @@
 
 * Keep Rust domain logic in runtime/modules and keep CLI/UI transport thin.
 
-* Keep React/Tauri state and command contracts explicit and stable.
+* Keep React component state and API contracts explicit and stable.
 
 * Review changes for regressions, architecture drift, and missing tests before merge.
 

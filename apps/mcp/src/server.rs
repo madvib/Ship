@@ -34,15 +34,8 @@ use runtime::{
     },
 };
 use ship_module_project::ops::adr::{create_adr, get_adr_by_id, list_adrs};
-use ship_module_project::ops::feature::{
-    create_feature, get_feature_by_id, list_features, sync_feature_docs_after_session,
-    update_feature_content,
-};
 use ship_module_project::ops::note::{
     create_note, get_note_by_id, list_notes, update_note_content,
-};
-use ship_module_project::ops::release::{
-    create_release, get_release_by_id, list_releases, update_release_content,
 };
 
 use ship_module_project::{NoteScope, get_project_name, list_registered_projects};
@@ -125,8 +118,6 @@ impl ShipServer {
             "open_project",
             // Planning
             "create_note",
-            "create_feature",
-            "update_feature",
             "create_adr",
             // Workspace
             "activate_workspace",
@@ -143,12 +134,8 @@ impl ShipServer {
         CORE_TOOLS.contains(&normalized.as_str())
     }
 
-    fn is_project_workspace_tool(tool_name: &str) -> bool {
-        // Tools auto-unlocked when the active workspace is type=service.
-        // These cover PM mutation flows (read surfaces should prefer resources).
-        const PROJECT_TOOLS: &[&str] = &["create_release", "update_release"];
-        let normalized = Self::normalize_mode_tool_id(tool_name);
-        PROJECT_TOOLS.contains(&normalized.as_str())
+    fn is_project_workspace_tool(_tool_name: &str) -> bool {
+        false
     }
 
     fn mode_allows_tool(tool_name: &str, active_tools: &[String]) -> bool {
@@ -257,8 +244,6 @@ impl ShipServer {
         let name = get_project_name(&project_dir);
         let config = get_config(Some(project_dir.clone())).unwrap_or_default();
 
-        let releases = list_releases(&project_dir).unwrap_or_default();
-        let features = list_features(&project_dir).unwrap_or_default();
         let adrs = list_adrs(&project_dir).unwrap_or_default();
 
         let mut out = format!("# Project: {}\n\n", name);
@@ -311,35 +296,6 @@ impl ShipServer {
             let names: Vec<_> = config.modes.iter().map(|m| m.id.as_str()).collect();
             out.push_str(&names.join(", "));
             out.push_str(")\n");
-        }
-
-        // Releases
-        out.push_str("\n## Releases\n");
-        if releases.is_empty() {
-            out.push_str("No releases.\n");
-        } else {
-            for r in &releases {
-                out.push_str(&format!("- [{}] {} ({})\n", r.status, r.version, r.id));
-            }
-        }
-
-        // Features
-        out.push_str("\n## Features\n");
-        if features.is_empty() {
-            out.push_str("No features.\n");
-        } else {
-            for f in &features {
-                let has_docs = f.feature.body.contains("## Documentation");
-                let docs_flag = if !has_docs {
-                    " ⚠ missing ## Documentation"
-                } else {
-                    ""
-                };
-                out.push_str(&format!(
-                    "- [{}] {} ({}){}\n",
-                    f.status, f.feature.metadata.title, f.id, docs_flag
-                ));
-            }
         }
 
         // ADRs
@@ -460,93 +416,6 @@ impl ShipServer {
             Ok(entry) => format!(
                 "Created ADR '{}' (id: {})",
                 entry.adr.metadata.title, entry.id
-            ),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    // ─── Release Tools ────────────────────────────────────────────────────────
-
-    /// Create a new release
-    #[tool(description = "Create a new release document in the active project")]
-    async fn create_release(&self, Parameters(req): Parameters<CreateReleaseRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let content = req.content.as_deref().unwrap_or("");
-        match create_release(&project_dir, &req.version, content) {
-            Ok(release) => format!(
-                "Created release: {} ({})",
-                release.release.metadata.version, release.id
-            ),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    /// Update a release's content
-    #[tool(description = "Update the content of an existing release")]
-    async fn update_release(&self, Parameters(req): Parameters<UpdateReleaseRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        match update_release_content(&project_dir, &req.id, &req.content) {
-            Ok(release) => format!(
-                "Updated release: {} ({})",
-                release.release.metadata.version, req.id
-            ),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    // ─── Feature Tools ────────────────────────────────────────────────────────
-
-    /// Create a new feature
-    #[tool(
-        description = "Create a new feature document. Features are the primary planning artifact — \
-        they capture intent and evolve into living documentation. Structure the body with \
-        '## Intent' (what this is, why it exists, how it should behave) and \
-        '## Documentation' (how it actually works once built). \
-        Link to a release, spec, or branch as needed."
-    )]
-    async fn create_feature(&self, Parameters(req): Parameters<CreateFeatureRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        let content = req.content.as_deref().unwrap_or("");
-        match create_feature(
-            &project_dir,
-            &req.title,
-            content,
-            req.release_id.as_deref(),
-            req.branch.as_deref(),
-        ) {
-            Ok(feature) => format!(
-                "Created feature: {} ({})",
-                feature.feature.metadata.title, feature.id
-            ),
-            Err(e) => format!("Error: {}", e),
-        }
-    }
-
-    /// Update a feature's content
-    #[tool(
-        description = "Update the content of an existing feature. Use this to refine intent, \
-        add implementation notes, or update the '## Documentation' section as the feature is built. \
-        Features should always have '## Intent' (planning north star) and \
-        '## Documentation' (how it works) sections. Pass the full replacement body."
-    )]
-    async fn update_feature(&self, Parameters(req): Parameters<UpdateFeatureRequest>) -> String {
-        let project_dir = match self.get_effective_project_dir().await {
-            Ok(d) => d,
-            Err(e) => return e,
-        };
-        match update_feature_content(&project_dir, &req.id, &req.content) {
-            Ok(feature) => format!(
-                "Updated feature: {} ({})",
-                feature.feature.metadata.title, req.id
             ),
             Err(e) => format!("Error: {}", e),
         }
@@ -748,14 +617,6 @@ impl ShipServer {
             Err(err) => return format!("Error: {}", err),
         };
 
-        if !session.updated_feature_ids.is_empty() {
-            let _ = sync_feature_docs_after_session(
-                &project_dir,
-                &session.updated_feature_ids,
-                session.summary.as_deref(),
-            );
-        }
-
         serde_json::to_string_pretty(&session)
             .unwrap_or_else(|e| format!("Error serializing workspace session: {}", e))
     }
@@ -800,49 +661,6 @@ impl ShipServer {
         if uri == "ship://project_info" {
             return Some(self.get_project_info().await);
         }
-        // ship://features
-        if uri == "ship://features" {
-            let entries = list_features(&dir).ok()?;
-            if entries.is_empty() {
-                return Some("No features found.".to_string());
-            }
-            let mut out = String::from("Features:\n");
-            for f in &entries {
-                out.push_str(&format!(
-                    "- [{}] {} ({})\n",
-                    f.status, f.feature.metadata.title, f.id
-                ));
-            }
-            return Some(out);
-        }
-        // ship://features/{id}
-        if let Some(id) = uri.strip_prefix("ship://features/") {
-            return get_feature_by_id(&dir, id)
-                .ok()
-                .and_then(|e| e.feature.to_markdown().ok());
-        }
-        // ship://releases
-        if uri == "ship://releases" {
-            let entries = list_releases(&dir).ok()?;
-            if entries.is_empty() {
-                return Some("No releases found.".to_string());
-            }
-            let mut out = String::from("Releases:\n");
-            for r in &entries {
-                out.push_str(&format!(
-                    "- [{}] {} ({})\n",
-                    r.status, r.release.metadata.version, r.id
-                ));
-            }
-            return Some(out);
-        }
-        // ship://releases/{id}
-        if let Some(id) = uri.strip_prefix("ship://releases/") {
-            return get_release_by_id(&dir, id)
-                .ok()
-                .and_then(|e| e.release.to_markdown().ok());
-        }
-
         // ship://adrs
         if uri == "ship://adrs" {
             let entries = list_adrs(dir).ok()?;
@@ -1071,12 +889,12 @@ impl ServerHandler for ShipServer {
             },
             instructions: Some(
                 "Ship project intelligence — three-stage workflow:\n\n\
-                 PLANNING: get_project_info → create_note / create_feature / update_feature / create_adr\n\
+                 PLANNING: get_project_info → create_note / create_adr\n\
                  WORKSPACE: list_workspaces → activate_workspace → set_mode\n\
                  SESSION: start_session → (work) → log_progress → end_session\n\n\
-                 By default only core workflow tools are visible. To access extended tools \
-                 (specs, releases, etc.), activate a mode that includes \
-                 them in its active_tools list. Call open_project first if the project is not \
+                 By default only core workflow tools are visible. To access extended tools, \
+                 activate a mode that includes them in its active_tools list. \
+                 Call open_project first if the project is not \
                  auto-detected. Use resources (ship://) for read-heavy workflows."
                     .into(),
             ),
@@ -1155,8 +973,6 @@ impl ServerHandler for ShipServer {
     ) -> Result<ListResourcesResult, ErrorData> {
         Ok(ListResourcesResult::with_all_items(vec![
             RawResource::new("ship://project_info", "Project Info").no_annotation(),
-            RawResource::new("ship://features", "Features").no_annotation(),
-            RawResource::new("ship://releases", "Releases").no_annotation(),
             RawResource::new("ship://specs", "Specs").no_annotation(),
             RawResource::new("ship://adrs", "ADRs").no_annotation(),
             RawResource::new("ship://notes", "Project Notes").no_annotation(),
@@ -1176,24 +992,6 @@ impl ServerHandler for ShipServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
         Ok(ListResourceTemplatesResult::with_all_items(vec![
-            RawResourceTemplate {
-                uri_template: "ship://features/{id}".to_string(),
-                name: "Feature".to_string(),
-                title: None,
-                description: None,
-                mime_type: Some("text/markdown".to_string()),
-                icons: None,
-            }
-            .no_annotation(),
-            RawResourceTemplate {
-                uri_template: "ship://releases/{id}".to_string(),
-                name: "Release".to_string(),
-                title: None,
-                description: None,
-                mime_type: Some("text/markdown".to_string()),
-                icons: None,
-            }
-            .no_annotation(),
             RawResourceTemplate {
                 uri_template: "ship://specs/{id}".to_string(),
                 name: "Spec".to_string(),
@@ -1326,73 +1124,9 @@ pub async fn run_server() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runtime::{EventAction, EventEntity, ModeConfig, add_mode, list_events_since};
+    use runtime::{ModeConfig, add_mode};
     use ship_module_project::init_project;
     use tempfile::tempdir;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn mcp_release_feature_flow_emits_events() {
-        let tmp = tempdir().expect("tempdir");
-        let project_dir = init_project(tmp.path().to_path_buf()).expect("init project");
-
-        let server = ShipServer::new();
-        *server.active_project.lock().await = Some(project_dir.clone());
-
-        let release_result = server
-            .create_release(Parameters(CreateReleaseRequest {
-                version: "v0.3.0-alpha".to_string(),
-                content: None,
-            }))
-            .await;
-        assert!(
-            release_result.contains("Created release:"),
-            "unexpected release response: {}",
-            release_result
-        );
-
-        let releases = list_releases(&project_dir).expect("list releases");
-        assert_eq!(releases.len(), 1);
-        let release_id = releases[0].id.clone();
-
-        let feature_result = server
-            .create_feature(Parameters(CreateFeatureRequest {
-                title: "Filesystem Routing Migration".to_string(),
-                content: None,
-                release_id: Some(release_id),
-                spec_id: None,
-                branch: Some("feature/fs-routing".to_string()),
-            }))
-            .await;
-        assert!(
-            feature_result.contains("Created feature:"),
-            "unexpected feature response: {}",
-            feature_result
-        );
-
-        let features = list_features(&project_dir).expect("list features");
-        assert_eq!(features.len(), 1);
-        let feature_entry = get_feature_by_id(&project_dir, &features[0].id).expect("get feature");
-        assert_eq!(
-            feature_entry.feature.metadata.branch.as_deref(),
-            Some("feature/fs-routing")
-        );
-
-        let events = list_events_since(&project_dir, 0, Some(200)).expect("list events");
-        assert!(
-            events
-                .iter()
-                .any(|event| event.entity == EventEntity::Release
-                    && event.action == EventAction::Create),
-            "missing Release.Create event"
-        );
-        assert!(
-            events
-                .iter()
-                .any(|event| event.entity == EventEntity::Feature
-                    && event.action == EventAction::Create),
-            "missing Feature.Create event"
-        );
-    }
 
     #[test]
     fn mode_gate_normalizes_and_blocks_disallowed_tools() {

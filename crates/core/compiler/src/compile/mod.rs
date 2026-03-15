@@ -58,7 +58,7 @@ impl ContextFile {
 pub enum SkillsDir {
     /// `.claude/skills/<id>/SKILL.md`
     Claude,
-    /// `.gemini/skills/<id>/SKILL.md`
+    /// `.agents/skills/<id>/SKILL.md` (Gemini CLI, Cursor fallback, universal)
     Gemini,
     /// `.agents/skills/<id>/SKILL.md`
     Agents,
@@ -71,7 +71,7 @@ impl SkillsDir {
     pub fn base_path(self) -> Option<&'static str> {
         match self {
             Self::Claude => Some(".claude/skills"),
-            Self::Gemini => Some(".gemini/skills"),
+            Self::Gemini => Some(".agents/skills"),
             Self::Agents => Some(".agents/skills"),
             Self::Cursor => Some(".cursor/skills"),
             Self::None => None,
@@ -1476,7 +1476,7 @@ mod tests {
             ..resolved(vec![])
         };
         assert!(compile(&r, "claude").unwrap().skill_files.contains_key(".claude/skills/rust-expert/SKILL.md"));
-        assert!(compile(&r, "gemini").unwrap().skill_files.contains_key(".gemini/skills/rust-expert/SKILL.md"));
+        assert!(compile(&r, "gemini").unwrap().skill_files.contains_key(".agents/skills/rust-expert/SKILL.md"));
         assert!(compile(&r, "codex").unwrap().skill_files.contains_key(".agents/skills/rust-expert/SKILL.md"));
     }
 
@@ -2002,7 +2002,7 @@ mod tests {
         skill.content = "Refactor carefully.".into();
         let r = ResolvedConfig { skills: vec![skill], ..resolved(vec![]) };
         assert!(compile(&r, "claude").unwrap().skill_files.contains_key(".claude/skills/refactor/SKILL.md"));
-        assert!(compile(&r, "gemini").unwrap().skill_files.contains_key(".gemini/skills/refactor/SKILL.md"));
+        assert!(compile(&r, "gemini").unwrap().skill_files.contains_key(".agents/skills/refactor/SKILL.md"));
         assert!(compile(&r, "codex").unwrap().skill_files.contains_key(".agents/skills/refactor/SKILL.md"));
         assert!(compile(&r, "cursor").unwrap().skill_files.contains_key(".cursor/skills/refactor/SKILL.md"));
     }

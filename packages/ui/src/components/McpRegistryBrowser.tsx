@@ -10,7 +10,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'github', name: 'GitHub',
     description: 'Search repos, manage PRs and issues, create commits.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/github',
     tags: ['popular', 'dev'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-github', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -18,7 +18,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'filesystem', name: 'Filesystem',
     description: 'Read and write local files within configurable allowed paths.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem',
     tags: ['popular', 'files'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-filesystem', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '.'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -26,7 +26,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'brave-search', name: 'Brave Search',
     description: 'Web search via the Brave Search API.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search',
     tags: ['search', 'web'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-brave-search', command: 'npx', args: ['-y', '@modelcontextprotocol/server-brave-search'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -34,7 +34,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'memory', name: 'Memory',
     description: 'Persistent knowledge graph — remember facts across sessions.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/memory',
     tags: ['memory', 'context'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-memory', command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -42,7 +42,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'slack', name: 'Slack',
     description: 'Read channels, post messages, and manage Slack workspaces.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/slack',
     tags: ['comms', 'popular'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-slack', command: 'npx', args: ['-y', '@modelcontextprotocol/server-slack'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -50,7 +50,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'linear', name: 'Linear',
     description: 'Manage issues, projects, and cycles in Linear.',
-    homepage: 'https://github.com/linear/linear',
+    homepage: 'https://github.com/linear/linear/tree/master/packages/mcp',
     tags: ['pm', 'issues'],
     package: { registry: 'npm', name: '@linear/mcp-server', command: 'npx', args: ['-y', '@linear/mcp-server'] },
     vendor: { name: 'Linear', url: 'https://linear.app' },
@@ -66,7 +66,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'postgres', name: 'PostgreSQL',
     description: 'Query and inspect a PostgreSQL database with read-only access.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/postgres',
     tags: ['database', 'sql'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-postgres', command: 'npx', args: ['-y', '@modelcontextprotocol/server-postgres'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -74,7 +74,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'puppeteer', name: 'Puppeteer',
     description: 'Headless browser control for scraping, screenshots, and automation.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer',
     tags: ['browser', 'scraping'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-puppeteer', command: 'npx', args: ['-y', '@modelcontextprotocol/server-puppeteer'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },
@@ -82,7 +82,7 @@ const CURATED_FALLBACK: McpRegistryServer[] = [
   {
     id: 'sqlite', name: 'SQLite',
     description: 'Read and write a local SQLite database file.',
-    homepage: 'https://github.com/modelcontextprotocol/servers',
+    homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite',
     tags: ['database', 'local'],
     package: { registry: 'npm', name: '@modelcontextprotocol/server-sqlite', command: 'npx', args: ['-y', '@modelcontextprotocol/server-sqlite'] },
     vendor: { name: 'Anthropic', url: 'https://modelcontextprotocol.io' },

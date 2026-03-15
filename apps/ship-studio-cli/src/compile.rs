@@ -1,4 +1,4 @@
-//! `ship-studio compile` — load the project library, resolve, compile, write.
+//! `ship compile` — load the project library, resolve, compile, write.
 
 use anyhow::{Context, Result};
 use compiler::{CompileOutput, ProjectLibrary, compile, get_provider, resolve_library};

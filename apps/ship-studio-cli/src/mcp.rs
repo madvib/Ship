@@ -87,7 +87,7 @@ pub fn list() -> Result<()> {
     let file = McpFile::load(&path)?;
     if file.servers.is_empty() {
         println!("No MCP servers configured.");
-        println!("Add one with: ship-studio mcp add-stdio <id> <command> [args...]");
+        println!("Add one with: ship mcp add-stdio <id> <command> [args...]");
         return Ok(());
     }
     println!("MCP servers:");

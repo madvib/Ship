@@ -1,7 +1,18 @@
 import { useState } from 'react'
 import { Plus, Trash2, ScrollText, ChevronDown, ChevronRight } from 'lucide-react'
-import { MarkdownEditor } from '@ship/primitives'
+import { MarkdownEditor, AutocompleteInput } from '@ship/primitives'
 import type { Rule } from '@ship/ui'
+
+const RULE_FILENAME_SUGGESTIONS = [
+  { value: 'AGENTS.md' },
+  { value: 'CLAUDE.md' },
+  { value: 'CURSOR.md' },
+  { value: 'code-style.md' },
+  { value: 'commit-conventions.md' },
+  { value: 'project-guidelines.md' },
+  { value: 'testing-rules.md' },
+  { value: 'architecture.md' },
+]
 
 interface Props {
   rules: Rule[]
@@ -67,14 +78,16 @@ export function RulesForm({ rules, onChange }: Props) {
                 <label className="block text-[11px] font-medium text-muted-foreground">
                   Filename <span className="font-normal opacity-60">— included in agent context as this path</span>
                 </label>
-                <input
-                  type="text"
+                <AutocompleteInput
                   value={rule.file_name}
-                  onChange={(e) => update(idx, { file_name: e.target.value })}
+                  options={RULE_FILENAME_SUGGESTIONS}
+                  onValueChange={(v) => update(idx, { file_name: v })}
                   placeholder="e.g. code-style.md"
+                  allowCustom
+                  syncOnInput
                   autoCorrect="off"
                   spellCheck={false}
-                  className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="h-7 font-mono text-xs"
                 />
               </div>
               <MarkdownEditor

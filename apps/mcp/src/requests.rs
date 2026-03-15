@@ -106,50 +106,6 @@ pub struct UpdateSpecRequest {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct CreateReleaseRequest {
-    /// Version label (e.g. "v0.1.0-alpha")
-    pub version: String,
-    /// Initial markdown content (optional — defaults to a scaffold)
-    pub content: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UpdateReleaseRequest {
-    /// Release version/id (e.g. "v0.1.0-alpha")
-    pub id: String,
-    /// Full replacement content
-    pub content: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct CreateFeatureRequest {
-    /// Feature title
-    pub title: String,
-    /// Initial markdown content (optional — defaults to a scaffold)
-    pub content: Option<String>,
-    /// Linked release ID (optional)
-    pub release_id: Option<String>,
-    /// Linked spec ID (optional)
-    pub spec_id: Option<String>,
-    /// Linked git branch name (optional)
-    pub branch: Option<String>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct UpdateFeatureRequest {
-    /// Feature ID
-    pub id: String,
-    /// Full replacement content
-    pub content: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct FeatureIdRequest {
-    /// Feature ID
-    pub id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
 pub struct GetAdrRequest {
     /// ADR filename (e.g. "use-postgresql.json")
     pub file_name: String,

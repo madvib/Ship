@@ -1,4 +1,4 @@
-# Managed by Ship — edit via `ship git include/exclude`
+# Ship project config — skills and rules are source, compiled artifacts are gitignored at repo root
 
 project/specs
 project/features
@@ -6,7 +6,6 @@ project/releases
 project/adrs
 project/notes
 project/vision.md
-agents/skills
 agents/README.md
 agents/skill-library-strategy.md
 README.md

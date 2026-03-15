@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { Plus, Trash2, BookOpen, FileText } from 'lucide-react'
-import { MarkdownEditor } from '@ship/primitives'
+import { useState, useEffect } from 'react'
+import { Plus, Trash2, BookOpen } from 'lucide-react'
+import {
+  CustomMilkdownEditor,
+  FileTree, FileTreeFile, FileTreeFolder, FileTreeActions, FileTreeName,
+} from '@ship/primitives'
 import type { Skill } from '@ship/ui'
 
 interface Props {
@@ -18,69 +21,104 @@ const EMPTY: Skill = {
   version: null,
 }
 
+/** Folder name = skill slug (id). Falls back to slugified name. */
+function skillSlug(skill: Skill): string {
+  if (skill.id) return skill.id
+  return skill.name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'untitled'
+}
+
 export function SkillsForm({ skills, onChange }: Props) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(skills.length > 0 ? 0 : null)
+  // Local content buffer — decouples CustomMilkdownEditor from parent re-renders
+  const [localContent, setLocalContent] = useState(skills[0]?.content ?? '')
+
+  useEffect(() => {
+    if (selectedIdx !== null) {
+      setLocalContent(skills[selectedIdx]?.content ?? '')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIdx])
 
   const add = () => {
-    const next = [...skills, { ...EMPTY, id: `skill-${Date.now()}`, name: 'New Skill' }]
+    const id = `new-skill-${Date.now()}`
+    const next = [...skills, { ...EMPTY, id, name: 'New Skill' }]
     onChange(next)
     setSelectedIdx(next.length - 1)
+    setLocalContent('')
   }
 
   const remove = (idx: number) => {
     const next = skills.filter((_, i) => i !== idx)
     onChange(next)
-    setSelectedIdx(next.length > 0 ? Math.min(idx, next.length - 1) : null)
+    const newIdx = next.length > 0 ? Math.min(idx, next.length - 1) : null
+    setSelectedIdx(newIdx)
+    setLocalContent(newIdx !== null ? (next[newIdx]?.content ?? '') : '')
   }
 
   const update = (idx: number, patch: Partial<Skill>) => {
     onChange(skills.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
   }
 
+  const handleContentChange = (v: string) => {
+    setLocalContent(v)
+    if (selectedIdx !== null) update(selectedIdx, { content: v })
+  }
+
   const selected = selectedIdx !== null ? skills[selectedIdx] : null
+  const selectedFolder = selected ? skillSlug(selected) : undefined
 
   return (
-    <div className="flex gap-0 border border-border/60 rounded-xl overflow-hidden" style={{ minHeight: '480px' }}>
-      {/* Left: file list */}
-      <div className="w-48 shrink-0 flex flex-col border-r border-border/60 bg-muted/20">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-border/60">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Skills</span>
+    <div className="flex h-full min-h-0 overflow-hidden rounded-xl border border-border/60">
+      {/* ── Left: file explorer ─────────────────────────────────────── */}
+      <div className="flex w-56 shrink-0 flex-col border-r border-border/60 bg-muted/20">
+        <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Explorer</span>
           <button
             onClick={add}
-            className="flex size-5 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
+            className="flex size-5 items-center justify-center rounded text-muted-foreground transition hover:bg-primary/10 hover:text-primary"
             title="New skill"
           >
             <Plus className="size-3.5" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto py-1">
-          {skills.length === 0 && (
-            <p className="px-3 py-4 text-center text-[11px] text-muted-foreground">No skills yet.</p>
-          )}
-          {skills.map((skill, idx) => (
-            <button
-              key={idx}
-              onClick={() => setSelectedIdx(idx)}
-              className={`group flex w-full items-center gap-2 px-2.5 py-2 text-left transition ${
-                selectedIdx === idx
-                  ? 'bg-primary/10 text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-              }`}
-            >
-              <FileText className="size-3 shrink-0 opacity-60" />
-              <span className="flex-1 truncate text-[11px] font-medium">
-                {skill.name || <span className="italic opacity-60">Unnamed</span>}
-              </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); remove(idx) }}
-                className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:text-destructive transition"
-                title="Delete skill"
-              >
-                <Trash2 className="size-2.5" />
-              </button>
-            </button>
-          ))}
+        <div className="flex-1 overflow-y-auto p-1.5">
+          <FileTree
+            selectedPath={selectedFolder ? `${selectedFolder}/SKILL.md` : undefined}
+            onSelect={(path) => {
+              // Clicking SKILL.md inside a folder selects that skill
+              const folder = path.replace('/SKILL.md', '')
+              const idx = skills.findIndex((s) => skillSlug(s) === folder)
+              if (idx !== -1) setSelectedIdx(idx)
+            }}
+            defaultExpanded={new Set(skills.map(skillSlug))}
+            className="border-0 rounded-none bg-transparent text-xs"
+          >
+            {skills.length === 0 && (
+              <p className="px-2 py-3 text-[11px] italic text-muted-foreground">No skills yet.</p>
+            )}
+            {skills.map((skill, idx) => {
+              const slug = skillSlug(skill)
+              return (
+                <FileTreeFolder key={skill.id || idx} path={slug} name={slug}>
+                  <FileTreeFile path={`${slug}/SKILL.md`} name="SKILL.md">
+                    <span className="size-4 shrink-0" />
+                    {/* file icon from FileTreeFile default */}
+                    <FileTreeName className="flex-1 text-[11px]">SKILL.md</FileTreeName>
+                    <FileTreeActions>
+                      <button
+                        onClick={() => remove(idx)}
+                        className="flex size-4 items-center justify-center rounded text-muted-foreground/40 transition hover:text-destructive"
+                        title="Delete skill"
+                      >
+                        <Trash2 className="size-2.5" />
+                      </button>
+                    </FileTreeActions>
+                  </FileTreeFile>
+                </FileTreeFolder>
+              )
+            })}
+          </FileTree>
         </div>
 
         <div className="border-t border-border/60 p-2">
@@ -94,39 +132,44 @@ export function SkillsForm({ skills, onChange }: Props) {
         </div>
       </div>
 
-      {/* Right: editor */}
-      <div className="flex flex-1 min-w-0 flex-col">
+      {/* ── Right: editor ───────────────────────────────────────────── */}
+      <div className="flex flex-1 min-w-0 min-h-0 flex-col">
         {selected && selectedIdx !== null ? (
           <>
-            {/* Skill metadata row */}
-            <div className="flex items-center gap-3 border-b border-border/60 px-4 py-2.5 bg-card/50">
+            {/* Metadata row — maps to SKILL.md frontmatter fields */}
+            <div className="flex items-center gap-3 border-b border-border/60 bg-card/50 px-4 py-2.5 shrink-0">
               <BookOpen className="size-3.5 shrink-0 text-muted-foreground" />
               <input
                 value={selected.name}
                 onChange={(e) => update(selectedIdx, { name: e.target.value })}
                 placeholder="Skill name"
-                className="flex-1 bg-transparent text-sm font-semibold placeholder:text-muted-foreground/60 focus:outline-none min-w-0"
+                className="min-w-0 flex-1 bg-transparent text-sm font-semibold placeholder:text-muted-foreground/60 focus:outline-none"
                 spellCheck={false}
               />
               <input
                 value={selected.id}
                 onChange={(e) => update(selectedIdx, { id: e.target.value })}
-                placeholder="id (slug)"
-                className="w-32 bg-transparent font-mono text-[11px] text-muted-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+                placeholder="slug"
+                className="w-28 bg-transparent font-mono text-[11px] text-muted-foreground placeholder:text-muted-foreground/40 focus:outline-none"
+                spellCheck={false}
+              />
+              <input
+                value={selected.description ?? ''}
+                onChange={(e) => update(selectedIdx, { description: e.target.value || null })}
+                placeholder="description (when to use…)"
+                className="w-64 bg-transparent text-[11px] text-muted-foreground placeholder:text-muted-foreground/40 focus:outline-none"
                 spellCheck={false}
               />
             </div>
 
-            {/* Markdown editor */}
+            {/* SKILL.md body editor — keyed by id so it remounts on skill switch */}
             <div className="flex-1 min-h-0 overflow-hidden p-3">
-              <MarkdownEditor
-                value={selected.content ?? ''}
-                onChange={(v) => update(selectedIdx, { content: v })}
-                placeholder="Write your skill in markdown. Use headings, rules, examples..."
+              <CustomMilkdownEditor
+                key={selected.id || selectedIdx}
+                value={localContent}
+                onChange={handleContentChange}
+                placeholder={'# Instructions\n\nDescribe what the agent should do and when to use this skill...'}
                 fillHeight
-                showStats={false}
-                showFrontmatter={false}
-                showAiActions={false}
               />
             </div>
           </>
