@@ -137,34 +137,37 @@ This is how "Feature", "Release", "Issue" enter the system — as workflow-defin
 
 ---
 
-## Distribution Strategy
+## The Moat
 
-### The PR is the distribution mechanism
+### 1. Multi-provider compilation
+One `.ship/` compiles to Claude, Gemini, Cursor, Codex, Copilot simultaneously. No one else does this. The switching cost compounds as users add providers — leaving Ship means rebuilding config for every provider from scratch.
 
-Ship does not compete to have the most popular marketplace. The goal is `.ship/` in every repo on GitHub. Distribution happens through:
+### 2. Package manager for agents
+`ship use @org/preset` is npm for agent config. Lockfile, versioning, registry, dependency resolution. Once teams treat presets the way they treat npm packages — checked into source, reproducible, team-shared — the switching cost is indistinguishable from removing a package manager. This is the revenue model: free for individuals, paid for teams and private registries.
 
-1. **GitHub PR flow** — user pastes a GitHub URL, Studio extracts existing config, one-click PR adds `.ship/` to their repo. Every merged PR is a new distribution point.
-2. **agentskills.io compliance** — Ship's compiled output (`.agents/skills/`) is the open standard format. Every skill published from Ship is automatically indexable by awesome-copilot, skillsmp.com, Cursor, Gemini CLI, Codex, Copilot — without submission. Being in GitHub in the right format IS being in every marketplace.
-3. **Viral repo spread** — devs who clone a repo with `.ship/` encounter it. The PR description is the onboarding.
+### 3. Project data ownership
+Once `.ship/` is in the repo and `ship use` is in the dev workflow, Ship owns: active preset, session history, workspace state, team usage patterns. This is the Linear play — Linear owns issue data and became infrastructure. Ship owns agent config data and becomes infrastructure. Analytics, workflow tools, and AI features compound on top of this data. Tools that own project data don't get replaced; they get extended.
 
-### The skill creator is the 10X, not the catalog
+### Distribution strategy
+The goal is `.ship/` in every repo on GitHub. Distribution is not a marketplace problem:
+- **GitHub PR flow** — Studio extracts existing config from any public repo URL, one-click PR adds `.ship/`. Every merged PR is a distribution event.
+- **agentskills.io compliance** — Ship's compiled output (`.agents/skills/`) is the open standard, read natively by every provider. Being in GitHub in the right format IS being in every marketplace — no submission required.
+- **Viral spread** — devs who clone repos with `.ship/` encounter it. The PR description is the onboarding copy.
 
-Marketplaces are discovery layers on top of GitHub. Being the best skill *creator* — composing, previewing, cross-compiling — produces higher quality skills than any hand-written collection. Ship Studio is the tool; the registry is the output. A skill built in Studio works on Claude, Gemini, Codex, Cursor, and Copilot simultaneously. No other tool does this.
+### agentskills.io — a standard Ship participates in, not owns
+Launched Dec 2025 by Anthropic, adopted by 26+ platforms. Format: directory with `SKILL.md` (YAML frontmatter + markdown) + optional `scripts/`, `references/`, `assets/`. `.agents/skills/` is the canonical read location across providers. Ship writes there as compiler output AND reads from there on `ship import`. Ship is a first-class participant in this standard; the standard enables Ship's portability story.
 
-### agentskills.io — the standard that makes this work
+### Provider plugin formats
+Each provider has a native plugin format. Ship should publish a plugin for each that bundles: `ship mcp` (MCP server), branch-switch hook (auto-runs `ship use`), and ship-workflow skill. No slash commands — MCP + hooks are the high-value surface.
 
-Launched Dec 2025 by Anthropic, now adopted by 26+ platforms including every provider Ship targets. The format: a directory containing `SKILL.md` (YAML frontmatter + markdown) + optional `scripts/`, `references/`, `assets/`. Write once, use everywhere.
+| Provider | Plugin manifest | Ships |
+|---|---|---|
+| Claude Code | `~/.claude/plugins/<name>/` | skills, MCP, hooks |
+| Cursor | `.cursor-plugin/plugin.json` | skills, rules, MCP, hooks, commands |
+| Gemini CLI | `gemini-extension.json` | skills, MCP, hooks, commands, context |
+| Codex | TBD | — |
 
-Ship's compiler inputs are provider-agnostic. Ship's compiled outputs are agentskills.io format. This is not coincidental — it is the entire portability story.
-
-### The plugin play
-
-A Ship Claude Code plugin is a packaging question, not a features question. The plugin bundles:
-- `ship mcp` as a registered MCP server → Claude Code gets Ship tools
-- A branch-switch hook → auto-runs `ship use` on checkout
-- The ship-workflow skill for agent awareness
-
-No slash commands. `.claude/commands/` slash commands are low-value interactive ceremony. MCP tools + hooks are the high-value surface. The plugin is how users install all three in one step. Build after CLI is stable.
+The plugin is how users get Ship behavior inside their existing provider UX. Build after CLI is stable.
 
 ---
 
