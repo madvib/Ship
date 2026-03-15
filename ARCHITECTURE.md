@@ -137,6 +137,37 @@ This is how "Feature", "Release", "Issue" enter the system — as workflow-defin
 
 ---
 
+## Distribution Strategy
+
+### The PR is the distribution mechanism
+
+Ship does not compete to have the most popular marketplace. The goal is `.ship/` in every repo on GitHub. Distribution happens through:
+
+1. **GitHub PR flow** — user pastes a GitHub URL, Studio extracts existing config, one-click PR adds `.ship/` to their repo. Every merged PR is a new distribution point.
+2. **agentskills.io compliance** — Ship's compiled output (`.agents/skills/`) is the open standard format. Every skill published from Ship is automatically indexable by awesome-copilot, skillsmp.com, Cursor, Gemini CLI, Codex, Copilot — without submission. Being in GitHub in the right format IS being in every marketplace.
+3. **Viral repo spread** — devs who clone a repo with `.ship/` encounter it. The PR description is the onboarding.
+
+### The skill creator is the 10X, not the catalog
+
+Marketplaces are discovery layers on top of GitHub. Being the best skill *creator* — composing, previewing, cross-compiling — produces higher quality skills than any hand-written collection. Ship Studio is the tool; the registry is the output. A skill built in Studio works on Claude, Gemini, Codex, Cursor, and Copilot simultaneously. No other tool does this.
+
+### agentskills.io — the standard that makes this work
+
+Launched Dec 2025 by Anthropic, now adopted by 26+ platforms including every provider Ship targets. The format: a directory containing `SKILL.md` (YAML frontmatter + markdown) + optional `scripts/`, `references/`, `assets/`. Write once, use everywhere.
+
+Ship's compiler inputs are provider-agnostic. Ship's compiled outputs are agentskills.io format. This is not coincidental — it is the entire portability story.
+
+### The plugin play
+
+A Ship Claude Code plugin is a packaging question, not a features question. The plugin bundles:
+- `ship mcp` as a registered MCP server → Claude Code gets Ship tools
+- A branch-switch hook → auto-runs `ship use` on checkout
+- The ship-workflow skill for agent awareness
+
+No slash commands. `.claude/commands/` slash commands are low-value interactive ceremony. MCP tools + hooks are the high-value surface. The plugin is how users install all three in one step. Build after CLI is stable.
+
+---
+
 ## Skill Filtering — Platform Differentiator
 
 Presets control which skills are active via `active_tools[]`. This is architecturally significant:

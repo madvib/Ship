@@ -6,6 +6,8 @@
 > **Constraint:** CLI must be solid before Web/Server ship the GitHub PR flow.
 > **Key invariant:** `.ship/` is source of truth. Provider files (CLAUDE.md, .mcp.json, etc.)
 > are generated artifacts — gitignored, never committed.
+> **Distribution:** agentskills.io compliance = automatic presence in all marketplaces.
+> The PR flow IS distribution. Goal: `.ship/` in every repo on GitHub.
 
 ---
 
@@ -17,17 +19,15 @@ The CLI is the linchpin. The PR flow is useless without it.
 - [ ] `ship init` — scaffold `.ship/agents/` in current project, write `ship.toml`
 - [ ] Detect existing provider files and offer to import them
 - [ ] Write provider files to `.gitignore` (CLAUDE.md, .mcp.json, AGENTS.md, .cursor/, .gemini/)
-- [ ] Print next steps: `ship use <preset>` or `ship compile`
-
-### feat/cli-compile
-- [ ] `ship compile` — compile active preset to all configured providers
-- [ ] `ship compile --provider claude` — compile for one provider
-- [ ] Read from `.ship/agents/` + active preset, emit to project root
-- [ ] Exit nonzero with actionable error if no preset active
+- [ ] Print next steps: `ship use <preset>`
 
 ### feat/cli-use
-- [ ] `ship use <preset-id>` — fetch preset from registry, set as active, compile
-- [ ] `ship use --list` — list available presets from registry
+- [ ] `ship use <preset-id>` — fetch preset from registry, set as active, emit provider files
+- [ ] `ship use` (no args) — re-emit current preset
+- [ ] `ship use --list` — list available presets (local + registry)
+- [ ] `ship use <preset>` installs required skills, respects ship.lock
+- [ ] `ship use` triggers plugin activation if preset declares `[plugins]`
+- [ ] Exit nonzero with actionable error if no preset and no arg
 - [ ] `ship status` — show active preset, last compiled, providers configured
 
 ### feat/cli-import
@@ -35,6 +35,13 @@ The CLI is the linchpin. The PR flow is useless without it.
 - [ ] Support: CLAUDE.md, .mcp.json, .cursor/rules/, AGENTS.md, .gemini/
 - [ ] Deduplicate rules across providers into shared library format
 - [ ] Output summary of what was imported
+
+### feat/cli-plugin *(after cli-use is stable)*
+- [ ] `ship plugin install <id>` — install a Claude Code plugin from registry
+- [ ] `ship plugin list` — list installed plugins
+- [ ] Ship plugin package: bundles `ship mcp` + branch-switch hook + ship-workflow skill
+- [ ] Plugin published to `~/.claude/plugins/ship/` on install
+- [ ] No slash commands — MCP tools + hooks only
 
 ---
 
