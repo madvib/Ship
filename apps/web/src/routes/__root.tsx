@@ -2,6 +2,7 @@ import {
   HeadContent,
   Scripts,
   createRootRouteWithContext,
+  useRouterState,
 } from '@tanstack/react-router'
 import Footer from '../components/Footer'
 import Header from '../components/Header'
@@ -39,6 +40,8 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
 })
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const isStudio = useRouterState({ select: (s) => s.location.pathname === '/studio' })
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -49,7 +52,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <TanStackQueryProvider>
           <Header />
           {children}
-          <Footer />
+          {!isStudio && <Footer />}
         </TanStackQueryProvider>
         <Scripts />
       </body>

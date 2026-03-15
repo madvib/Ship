@@ -53,5 +53,8 @@ export * from "./components/ai/side-by-side";
 export * from "./components/ai/task";
 export * from "./components/ai-elements/file-tree";
 
+// Theme
+export { ThemeToggle } from "./components/ThemeToggle";
+
 // Utils
 export * from "./lib/utils";

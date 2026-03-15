@@ -18,7 +18,7 @@ function applyTheme(mode: ThemeMode) {
   window.localStorage.setItem('theme', mode)
 }
 
-export default function ThemeToggle() {
+export function ThemeToggle() {
   const [mode, setMode] = useState<ThemeMode>('dark')
 
   useEffect(() => {

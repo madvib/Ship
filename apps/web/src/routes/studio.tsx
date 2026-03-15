@@ -546,7 +546,7 @@ function LibraryPanel({ library, onAddMcp, onAddSkill }: LibraryPanelProps) {
   )
 
   return (
-    <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r border-border/60 bg-sidebar/30">
+    <aside className="hidden lg:flex w-72 shrink-0 flex-col border-r border-border/60 bg-sidebar/30">
       {/* Search */}
       <div className="p-2 border-b border-border/60">
         <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-1.5">
@@ -734,15 +734,13 @@ function ComposerPanel({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-xl p-4 lg:p-6">
+        <div className="mx-auto max-w-3xl p-4 lg:p-6">
           <SectionHeader section={activeSection} library={library} />
 
           {activeSection === 'providers' && (
             <ProvidersForm
               selected={selectedProviders}
-              activeMode=""
               onToggle={onToggleProvider}
-              onModeChange={() => {}}
             />
           )}
           {activeSection === 'mcp' && (
@@ -825,7 +823,7 @@ function InspectorPanel({ state, selectedProviders }: InspectorPanelProps) {
   }
 
   return (
-    <aside className="hidden md:flex w-80 xl:w-96 shrink-0 flex-col bg-sidebar/20">
+    <aside className="hidden md:flex w-96 xl:w-[420px] shrink-0 flex-col bg-sidebar/20">
       {/* Provider tabs */}
       <div className="flex items-center gap-0.5 border-b border-border/60 bg-muted/20 px-2 py-1.5 shrink-0 overflow-x-auto [scrollbar-width:none]">
         {selectedProviders.map((p) => (
