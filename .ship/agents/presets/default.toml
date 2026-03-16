@@ -11,6 +11,13 @@ refs = []
 [mcp]
 servers = []
 
+[plugins]
+install = [
+  "superpowers@claude-plugins-official",
+  "rust-analyzer-lsp@claude-plugins-official",
+]
+scope = "project"
+
 [permissions]
 preset = "ship-guarded"
 tools_deny = ["Bash(rm -rf *)", "Bash(git reset --hard*)"]

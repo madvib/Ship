@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PARENT_DIR="$(dirname "$REPO_ROOT")"
+WORKTREES_DIR="$HOME/dev/worktrees"
 
 echo "==> Ship dev setup"
 echo "    Repo: $REPO_ROOT"
@@ -67,15 +67,17 @@ echo "==> Setting up worktrees..."
 cd "$REPO_ROOT"
 git fetch --all --quiet
 
+mkdir -p "$WORKTREES_DIR"
+
 setup_worktree() {
   local name="$1"
   local branch="$2"
-  local dir="$PARENT_DIR/$name"
+  local dir="$WORKTREES_DIR/$name"
   if [ -d "$dir" ]; then
     echo "  $name: already exists, pulling..."
     cd "$dir" && git pull --quiet && cd "$REPO_ROOT"
   else
-    echo "  $name: creating..."
+    echo "  $name: creating at $dir..."
     git worktree add "$dir" "$branch"
   fi
 }
@@ -114,8 +116,8 @@ echo "Worktrees:"
 git worktree list
 echo ""
 echo "Next:"
-echo "  cd ../ship-cli    — CLI lane (feat/cli-init)"
-echo "  cd ../ship-server — Server lane (feat/server-auth)"
-echo "  cd ../ship-web    — Web lane (feat/web-import)"
+echo "  cd ~/dev/worktrees/ship-cli    — CLI lane (feat/cli-init)"
+echo "  cd ~/dev/worktrees/ship-server — Server lane (feat/server-auth)"
+echo "  cd ~/dev/worktrees/ship-web    — Web lane (feat/web-import)"
 echo ""
 echo "Open each worktree in Claude Code and say: 'Read BRIEF.md then execute all tasks in priority order.'"

@@ -1,238 +1,148 @@
 # Ship
 
-**Project memory and execution infrastructure for AI-assisted software teams.**
+**Compiler and package manager for AI agent configuration.**
 
-Every agent session starts blank. Ship fixes that.
-
-Ship is a local-first project OS that persists your team's context — decisions, features, specs, open work — and injects exactly the right context into every AI agent, on every branch, for every provider. Claude, Gemini, Codex: each gets its native config format, automatically, on checkout.
+`ship use <preset>` — one command activates your agent stack: writes context files, installs skills, configures MCP servers, and manages Claude Code plugins. Works with Claude, Gemini, Codex, and Cursor. Switching git branches switches your agent config automatically.
 
 ---
 
-## The Problem
+## What it does
 
-AI coding agents are powerful but amnesiac. Every session starts from scratch. Teams compensate by pasting context into every prompt, keeping mental models of what the agent already "knows," and watching agents repeat the same mistakes across sessions.
+Your agent tools each read config from different places in different formats. Ship is the single source of truth that compiles to all of them:
 
-The underlying issue is structural: there's no persistent, structured project memory that agents can actually read — and no system to keep that memory current as work moves forward.
+| Provider | Context | MCP | Skills | Plugins |
+|---|---|---|---|---|
+| Claude Code | `CLAUDE.md` | `.mcp.json` | `.claude/skills/` | `claude plugin install` |
+| Gemini CLI | `GEMINI.md` | `.gemini/settings.json` | `.agents/skills/` | — |
+| OpenAI Codex | `AGENTS.md` | `.codex/config.toml` | `.agents/skills/` | — |
+| Cursor | — | `.cursor/mcp.json` | `.cursor/rules/` | — |
 
----
-
-## What Ship Does
-
-Ship sits in your repository as a `.ship/` directory. It stores your project's working memory as structured markdown files with TOML frontmatter, versioned in git alongside your code. A git hook fires on every branch checkout and writes the right context files for your active agents — `CLAUDE.md`, `GEMINI.md`, `AGENTS.md` — each populated with the current feature spec, open issues, applicable skills, and always-on rules.
-
-**The workflow loop:**
-
-```
-Vision → Release → Feature → Spec → Issues → Close Feature → Ship Release
-```
-
-At each transition, Ship knows where you are and what your agents need to know. Notes and ADRs exist outside the loop — ambient records created whenever a decision or insight surfaces, never blocking progress.
+Your `.ship/` directory is the source. Provider files are generated artifacts — gitignored, never committed. `ship use` produces them on demand.
 
 ---
 
-## How It Works
+## Quick start
 
-### Branch checkout triggers context injection
+```bash
+# Fresh machine — handles Rust, ship binary, Node, pnpm, plugins, worktrees
+bash scripts/setup.sh
 
+# In your project
+ship init
+ship use default
+# → CLAUDE.md, .mcp.json, .claude/skills/ written
+# → Claude Code plugins declared in preset installed
+# → git post-checkout hook installed (branch switches auto-trigger ship use)
 ```
-git checkout feature/payments-v2
-→ Ship reads the feature document linked to this branch
-→ Writes CLAUDE.md with: feature spec + open issues + inlined skills + rules
-→ Writes .mcp.json with the servers declared for this feature
-→ Writes GEMINI.md / AGENTS.md for other connected providers
-→ Agent opens the project and immediately understands what's in scope
-```
 
-No prompts. No copy-paste. The agent has context before you type the first message.
+---
 
-### Structured documents, not raw notes
+## Preset format
 
-Every entity has typed frontmatter with stable UUIDs for cross-linking:
+A preset is what you activate. It declares everything your agent stack needs:
 
 ```toml
-# .ship/project/features/payments-v2.md
-id = "f3a7c291"
-title = "Payments v2 — Stripe Connect"
-status = "in-progress"
-release_id = "8b2d4e10"
-spec_id   = "c9f1a033"
-branch    = "feature/payments-v2"
+[preset]
+id = "rust-expert"
+name = "Rust Expert"
+version = "0.1.0"
+providers = ["claude", "gemini"]
 
-[agent]
-skills     = [{id = "payment-compliance"}]
-mcp_servers = [{id = "stripe-docs"}]
+[skills]
+refs = ["rust-idioms", "cargo-workflow"]
+
+[mcp]
+servers = ["github", "rust-docs"]
+
+[plugins]
+install = [
+  "superpowers@claude-plugins-official",
+  "rust-analyzer-lsp@claude-plugins-official",
+]
+scope = "project"
+
+[permissions]
+preset = "ship-guarded"
+default_mode = "plan"
 ```
 
-### Multi-provider, native formats
+`ship use rust-expert` installs skills, configures MCP, installs plugins, emits all provider files.
 
-Ship knows how each agent tool works. It writes config in the format each provider actually reads:
+---
 
-| Provider     | Context file | MCP config                  | Skills                        |
-| ------------ | ------------ | --------------------------- | ----------------------------- |
-| Claude Code  | `CLAUDE.md`  | `.mcp.json` (JSON)          | `.claude/skills/<id>/SKILL.md`  |
-| Gemini CLI   | `GEMINI.md`  | `.gemini/settings.json`     | `.gemini/skills/<id>/SKILL.md`  |
-| OpenAI Codex | `AGENTS.md`  | `.codex/config.toml` (TOML) | `.agents/skills/<id>/SKILL.md`  |
+## Branch-aware config
 
-MCP sync contract (import/export paths, guardrails, precedence): `docs/mcp-import-export.md`
-CLI/MCP binary surfaces + PATH install/update workflow: `docs/cli-mcp-offerings.md`
-
-Add a provider in one command. Ship handles the rest:
+Ship tracks which preset is active per branch in a local SQLite DB (`.ship/state/ship.db`).
 
 ```bash
-ship providers connect gemini
-# → gemini added to ship.toml
-# → next branch checkout writes GEMINI.md automatically
+git checkout feat/payments    # post-checkout hook fires
+# → ship looks up stored preset for this branch
+# → runs ship use <preset> silently
+# → your agent stack switches without any manual steps
 ```
 
-### MCP server — agents as first-class consumers
-
-Ship runs as an MCP server, giving agents structured read/write access to the entire project state: issues, specs, features, releases, ADRs, skills, providers, events. Agents don't need file access — they use typed tools.
-
-```bash
-ship mcp # stdio transport, works with any MCP-compatible agent
-```
-
-Forty-plus tools including `get_project_info` (full context in one call), `create_issue`, `move_issue`, `connect_provider`, `list_providers_tool`, `git_feature_sync`, and more.
-
-### Skills and rules
-
-Reusable agent instructions, scoped to project or user:
-
-```markdown
-# .ship/agents/skills/task-policy/SKILL.md
-
----
-name: task-policy
-description: Ship workflow policy and execution guardrails for daily delivery.
-metadata:
-  display_name: Ship Workflow Policy
-  source: builtin
----
-
-Always start from a feature document. File issues for every gap found.
-Run tests before closing feature todos.
-```
-
-User-scoped shared skills live in `~/.ship/skills/<id>/SKILL.md`.
-
-Rules in `agents/rules/*.md` are always-on — inlined into every provider's context file on every checkout.
-
-Rules contract (naming, mode matching, validation): `docs/agent-rules-contract.md`
+The DB syncs across machines via Syncthing (or any file sync). All your machines know the branch → preset mapping. No markdown files store this state — only `ship.toml` (project ID, committed) and the DB (runtime state, synced).
 
 ---
 
-## Quick Start
+## Distribution
 
-```bash
-# Install (requires Rust)
-cargo install --path crates/cli
+Ship participates in the [agentskills.io](https://agentskills.io) open standard. Skills emitted to `.agents/skills/` are automatically readable by all compliant providers — no per-marketplace submissions.
 
-# Initialize in your repo
-ship init
-# → detects installed providers (Claude, Gemini, Codex) automatically
-# → installs git hooks
-# → creates .ship/ structure
-
-# Create a feature
-ship feature create "User authentication"
-
-# Create and move issues
-ship issue create "Implement JWT refresh" "Access tokens expire after 15min..."
-ship issue move jwt-refresh.md backlog in-progress
-
-# See what's connected
-ship providers list
-# ID           NAME                 INSTALLED  CONNECTED  VERSION
-# claude       Claude Code          yes        yes        2.1.63
-# gemini       Gemini CLI           yes        no         0.23.0
-# codex        Codex CLI            yes        no         -
-
-ship providers connect gemini
-
-# Manually sync agent context for current branch
-ship git sync
-```
-
----
-
-## Project Structure
-
-```
-.ship/
-├── ship.toml                 # project config, providers, git policy
-├── project/
-│   ├── features/             # feature documents (committed)
-│   ├── specs/                # spec documents (committed)
-│   ├── releases/             # release documents (committed)
-│   ├── adrs/                 # architecture decisions (committed)
-│   │   └── accepted/
-│   └── vision.md
-└── agents/
-    ├── skills/               # reusable agent instructions
-    ├── rules/                # always-on rules, inlined into every context
-    └── modes/                # named agent configurations
-```
-
-**Git policy** — Ship defaults to a config-first posture: `ship.toml`, MCP config, permissions, and rules are tracked; project docs, skills, and templates are local unless explicitly included.
+The viral loop: anyone can paste a GitHub URL into Ship Studio → extract the repo's agent config → compile it for their stack. For project owners, `ship use` + a PR that adds `.ship/` = every collaborator gets your agent config on checkout.
 
 ---
 
 ## Architecture
 
-Ship is a Rust monorepo:
+```
+apps/
+  web/         — Ship Studio (TanStack Start + Cloudflare Workers) — active
+  mcp/         — ship-mcp binary (MCP stdio server) — active
+crates/
+  core/
+    compiler/  — WASM compiler: ProjectLibrary → provider files
+    runtime/   — workspace, session, event, preset, skill data model
+packages/
+  compiler/    — @ship/compiler WASM output (consumed by Studio)
+  primitives/  — @ship/primitives shared UI components
+```
 
-| Crate                | Role                                                         |
-| -------------------- | ------------------------------------------------------------ |
-| `core/runtime`       | Core data model, CRUD, event stream, agent config resolution |
-| `crates/cli`         | `ship` binary — workflow CLI                                 |
-| `crates/mcp`         | `ship-mcp` binary — MCP stdio server                         |
-| `crates/modules/git` | Git hook handler, context file generation                    |
-| `crates/ui`          | Tauri + React desktop app (macOS/Windows)                    |
-| `crates/plugins/*`   | Time tracker, ghost issue scanner                            |
+The compiler is WASM — runs in the browser (Studio) and on the server (CLI via native). Same compilation logic everywhere.
 
-- **Storage:** Structured markdown with TOML frontmatter (git-native) + SQLite for workspace state and managed MCP ledger
-- **Events:** Append-only event stream — the replication unit for future cloud sync
-- **Agent config resolution:** Project defaults → active mode → feature-level overrides, consistent across CLI, MCP, and Tauri
-- **Transport:** MCP over stdio today; HTTP/SSE scoped for post-alpha
+---
+
+## Repo layout for contributors
+
+```
+ARCHITECTURE.md  — platform principles, layer separation, naming conventions
+SPEC.md          — config formats, preset schema, CLI contracts, storage model
+TASKS.md         — sprint board: CLI / Server / Web lanes
+scripts/setup.sh — fresh machine setup (run this first)
+```
+
+Work happens in parallel worktrees at `~/dev/worktrees/`:
+
+```
+ship-cli     feat/cli-init      — ship init, ship use, ship log
+ship-server  feat/server-auth   — Better Auth + D1 + GitHub import endpoint
+ship-web     feat/web-import    — Studio GitHub URL import flow
+```
 
 ---
 
 ## Status
 
-Ship is in **alpha**. It is used to build itself — this repo runs Ship on every branch. The core loop is functional end-to-end.
+Early. Used to build itself. The compiler and Studio UI work end-to-end. CLI and server lanes are active now.
 
-**Working now:**
+**Working:**
+- WASM compiler: ProjectLibrary → CLAUDE.md / GEMINI.md / AGENTS.md / .mcp.json
+- Ship Studio: paste any GitHub URL → extract agent config → compile → download
+- ship-mcp: workspace, session, skill, note tools
 
-- Full CRUD for features, specs, issues, releases, ADRs, notes, skills, rules
-- Git hook → context injection for Claude, Gemini, Codex
-- MCP server with 40+ tools
-- Provider detection, connect/disconnect, model registry
-- SQLite workspace state with branch-scoped context
-- 180+ passing tests including end-to-end branch lifecycle tests
-
-**Coming next:**
-
-- Desktop UI (macOS/Windows) — Tauri + React, designs in progress
-- `ship providers` HTTP/SSE transport for editor integrations (Cursor, Windsurf)
-- Cloud sync via event log replication
-- CLI porcelain surface (`ship status`, `ship log`, `ship new`)
-
----
-
-## Why Now
-
-The MCP protocol standardized how agents consume external context. Every major AI coding tool — Claude Code, Gemini CLI, Codex, Cursor, Windsurf, Zed — now supports it. The tooling layer has arrived. What's missing is the project memory layer that sits above it: structured, versioned, agent-readable, and wired into the developer's actual workflow.
-
-Ship is that layer.
-
----
-
-## Contributing / Interest
-
-This project is in active development. If you're building with AI agents at scale, working on developer tooling, or interested in the future of software engineering workflows, we'd like to talk.
-
-Open issues, file bugs, and follow development here. The `.ship/` directory in this repo is live — the same workflow described above is what we use every day.
-
----
-
-_Built with Ship · Rust · MCP · Local-first_
+**In progress:**
+- `ship init` + `ship use` (CLI lane)
+- Better Auth + GitHub OAuth + `/api/github/import` (server lane)
+- Studio import UI + auth (web lane)
+- Branch-preset tracking with post-checkout hook
+- Plugin lifecycle management via `ship use`

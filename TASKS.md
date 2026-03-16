@@ -37,12 +37,14 @@ The CLI is the linchpin. The PR flow is useless without it.
 - [ ] Deduplicate rules across providers into shared library format
 - [ ] Output summary of what was imported
 
-### feat/cli-branch-preset *(after cli-use is stable)*
-- [ ] DB stores `active_preset` per workspace, keyed to branch name
-- [ ] `ship workspace activate <branch>` — look up workspace, run `ship use <preset>` for that branch
-- [ ] Git post-checkout hook: calls `ship workspace activate` on branch switch
-- [ ] `ship init` installs the hook automatically
-- [ ] Goal: switching branches auto-switches your agent config
+### feat/cli-workspace *(after cli-use is stable)*
+- [ ] `ship init` creates workspace row in DB: `(id from ship.toml, name, git_remote)`
+- [ ] `ship use` upserts `branch_presets (workspace_id, branch_name, preset_id)` after emit
+- [ ] Post-checkout hook installed by `ship init`: on branch switch, look up branch_presets → run `ship use <preset>` silently
+- [ ] Inherit from base branch / `[defaults] preset` when branch has no stored preset
+- [ ] `ship status` shows: active preset, branch, last compiled, device that last ran it
+- [ ] All state in DB only — no markdown files store IDs or workspace refs
+- [ ] Goal: `git checkout feat/something` auto-switches agent config on all synced machines
 
 ### feat/cli-plugin *(after cli-use is stable)*
 - [ ] `ship plugin install <id>` — install a Claude Code plugin from registry
