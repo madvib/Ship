@@ -16,6 +16,7 @@
 The CLI is the linchpin. The PR flow is useless without it.
 
 ### feat/cli-init
+- [ ] `ship log <message>` — write timestamped note to `.ship/coordination.log` (coordination primitive, do first)
 - [ ] `ship init` — scaffold `.ship/agents/` in current project, write `ship.toml`
 - [ ] Detect existing provider files and offer to import them
 - [ ] Write provider files to `.gitignore` (CLAUDE.md, .mcp.json, AGENTS.md, .cursor/, .gemini/)
@@ -35,6 +36,15 @@ The CLI is the linchpin. The PR flow is useless without it.
 - [ ] Support: CLAUDE.md, .mcp.json, .cursor/rules/, AGENTS.md, .gemini/
 - [ ] Deduplicate rules across providers into shared library format
 - [ ] Output summary of what was imported
+
+### feat/cli-workspace *(after cli-use is stable)*
+- [ ] `ship init` creates workspace row in DB: `(id from ship.toml, name, git_remote)`
+- [ ] `ship use` upserts `branch_presets (workspace_id, branch_name, preset_id)` after emit
+- [ ] Post-checkout hook installed by `ship init`: on branch switch, look up branch_presets → run `ship use <preset>` silently
+- [ ] Inherit from base branch / `[defaults] preset` when branch has no stored preset
+- [ ] `ship status` shows: active preset, branch, last compiled, device that last ran it
+- [ ] All state in DB only — no markdown files store IDs or workspace refs
+- [ ] Goal: `git checkout feat/something` auto-switches agent config on all synced machines
 
 ### feat/cli-plugin *(after cli-use is stable)*
 - [ ] `ship plugin install <id>` — install a Claude Code plugin from registry

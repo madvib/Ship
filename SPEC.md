@@ -147,14 +147,59 @@ preset = "rust-expert"
 
 ```toml
 version = "1"
-id = "hRvMUz4p"           # nanoid, stable
+id = "hRvMUz4p"           # nanoid, stable — cross-machine project identity
 name = "ship"
 description = "..."
 
 [defaults]
-preset = "default"        # active preset id
+preset = "default"        # fallback preset when no branch-specific preset is set
 providers = ["claude"]
 ```
+
+---
+
+## Workspace Tracking
+
+Ship tracks workspace state in the local SQLite DB (`.ship/state/ship.db`), Syncthing-synced across machines. No project state lives in git-tracked markdown files.
+
+### Project identity
+
+`ship.toml` carries a stable `id` (nanoid). This is the cross-machine project key. When the same repo is cloned on multiple machines, they share the same `id` because `ship.toml` is committed.
+
+### Branch-preset tracking (DB schema)
+
+```sql
+-- One row per project
+workspaces (
+  id TEXT PRIMARY KEY,         -- matches ship.toml id
+  name TEXT,
+  git_remote TEXT,             -- canonical remote URL (for cross-machine lookup)
+  created_at INTEGER
+)
+
+-- One row per branch per project
+branch_presets (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT REFERENCES workspaces(id),
+  branch_name TEXT,            -- git branch name, e.g. "feat/cli-init"
+  active_preset_id TEXT,       -- last preset activated on this branch
+  last_compiled_at INTEGER,
+  device_id TEXT,              -- which machine last ran ship use
+  UNIQUE(workspace_id, branch_name)
+)
+```
+
+### How it works
+
+1. `ship init` — creates workspace row from `ship.toml id` + git remote
+2. `ship use <preset>` — upserts `branch_presets` for `(workspace_id, current_branch)`
+3. Post-checkout git hook (installed by `ship init`) — on branch switch:
+   - Look up `branch_presets` for the new branch
+   - If found: `ship use <stored_preset_id>` (silent, fast)
+   - If not found: inherit from base branch or `[defaults] preset` in `ship.toml`
+4. Syncthing propagates DB changes — all machines see branch → preset history
+
+**No markdown files store IDs.** `ship.toml` has the project ID. The DB has the branch state. Git has the code.
 
 ---
 
@@ -176,6 +221,16 @@ refs = ["rust-idioms", "cargo-workflow"]   # empty = all installed skills
 [mcp]
 servers = ["github", "search"]             # empty = all configured servers
 
+[plugins]
+# Claude Code plugins managed by this preset.
+# ship use installs on activation, uninstalls on deactivation (delta from previous preset).
+# Format: "<id>@<marketplace>" — same as `claude plugin install`
+install = [
+  "superpowers@claude-plugins-official",
+  "rust-analyzer-lsp@claude-plugins-official",
+]
+scope = "project"             # "project" (default) or "user"
+
 [permissions]
 preset = "ship-guarded"       # ship-standard | ship-guarded | read-only | full-access
 tools_deny = ["mcp__*__delete*"]
@@ -187,6 +242,13 @@ inline = """
 Prefer safe Rust. No unwrap() in library code.
 """
 ```
+
+**Plugin lifecycle** (`ship use` manages this automatically):
+1. Read `[plugins] install` from incoming preset
+2. Read previously active preset's `[plugins]` from `ship.lock`
+3. Install plugins in incoming but not current: `claude plugin install <id> --scope <scope>`
+4. Uninstall plugins in current but not incoming: `claude plugin uninstall <id>`
+5. Record installed plugin manifest in `ship.lock` under `[plugins]`
 
 **Permission presets:**
 - `ship-standard` — base permissions from `agents/permissions.toml`
